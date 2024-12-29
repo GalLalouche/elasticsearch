@@ -19,10 +19,12 @@ import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.index.EsIndex;
 import org.elasticsearch.xpack.esql.io.stream.PlanStreamInput;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
+import org.elasticsearch.xpack.esql.plan.logical.Insist;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 public class EsSourceExec extends LeafExec {
     public static final NamedWriteableRegistry.Entry ENTRY = new NamedWriteableRegistry.Entry(
@@ -35,6 +37,21 @@ public class EsSourceExec extends LeafExec {
     private final List<Attribute> attributes;
     private final QueryBuilder query;
     private final IndexMode indexMode;
+
+    // FIXME (gal, do-not-merge!) pass the attributes directly.
+    public EsSourceExec insistingOn(Insist insist) {
+        // FIXME (gal, do-not-merge!) What to do if the types differ?
+        if (attributes.stream().anyMatch(a -> a.name().equals(insist.parameters().identifier()))) {
+            return this;
+        }
+        return new EsSourceExec(
+            source(),
+            index,
+            Stream.concat(attributes.stream(), insist.attributes().stream()).toList(),
+            query,
+            indexMode
+        );
+    }
 
     public EsSourceExec(EsRelation relation) {
         this(relation.source(), relation.index(), relation.output(), null, relation.indexMode());

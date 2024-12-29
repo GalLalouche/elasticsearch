@@ -1,0 +1,13 @@
+{
+    "properties": {
+        "@timestamp": {
+            "type": "date"
+        },
+        "client_ip": {
+            "type": "ip"
+        },
+        "message": {
+            "type": "keyword"
+        }
+    }
+}

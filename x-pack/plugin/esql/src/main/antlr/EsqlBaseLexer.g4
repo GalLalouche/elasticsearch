@@ -63,6 +63,7 @@ ENRICH : 'enrich'             -> pushMode(ENRICH_MODE);
 EVAL : 'eval'                 -> pushMode(EXPRESSION_MODE);
 EXPLAIN : 'explain'           -> pushMode(EXPLAIN_MODE);
 FROM : 'from'                 -> pushMode(FROM_MODE);
+INSIST : 'insist'             -> pushMode(EXPRESSION_MODE);
 GROK : 'grok'                 -> pushMode(EXPRESSION_MODE);
 KEEP : 'keep'                 -> pushMode(PROJECT_MODE);
 LIMIT : 'limit'               -> pushMode(EXPRESSION_MODE);
@@ -305,6 +306,17 @@ FROM_MULTILINE_COMMENT
 FROM_WS
     : WS -> channel(HIDDEN)
     ;
+
+//
+// INSIST command
+//
+mode INSIST_MODE;
+INSIST_PIPE : PIPE -> type(PIPE), popMode;
+INSIST_WS : WS -> channel(HIDDEN);
+INSIST_IDENTIFIER: UNQUOTED_IDENTIFIER -> type(UNQUOTED_IDENTIFIER);
+INSIST_CAST_OP : CAST_OP -> type(CAST_OP);
+INSIST_DATA_TYPE : UNQUOTED_IDENTIFIER -> type(UNQUOTED_IDENTIFIER);
+
 //
 // DROP, KEEP
 //
