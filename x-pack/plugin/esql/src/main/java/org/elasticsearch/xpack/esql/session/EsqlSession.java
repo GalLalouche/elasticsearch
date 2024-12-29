@@ -187,6 +187,7 @@ public class EsqlSession {
         LogicalPlan optimizedPlan,
         ActionListener<Result> listener
     ) {
+        System.out.println(optimizedPlan);
         PhysicalPlan physicalPlan = logicalPlanToPhysicalPlan(optimizedPlan, request);
         // TODO: this could be snuck into the underlying listener
         EsqlSessionCCSUtils.updateExecutionInfoAtEndOfPlanning(executionInfo);

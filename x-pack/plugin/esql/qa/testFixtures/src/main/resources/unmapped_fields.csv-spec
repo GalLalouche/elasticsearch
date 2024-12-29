@@ -21,14 +21,14 @@ FROM sample_data_no_mapping
 ;
 
 // Note that event_duration appears last in the result but not in the CSV, since it is insisted.
-@timestamp:date           |  client_ip:ip   |  message:keyword       |  event_duration:long 
-2023-10-23T13:55:01.543Z  |  172.21.3.15    |  Connected to 10.1.0.1 |  1756467             
-2023-10-23T13:53:55.832Z  |  172.21.3.15    |  Connection error      |  5033755             
-2023-10-23T13:52:55.015Z  |  172.21.3.15    |  Connection error      |  8268153             
-2023-10-23T13:51:54.732Z  |  172.21.3.15    |  Connection error      |  725448              
-2023-10-23T13:33:34.937Z  |  172.21.0.5     |  Disconnected          |  1232382             
-2023-10-23T12:27:28.948Z  |  172.21.2.113   |  Connected to 10.1.0.2 |  2764889             
-2023-10-23T12:15:03.360Z  |  172.21.2.162   |  Connected to 10.1.0.3 |  3450233             
+@timestamp:date           |  client_ip:ip   |  message:keyword       |  event_duration:long
+2023-10-23T13:55:01.543Z  |  172.21.3.15    |  Connected to 10.1.0.1 |  1756467
+2023-10-23T13:53:55.832Z  |  172.21.3.15    |  Connection error      |  5033755
+2023-10-23T13:52:55.015Z  |  172.21.3.15    |  Connection error      |  8268153
+2023-10-23T13:51:54.732Z  |  172.21.3.15    |  Connection error      |  725448
+2023-10-23T13:33:34.937Z  |  172.21.0.5     |  Disconnected          |  1232382
+2023-10-23T12:27:28.948Z  |  172.21.2.113   |  Connected to 10.1.0.2 |  2764889
+2023-10-23T12:15:03.360Z  |  172.21.2.162   |  Connected to 10.1.0.3 |  3450233
 ;
 
 actuallyUnmappedAndCast
@@ -38,28 +38,27 @@ FROM sample_data_no_mapping
 ;
 
 // Note that event_duration appears last in the result but not in the CSV since it is INSISTed.
-@timestamp:date           |  client_ip:ip   |  message:keyword       |  event_duration:keyword 
-2023-10-23T13:55:01.543Z  |  172.21.3.15    |  Connected to 10.1.0.1 |  1756467             
-2023-10-23T13:53:55.832Z  |  172.21.3.15    |  Connection error      |  5033755             
-2023-10-23T13:52:55.015Z  |  172.21.3.15    |  Connection error      |  8268153             
-2023-10-23T13:51:54.732Z  |  172.21.3.15    |  Connection error      |  725448              
-2023-10-23T13:33:34.937Z  |  172.21.0.5     |  Disconnected          |  1232382             
-2023-10-23T12:27:28.948Z  |  172.21.2.113   |  Connected to 10.1.0.2 |  2764889             
-2023-10-23T12:15:03.360Z  |  172.21.2.162   |  Connected to 10.1.0.3 |  3450233             
+@timestamp:date           |  client_ip:ip   |  message:keyword       |  event_duration:keyword
+2023-10-23T13:55:01.543Z  |  172.21.3.15    |  Connected to 10.1.0.1 |  1756467
+2023-10-23T13:53:55.832Z  |  172.21.3.15    |  Connection error      |  5033755
+2023-10-23T13:52:55.015Z  |  172.21.3.15    |  Connection error      |  8268153
+2023-10-23T13:51:54.732Z  |  172.21.3.15    |  Connection error      |  725448
+2023-10-23T13:33:34.937Z  |  172.21.0.5     |  Disconnected          |  1232382
+2023-10-23T12:27:28.948Z  |  172.21.2.113   |  Connected to 10.1.0.2 |  2764889
+2023-10-23T12:15:03.360Z  |  172.21.2.162   |  Connected to 10.1.0.3 |  3450233
 ;
 
 doesNotLoadUnmappedFields
 FROM sample_data_no_mapping
-| EVAL message = message :: keyword
 | SORT @timestamp DESC
 ;
 
-@timestamp:date           |  client_ip:ip   |  message:keyword       
-2023-10-23T13:55:01.543Z  |  172.21.3.15    |  Connected to 10.1.0.1 
-2023-10-23T13:53:55.832Z  |  172.21.3.15    |  Connection error      
-2023-10-23T13:52:55.015Z  |  172.21.3.15    |  Connection error      
-2023-10-23T13:51:54.732Z  |  172.21.3.15    |  Connection error      
-2023-10-23T13:33:34.937Z  |  172.21.0.5     |  Disconnected          
-2023-10-23T12:27:28.948Z  |  172.21.2.113   |  Connected to 10.1.0.2 
-2023-10-23T12:15:03.360Z  |  172.21.2.162   |  Connected to 10.1.0.3 
+@timestamp:date           |  client_ip:ip   |  message:keyword
+2023-10-23T13:55:01.543Z  |  172.21.3.15    |  Connected to 10.1.0.1
+2023-10-23T13:53:55.832Z  |  172.21.3.15    |  Connection error
+2023-10-23T13:52:55.015Z  |  172.21.3.15    |  Connection error
+2023-10-23T13:51:54.732Z  |  172.21.3.15    |  Connection error
+2023-10-23T13:33:34.937Z  |  172.21.0.5     |  Disconnected
+2023-10-23T12:27:28.948Z  |  172.21.2.113   |  Connected to 10.1.0.2
+2023-10-23T12:15:03.360Z  |  172.21.2.162   |  Connected to 10.1.0.3
 ;

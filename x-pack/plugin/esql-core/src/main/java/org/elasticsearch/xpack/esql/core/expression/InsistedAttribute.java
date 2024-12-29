@@ -35,7 +35,7 @@ public class InsistedAttribute extends TypedAttribute {
 
     @Override
     protected Attribute clone(Source source, String name, DataType type, Nullability nullability, NameId id, boolean synthetic) {
-        throw new AssertionError("TODO(gal)");
+        return new InsistedAttribute(source, name, type);
     }
 
     @Override
