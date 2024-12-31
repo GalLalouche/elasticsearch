@@ -43,7 +43,7 @@ public final class Insist extends UnaryPlan {
     }
 
     public boolean isRedundant() {
-        return child().output().stream().anyMatch(a -> a.name().equals(parameters.identifier()));
+        return child().output().stream().anyMatch(parameters::isTheSameAs);
     }
 
     public InsistParameters parameters() {

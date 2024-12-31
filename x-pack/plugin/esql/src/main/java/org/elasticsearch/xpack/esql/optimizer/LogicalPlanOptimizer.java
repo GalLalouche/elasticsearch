@@ -19,6 +19,7 @@ import org.elasticsearch.xpack.esql.optimizer.rules.logical.CombineEvals;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.CombineProjections;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.ConstantFolding;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.ConvertStringToByteRef;
+import org.elasticsearch.xpack.esql.optimizer.rules.logical.DesugarInsist;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.ExtractAggregateCommonFilter;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.FoldNull;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.LiteralsOnTheRight;
@@ -33,7 +34,6 @@ import org.elasticsearch.xpack.esql.optimizer.rules.logical.PruneEmptyPlans;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.PruneFilters;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.PruneLiteralsInOrderBy;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.PruneOrderByBeforeStats;
-import org.elasticsearch.xpack.esql.optimizer.rules.logical.PruneRedundantInsistClauses;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.PruneRedundantSortClauses;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.PushDownAndCombineFilters;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.PushDownAndCombineLimits;
@@ -127,7 +127,7 @@ public class LogicalPlanOptimizer extends ParameterizedRuleExecutor<LogicalPlan,
         return new Batch<>(
             "Substitutions",
             Limiter.ONCE,
-            new PruneRedundantInsistClauses(),
+            new DesugarInsist(),
             new SubstituteSurrogatePlans(),
             // Translate filtered expressions into aggregate with filters - can't use surrogate expressions because it was
             // retrofitted for constant folding - this needs to be fixed.

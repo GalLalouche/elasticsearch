@@ -31,6 +31,7 @@ import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.analysis.AnalysisRegistry;
 import org.elasticsearch.index.mapper.BlockLoader;
 import org.elasticsearch.index.mapper.FieldNamesFieldMapper;
+import org.elasticsearch.index.mapper.KeywordFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.NestedLookup;
 import org.elasticsearch.index.mapper.SourceFieldMapper;
@@ -47,6 +48,7 @@ import org.elasticsearch.search.sort.SortBuilder;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
+import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.MultiTypeEsField;
@@ -62,6 +64,7 @@ import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.PhysicalOperat
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -110,28 +113,26 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         int docChannel = source.layout.get(sourceAttr.id()).channel();
         for (Attribute attr : fieldExtractExec.attributesToExtract()) {
             layout.append(attr);
-            var unionTypes = findUnionTypes(attr);
-            DataType dataType = attr.dataType();
             MappedFieldType.FieldExtractPreference fieldExtractPreference = fieldExtractExec.fieldExtractPreference(attr);
-            ElementType elementType = PlannerUtils.toElementType(dataType, fieldExtractPreference);
-            // Do not use the field attribute name, this can deviate from the field name for union types.
-            String fieldName = attr instanceof FieldAttribute fa ? fa.fieldName() : attr.name();
-            boolean isUnsupported = dataType == DataType.UNSUPPORTED;
-            IntFunction<BlockLoader> loader = s -> getBlockLoaderFor(s, fieldName, isUnsupported, fieldExtractPreference, unionTypes);
-            fields.add(new ValuesSourceReaderOperator.FieldInfo(fieldName, elementType, loader));
+            ElementType elementType = PlannerUtils.toElementType(attr.dataType(), fieldExtractPreference);
+            IntFunction<BlockLoader> loader = s -> getBlockLoaderFor(s, attr, fieldExtractPreference);
+            fields.add(new ValuesSourceReaderOperator.FieldInfo(getFieldName(attr), elementType, loader));
         }
         return source.with(new ValuesSourceReaderOperator.Factory(fields, readers, docChannel), layout.build());
     }
 
-    private BlockLoader getBlockLoaderFor(
-        int shardId,
-        String fieldName,
-        boolean isUnsupported,
-        MappedFieldType.FieldExtractPreference fieldExtractPreference,
-        MultiTypeEsField unionTypes
-    ) {
-        DefaultShardContext shardContext = (DefaultShardContext) shardContexts.get(shardId);
+    private static String getFieldName(Attribute attr) {
+        // Do not use the field attribute name, this can deviate from the field name for union types.
+        return attr instanceof FieldAttribute fa ? fa.fieldName() : attr.name();
+    }
+
+    private BlockLoader getBlockLoaderFor(int shardId, Attribute attr, MappedFieldType.FieldExtractPreference fieldExtractPreference) {
+        DataType dataType = attr.dataType();
+        boolean isUnsupported = dataType == DataType.UNSUPPORTED;
+        String fieldName = getFieldName(attr);
+        DefaultShardContext shardContext = getDefaultShardContext(shardId, attr);
         BlockLoader blockLoader = shardContext.blockLoader(fieldName, isUnsupported, fieldExtractPreference);
+        var unionTypes = findUnionTypes(attr);
         if (unionTypes != null) {
             String indexName = shardContext.ctx.index().getName();
             Expression conversion = unionTypes.getConversionExpressionForIndex(indexName);
@@ -140,6 +141,28 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
                 : new TypeConvertingBlockLoader(blockLoader, (AbstractConvertFunction) conversion);
         }
         return blockLoader;
+    }
+
+    private DefaultShardContext getDefaultShardContext(int shardId, Attribute attr) {
+        DefaultShardContext shardContext = (DefaultShardContext) shardContexts.get(shardId);
+        return attr instanceof InsistedAttribute ia ? new DefaultShardContextForInsistedAttribute(shardContext, ia) : shardContext;
+    }
+
+    private static class DefaultShardContextForInsistedAttribute extends DefaultShardContext {
+        private final InsistedAttribute insistedAttribute;
+
+        DefaultShardContextForInsistedAttribute(DefaultShardContext ctx, InsistedAttribute insistedAttribute) {
+            super(ctx.index, ctx.ctx, ctx.aliasFilter);
+            this.insistedAttribute = insistedAttribute;
+        }
+
+        @Override
+        protected MappedFieldType fieldType(String name) {
+            var superResult = super.fieldType(name);
+            return superResult == null && name.equals(insistedAttribute.name())
+                ? new KeywordFieldMapper.KeywordFieldType(name, false /* isIndexed */, false /* hasDocValues */, Map.of() /* meta*/)
+                : superResult;
+        }
     }
 
     private MultiTypeEsField findUnionTypes(Attribute attr) {
@@ -237,12 +260,8 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
             .toList();
         // The grouping-by values are ready, let's group on them directly.
         // Costin: why are they ready and not already exposed in the layout?
-        boolean isUnsupported = attrSource.dataType() == DataType.UNSUPPORTED;
-        var unionTypes = findUnionTypes(attrSource);
-        // Do not use the field attribute name, this can deviate from the field name for union types.
-        String fieldName = attrSource instanceof FieldAttribute fa ? fa.fieldName() : attrSource.name();
         return new OrdinalsGroupingOperator.OrdinalsGroupingOperatorFactory(
-            shardIdx -> getBlockLoaderFor(shardIdx, fieldName, isUnsupported, NONE, unionTypes),
+            shardIdx -> getBlockLoaderFor(shardIdx, attrSource, NONE),
             vsShardContexts,
             groupElementType,
             docChannel,
@@ -315,11 +334,11 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
             if (asUnsupportedSource) {
                 return BlockLoader.CONSTANT_NULLS;
             }
-            MappedFieldType fieldType = ctx.getFieldType(name);
+            MappedFieldType fieldType = fieldType(name);
             if (fieldType == null) {
-                // the field does not exist in this context
                 return BlockLoader.CONSTANT_NULLS;
             }
+
             BlockLoader loader = fieldType.blockLoader(new MappedFieldType.BlockLoaderContext() {
                 @Override
                 public String indexName() {
@@ -371,6 +390,10 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
             }
 
             return loader;
+        }
+
+        protected MappedFieldType fieldType(String name) {
+            return ctx.getFieldType(name);
         }
     }
 

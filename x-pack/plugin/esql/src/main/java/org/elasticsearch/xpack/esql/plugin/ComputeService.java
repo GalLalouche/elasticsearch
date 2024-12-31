@@ -441,6 +441,7 @@ public class ComputeService {
                     return new ReinitializingSourceProvider(supplier);
 
                 }
+
             };
             contexts.add(
                 new EsPhysicalOperationProviders.DefaultShardContext(i, searchExecutionContext, searchContext.request().getAliasFilter())

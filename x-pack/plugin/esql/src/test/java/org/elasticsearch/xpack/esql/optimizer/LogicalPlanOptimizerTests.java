@@ -33,6 +33,7 @@ import org.elasticsearch.xpack.esql.core.expression.AttributeSet;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Expressions;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
+import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.Nullability;
@@ -2571,6 +2572,55 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
                 )
             )
         );
+    }
+
+    public void testPruneRedundantInsist_FieldExistsAndIsOfSameType_RemovesInsist() {
+        LogicalPlan plan = optimizedPlan("""
+            FROM test
+            | INSIST first_name :: KEYWORD
+            """);
+
+        LogicalPlan equivalentPlan = optimizedPlan("FROM test");
+
+        assertThat(plan, is(equalTo(equivalentPlan)));
+    }
+
+    public void testPruneRedundantInsist_FieldExistsButOfDifferentType_ReplacedWithACast() {
+        LogicalPlan plan = optimizedPlan("""
+            FROM test
+            | INSIST emp_no :: KEYWORD
+            """);
+
+        LogicalPlan equivalentPlan = optimizedPlan("""
+            FROM test
+            | EVAL emp_no = emp_no :: KEYWORD
+            """);
+
+        assertThat(plan, is(equalTo(equivalentPlan)));
+    }
+
+    public void testPruneRedundantInsist_FieldDoesNotExistAndIsKeyword_UpdatesRelationWithNewField() {
+        LogicalPlan plan = optimizedPlan("""
+            FROM test
+            | INSIST foobar :: KEYWORD
+            """);
+
+        var limit = as(plan, Limit.class);
+        var relation = as(limit.child(), EsRelation.class);
+        assertThat(relation.output().getLast(), is(equalTo(new InsistedAttribute(EMPTY, "foobar", DataType.KEYWORD))));
+    }
+
+    public void testPruneRedundantInsist_FieldDoesNotExistAndIsNotKeyword_UpdatesRelationWithNewFieldAndAddsCast() {
+        LogicalPlan plan = optimizedPlan("""
+            FROM test
+            | INSIST foobar :: LONG
+            """);
+
+        System.out.println(plan);
+        var eval = as(plan, Eval.class);
+        var limit = as(eval.child(), Limit.class);
+        var relation = as(limit.child(), EsRelation.class);
+        assertThat(relation.output().getLast(), is(equalTo(new InsistedAttribute(EMPTY, "foobar", DataType.KEYWORD))));
     }
 
     public void testSimplifyLikeNoWildcard() {
