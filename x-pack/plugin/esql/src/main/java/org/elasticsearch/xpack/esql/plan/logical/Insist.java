@@ -121,4 +121,8 @@ public final class Insist extends UnaryPlan {
 
         return Objects.equals(parameters, other.parameters) && Objects.equals(child(), other.child());
     }
+
+    public NameId insistedId() {
+        return output().stream().filter(attr -> attr.name().equals(parameters.identifier())).findFirst().get().id();
+    }
 }

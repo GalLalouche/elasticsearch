@@ -29,21 +29,26 @@ import java.util.stream.Stream;
 /// INSIST clauses can be desugared, based on three cases:
 /// 1. If the requested column exists and is of the correct type, the INSIST clause is redundant and can be removed.
 /// 2. If the requested column exists but is of the wrong type, the INSIST clause can be replaced with a CAST clause.
-/// 3. If the requested column does not exist, we update the underlying relation to "pretend" it exists as a `KEYWORD`, and add a CAST on
-/// top of it. This isn't the most efficient way to handle this case, but it has the benefit of completely removing insists, and since we're
-/// dealing with source anyway, our performance is gonna be wrecked anyway. We may we wish to revisit this implementation in the future.
+/// 3. If the requested column does not exist, we update the underlying relation to "pretend" it exists as a `KEYWORD` (since we can read
+/// any value as a `KEYWORD`), and add a CAST on top of it if needed. This isn't the most efficient way to handle this case, but it has the
+/// benefit of completely removing insists, and since we're dealing with source anyway, our performance is gonna be wrecked anyway. We may
+/// we wish to revisit this implementation in the future.
 public final class DesugarInsist extends OptimizerRules.OptimizerRule<Insist> {
     @Override
     protected LogicalPlan rule(Insist plan) {
+        // Column exists and is of the same type, just replace this node with its child.
         if (plan.isRedundant()) {
             return plan.child();
         }
 
         InsistParameters params = plan.parameters();
         if (lookupAttribute(plan.child(), params).orElse(null) instanceof Attribute attr) {
-            return params.dataType() != attr.dataType() ? addCast(plan.child(), plan) : plan.child();
+            // Column exists but is different, so just add a cast.
+            assert params.dataType() != attr.dataType();
+            return addCast(plan.child(), plan);
         }
 
+        // Column does not exist, need to patch up the relation in addition to maybe adding a cast.
         var newRelation = updateEsRelation(plan);
         return params.dataType() != DEFAULT_ADDED_TYPE ? addCast(newRelation, plan) : newRelation;
     }
@@ -54,12 +59,14 @@ public final class DesugarInsist extends OptimizerRules.OptimizerRule<Insist> {
         return oldRelation.withAttributes(Stream.concat(oldRelation.output().stream(), Stream.of(newAttribute)).toList());
     }
 
-    private static Eval addCast(LogicalPlan newRelation, Insist insist) {
+    private static Eval addCast(LogicalPlan child, Insist insist) {
         var params = insist.parameters();
-        var insistedId = insist.output().stream().filter(c -> c.name().equals(params.identifier())).findFirst().get().id();
-        var attr = lookupAttribute(newRelation, params).get();
+        // Since we're replacing the INSIST output with an eval, we need to maintain the same ID, otherwise the plan verifier will throw
+        // a hissy fit about the IDs not matching.
+        var insistedId = insist.insistedId();
+        var attr = lookupAttribute(child, params).get();
         AbstractConvertFunction conversion = EsqlDataTypeConverter.converterFunctionFactory(params.dataType()).apply(Source.EMPTY, attr);
-        return new Eval(Source.EMPTY, newRelation, List.of(new Alias(Source.EMPTY, params.identifier(), conversion, insistedId)));
+        return new Eval(Source.EMPTY, child, List.of(new Alias(Source.EMPTY, params.identifier(), conversion, insistedId)));
     }
 
     private static Optional<Attribute> lookupAttribute(LogicalPlan node, InsistParameters parameters) {
