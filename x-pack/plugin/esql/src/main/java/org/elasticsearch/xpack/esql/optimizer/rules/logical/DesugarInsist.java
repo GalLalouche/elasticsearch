@@ -41,11 +41,11 @@ public final class DesugarInsist extends OptimizerRules.OptimizerRule<Insist> {
 
         InsistParameters params = plan.parameters();
         if (lookupAttribute(plan.child(), params).orElse(null) instanceof Attribute attr) {
-            return params.dataType() != attr.dataType() ? addCast(plan.child(), params) : plan.child();
+            return params.dataType() != attr.dataType() ? addCast(plan.child(), plan) : plan.child();
         }
 
         var newRelation = updateEsRelation(plan);
-        return params.dataType() != DEFAULT_ADDED_TYPE ? addCast(newRelation, params) : newRelation;
+        return params.dataType() != DEFAULT_ADDED_TYPE ? addCast(newRelation, plan) : newRelation;
     }
 
     private static EsRelation updateEsRelation(Insist plan) {
@@ -54,10 +54,12 @@ public final class DesugarInsist extends OptimizerRules.OptimizerRule<Insist> {
         return oldRelation.withAttributes(Stream.concat(oldRelation.output().stream(), Stream.of(newAttribute)).toList());
     }
 
-    private static Eval addCast(LogicalPlan newRelation, InsistParameters params) {
+    private static Eval addCast(LogicalPlan newRelation, Insist insist) {
+        var params = insist.parameters();
+        var insistedId = insist.output().stream().filter(c -> c.name().equals(params.identifier())).findFirst().get().id();
         var attr = lookupAttribute(newRelation, params).get();
         AbstractConvertFunction conversion = EsqlDataTypeConverter.converterFunctionFactory(params.dataType()).apply(Source.EMPTY, attr);
-        return new Eval(Source.EMPTY, newRelation, List.of(new Alias(Source.EMPTY, params.identifier(), conversion)));
+        return new Eval(Source.EMPTY, newRelation, List.of(new Alias(Source.EMPTY, params.identifier(), conversion, insistedId)));
     }
 
     private static Optional<Attribute> lookupAttribute(LogicalPlan node, InsistParameters parameters) {

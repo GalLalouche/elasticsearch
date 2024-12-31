@@ -10,6 +10,7 @@ package org.elasticsearch.xpack.esql.core.expression;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.core.tree.NodeInfo;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
@@ -30,12 +31,16 @@ public class InsistedAttribute extends TypedAttribute {
     }
 
     public InsistedAttribute(Source source, String name, DataType dataType) {
-        super(source, name, dataType, Nullability.TRUE, null /* id */, false /* synthetic */);
+        this(source, name, dataType, null /* id */);
+    }
+
+    private InsistedAttribute(Source source, String name, DataType dataType, @Nullable NameId id) {
+        super(source, name, dataType, Nullability.TRUE, id, false /* synthetic */);
     }
 
     @Override
     protected Attribute clone(Source source, String name, DataType type, Nullability nullability, NameId id, boolean synthetic) {
-        return new InsistedAttribute(source, name, type);
+        return new InsistedAttribute(source, name, type, id);
     }
 
     @Override

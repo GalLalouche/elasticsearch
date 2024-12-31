@@ -51,9 +51,8 @@ processingCommand
     | grokCommand
     | enrichCommand
     | mvExpandCommand
-    // FIXME (gal, do-not-merge!) This should be in development, and also only work after FROM
-    | insistCommand
     // in development
+    | {this.isDevVersion()}? insistCommand
     | {this.isDevVersion()}? inlinestatsCommand
     | {this.isDevVersion()}? lookupCommand
     | {this.isDevVersion()}? joinCommand

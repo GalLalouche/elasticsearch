@@ -11,16 +11,19 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
-import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
+import org.elasticsearch.xpack.esql.core.expression.NameId;
+import org.elasticsearch.xpack.esql.core.expression.Nullability;
+import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.NodeInfo;
 import org.elasticsearch.xpack.esql.core.tree.Source;
+import org.elasticsearch.xpack.esql.expression.NamedExpressions;
 import org.elasticsearch.xpack.esql.io.stream.PlanStreamInput;
 import org.elasticsearch.xpack.esql.plan.InsistParameters;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Stream;
 
 public final class Insist extends UnaryPlan {
     public static final NamedWriteableRegistry.Entry ENTRY = new NamedWriteableRegistry.Entry(LogicalPlan.class, "INSIST", Insist::new);
@@ -32,14 +35,28 @@ public final class Insist extends UnaryPlan {
         this.parameters = parameters;
     }
 
-    private @Nullable List<Attribute> computedOutput = null;
+    private @Nullable List<Attribute> lazyOutput = null;
 
     @Override
     public List<Attribute> output() {
-        if (computedOutput == null) {
-            computedOutput = isRedundant() ? child().output() : Stream.concat(child().output().stream(), attributes().stream()).toList();
+        if (lazyOutput == null) {
+            lazyOutput = computeOutput();
         }
-        return computedOutput;
+        return lazyOutput;
+    }
+
+    // Although we remove Insist clauses later on, we need to make sure that the output of the Insist node is correct while it exists.
+    private List<Attribute> computeOutput() {
+        if (isRedundant()) {
+            return child().output();
+        }
+        return NamedExpressions.mergeOutputAttributes(
+            List.of(
+                new ReferenceAttribute(source(), parameters.identifier(), parameters.dataType()).withNullability(Nullability.TRUE)
+                    .withId(new NameId())
+            ),
+            new ArrayList<Attribute>(child().output())
+        );
     }
 
     public boolean isRedundant() {
@@ -48,10 +65,6 @@ public final class Insist extends UnaryPlan {
 
     public InsistParameters parameters() {
         return parameters;
-    }
-
-    public List<Attribute> attributes() {
-        return List.of(new InsistedAttribute(source(), parameters.identifier(), parameters.dataType()));
     }
 
     @Override

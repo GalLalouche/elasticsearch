@@ -127,11 +127,13 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
     }
 
     private BlockLoader getBlockLoaderFor(int shardId, Attribute attr, MappedFieldType.FieldExtractPreference fieldExtractPreference) {
-        DataType dataType = attr.dataType();
-        boolean isUnsupported = dataType == DataType.UNSUPPORTED;
-        String fieldName = getFieldName(attr);
-        DefaultShardContext shardContext = getDefaultShardContext(shardId, attr);
-        BlockLoader blockLoader = shardContext.blockLoader(fieldName, isUnsupported, fieldExtractPreference);
+        DefaultShardContext shardContext = (DefaultShardContext) shardContexts.get(shardId);
+        if (attr instanceof InsistedAttribute ia) {
+            shardContext = new DefaultShardContextForInsistedAttribute(shardContext, ia);
+        }
+
+        boolean isUnsupported = attr.dataType() == DataType.UNSUPPORTED;
+        BlockLoader blockLoader = shardContext.blockLoader(getFieldName(attr), isUnsupported, fieldExtractPreference);
         var unionTypes = findUnionTypes(attr);
         if (unionTypes != null) {
             String indexName = shardContext.ctx.index().getName();
@@ -141,11 +143,6 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
                 : new TypeConvertingBlockLoader(blockLoader, (AbstractConvertFunction) conversion);
         }
         return blockLoader;
-    }
-
-    private DefaultShardContext getDefaultShardContext(int shardId, Attribute attr) {
-        DefaultShardContext shardContext = (DefaultShardContext) shardContexts.get(shardId);
-        return attr instanceof InsistedAttribute ia ? new DefaultShardContextForInsistedAttribute(shardContext, ia) : shardContext;
     }
 
     private static class DefaultShardContextForInsistedAttribute extends DefaultShardContext {
@@ -160,7 +157,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         protected MappedFieldType fieldType(String name) {
             var superResult = super.fieldType(name);
             return superResult == null && name.equals(insistedAttribute.name())
-                ? new KeywordFieldMapper.KeywordFieldType(name, false /* isIndexed */, false /* hasDocValues */, Map.of() /* meta*/)
+                ? new KeywordFieldMapper.KeywordFieldType(name, false /* isIndexed */, false /* hasDocValues */, Map.of() /* meta */)
                 : superResult;
         }
     }
