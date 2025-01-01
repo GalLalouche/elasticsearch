@@ -456,7 +456,6 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
             var result = blockBuilder.build();
             assert result.getPositionCount() == docBlock.getPositionCount()
                 : "Expected " + docBlock.getPositionCount() + " rows, got " + result.getPositionCount();
-            System.out.println("-----");
             return result;
         }
     }

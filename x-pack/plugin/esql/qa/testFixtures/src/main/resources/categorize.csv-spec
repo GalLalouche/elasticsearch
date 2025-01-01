@@ -95,9 +95,10 @@ FROM sample_data*
 ;
 
 COUNT():long | category:keyword
-          12 | .*?Connected.+?to.*?
-          12 | .*?Connection.+?error.*?
+          15 | .*?Connected.+?to.*?
+          15 | .*?Connection.+?error.*?
            4 | .*?Disconnected.*?
+           1 | null
 ;
 
 mv with many values
