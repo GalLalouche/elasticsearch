@@ -13,7 +13,6 @@ import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
 import org.elasticsearch.xpack.esql.core.expression.NameId;
-import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.NodeInfo;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
@@ -50,16 +49,11 @@ public final class Insist extends UnaryPlan {
     private List<Attribute> computeOutput() {
         var result = new ArrayList<>(child().output());
         OptionalInt index = CollectionUtils.findIndex(child().output(), c -> c.name().equals(parameters.identifier()));
+        InsistedAttribute insistedAttribute = new InsistedAttribute(Source.EMPTY, parameters.identifier(), parameters.dataType());
         if (index.isPresent()) {
-            var willBeCast = child().output().get(index.getAsInt()).dataType() != parameters.dataType();
-            result.set(
-                index.getAsInt(),
-                willBeCast
-                    ? new ReferenceAttribute(Source.EMPTY, parameters.identifier(), parameters.dataType())
-                    : new InsistedAttribute(Source.EMPTY, parameters.identifier(), parameters.dataType())
-            );
+            result.set(index.getAsInt(), insistedAttribute);
         } else {
-            result.add(new InsistedAttribute(Source.EMPTY, parameters.identifier(), parameters.dataType()));
+            result.add(insistedAttribute);
         }
         return result;
     }

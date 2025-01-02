@@ -37,6 +37,7 @@ import org.elasticsearch.index.analysis.AnalysisRegistry;
 import org.elasticsearch.index.mapper.MappedFieldType.FieldExtractPreference;
 import org.elasticsearch.indices.analysis.AnalysisModule;
 import org.elasticsearch.plugins.scanners.StablePluginsRegistry;
+import org.elasticsearch.xpack.esql.CsvTestUtils.PageColumn;
 import org.elasticsearch.xpack.esql.EsqlIllegalArgumentException;
 import org.elasticsearch.xpack.esql.TestBlockFactory;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
@@ -83,9 +84,13 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         return new TestPhysicalOperationProviders(indexPages, createAnalysisRegistry());
     }
 
-    public record IndexPage(String index, Page page, List<String> columnNames) {
+    public record IndexPage(String index, Page page, List<PageColumn> columns) {
+        List<String> columnNames() {
+            return columns.stream().map(PageColumn::name).toList();
+        }
+
         Optional<Integer> columnIndex(String columnName) {
-            var result = IntStream.range(0, columnNames.size()).filter(i -> columnNames.get(i).equals(columnName)).findFirst();
+            var result = IntStream.range(0, columns.size()).filter(i -> columns.get(i).name().equals(columnName)).findFirst();
             return result.isPresent() ? Optional.of(result.getAsInt()) : Optional.empty();
         }
     }
@@ -285,11 +290,21 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
     }
 
     private Block getBlockForInsistedType(DocBlock indexDoc, InsistedAttribute attr, TestBlockCopier blockCopier) {
-        return extractBlockForSingleDoc(indexDoc, attr.name(), blockCopier).mapOrNulls(indexDoc, block -> castInsisted(attr, block));
+        var indexId = indexDoc.asVector().shards().getInt(0);
+        var indexPage = indexPages.get(indexId);
+        var blockDataType = indexPage.columns.stream()
+            .filter(c -> c.name().equals(attr.name()))
+            .findFirst()
+            .map(PageColumn::dataType)
+            .orElseThrow();
+
+        return extractBlockForSingleDoc(indexDoc, attr.name(), blockCopier).mapOrNulls(
+            indexDoc,
+            block -> castInsisted(attr, block, blockDataType)
+        );
     }
 
-    private static Block castInsisted(InsistedAttribute insistedAttribute, Block block) {
-        DataType blockDataType = PlannerUtils.toDataType(block.elementType());
+    private static Block castInsisted(InsistedAttribute insistedAttribute, Block block, DataType blockDataType) {
         AbstractConvertFunction conversion = EsqlDataTypeConverter.converterFunctionFactory(insistedAttribute.dataType())
             .apply(insistedAttribute.source(), new ReferenceAttribute(insistedAttribute.source(), insistedAttribute.name(), blockDataType));
         return TypeConverter.fromConvertFunction(conversion).convert(block);
@@ -334,7 +349,7 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         var indexPage = indexPages.get(indexId);
         return indexPage.columnIndex(columnName)
             .<BlockResult>map(columnIndex -> new BlockResultSuccess(blockCopier.copyBlock(indexPage.page.getBlock(columnIndex))))
-            .orElseGet(() -> new BlockResultMissing(columnName, indexPage.columnNames));
+            .orElseGet(() -> new BlockResultMissing(columnName, indexPage.columnNames()));
     }
 
     private static void foreachIndexDoc(DocBlock docBlock, Consumer<DocBlock> indexDocConsumer) {
