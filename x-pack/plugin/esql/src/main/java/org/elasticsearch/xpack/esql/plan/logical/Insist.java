@@ -11,12 +11,12 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
+import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
 import org.elasticsearch.xpack.esql.core.expression.NameId;
-import org.elasticsearch.xpack.esql.core.expression.Nullability;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.NodeInfo;
 import org.elasticsearch.xpack.esql.core.tree.Source;
-import org.elasticsearch.xpack.esql.expression.NamedExpressions;
+import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
 import org.elasticsearch.xpack.esql.io.stream.PlanStreamInput;
 import org.elasticsearch.xpack.esql.plan.InsistParameters;
 
@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalInt;
 
 public final class Insist extends UnaryPlan {
     public static final NamedWriteableRegistry.Entry ENTRY = new NamedWriteableRegistry.Entry(LogicalPlan.class, "INSIST", Insist::new);
@@ -47,16 +48,20 @@ public final class Insist extends UnaryPlan {
 
     // Although we remove Insist clauses later on, we need to make sure that the output of the Insist node is correct while it exists.
     private List<Attribute> computeOutput() {
-        if (isRedundant()) {
-            return child().output();
+        var result = new ArrayList<>(child().output());
+        OptionalInt index = CollectionUtils.findIndex(child().output(), c -> c.name().equals(parameters.identifier()));
+        if (index.isPresent()) {
+            var willBeCast = child().output().get(index.getAsInt()).dataType() != parameters.dataType();
+            result.set(
+                index.getAsInt(),
+                willBeCast
+                    ? new ReferenceAttribute(Source.EMPTY, parameters.identifier(), parameters.dataType())
+                    : new InsistedAttribute(Source.EMPTY, parameters.identifier(), parameters.dataType())
+            );
+        } else {
+            result.add(new InsistedAttribute(Source.EMPTY, parameters.identifier(), parameters.dataType()));
         }
-        return NamedExpressions.mergeOutputAttributes(
-            List.of(
-                new ReferenceAttribute(source(), parameters.identifier(), parameters.dataType()).withNullability(Nullability.TRUE)
-                    .withId(new NameId())
-            ),
-            new ArrayList<Attribute>(child().output())
-        );
+        return result;
     }
 
     public boolean isRedundant() {

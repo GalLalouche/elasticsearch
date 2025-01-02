@@ -50,6 +50,8 @@ import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
+import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
+import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.MultiTypeEsField;
 import org.elasticsearch.xpack.esql.expression.function.scalar.convert.AbstractConvertFunction;
@@ -60,10 +62,12 @@ import org.elasticsearch.xpack.esql.plan.physical.FieldExtractExec;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.DriverParallelism;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.LocalExecutionPlannerContext;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.PhysicalOperation;
+import org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -128,6 +132,8 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
 
     private BlockLoader getBlockLoaderFor(int shardId, Attribute attr, MappedFieldType.FieldExtractPreference fieldExtractPreference) {
         DefaultShardContext shardContext = (DefaultShardContext) shardContexts.get(shardId);
+        Optional<DataType> originalType = Optional.ofNullable(shardContext.fieldType(getFieldName(attr)))
+            .map(e -> DataType.fromEs(e.typeName()));
         if (attr instanceof InsistedAttribute ia) {
             shardContext = new DefaultShardContextForInsistedAttribute(shardContext, ia);
         }
@@ -141,6 +147,21 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
             return conversion == null
                 ? BlockLoader.CONSTANT_NULLS
                 : new TypeConvertingBlockLoader(blockLoader, (AbstractConvertFunction) conversion);
+        }
+        // FIXME(gal, do-not-merge!) bad code
+        if (attr instanceof InsistedAttribute ia) {
+            return new TypeConvertingBlockLoader(
+                blockLoader,
+                EsqlDataTypeConverter.converterFunctionFactory(ia.dataType())
+                    .apply(
+                        Source.EMPTY,
+                        new ReferenceAttribute(
+                            Source.EMPTY,
+                            ia.name(),
+                            originalType.map(e -> DataType.valueOf(e.typeName().toUpperCase(Locale.ROOT))).orElse(DataType.KEYWORD)
+                        )
+                    )
+            );
         }
         return blockLoader;
     }

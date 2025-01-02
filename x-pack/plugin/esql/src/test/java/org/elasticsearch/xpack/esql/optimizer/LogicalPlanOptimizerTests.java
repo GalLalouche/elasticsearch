@@ -47,8 +47,10 @@ import org.elasticsearch.xpack.esql.core.expression.predicate.operator.compariso
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.EsField;
+import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
 import org.elasticsearch.xpack.esql.core.util.Holder;
 import org.elasticsearch.xpack.esql.core.util.StringUtils;
+import org.elasticsearch.xpack.esql.core.util.TestUtils;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.function.EsqlFunctionRegistry;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
@@ -133,6 +135,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptyList;
@@ -2574,53 +2577,51 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         );
     }
 
-    public void testPruneRedundantInsist_FieldExistsAndIsOfSameType_RemovesInsist() {
+    public void testPruneRedundantInsist_fieldExistsAndIsOfSameType_updatesRelation() {
         LogicalPlan plan = optimizedPlan("""
             FROM test
             | INSIST first_name :: KEYWORD
             """);
 
-        LogicalPlan equivalentPlan = optimizedPlan("FROM test");
-
-        assertThat(plan, is(equalTo(equivalentPlan)));
+        var limit = as(plan, Limit.class);
+        assertRelationHasInsistedField(as(limit.child(), EsRelation.class), "first_name", DataType.KEYWORD);
     }
 
-    public void testPruneRedundantInsist_FieldExistsButOfDifferentType_ReplacedWithACast() {
+    private void assertRelationHasInsistedField(EsRelation relation, String fieldName, DataType fieldType) {
+        var insistedAttribute = TestUtils.assertSingleton(CollectionUtils.filterType(relation.output(), InsistedAttribute.class));
+        assertThat(insistedAttribute, is(equalTo(new InsistedAttribute(EMPTY, fieldName, fieldType))));
+
+        Predicate<Attribute> isFirstName = e -> e.name().equals(fieldName);
+        assertThat(
+            "Index of first_name field should not have changed",
+            CollectionUtils.findIndex(relation.output(), isFirstName),
+            is(equalTo(CollectionUtils.findIndex(optimizedPlan("FROM test").output(), isFirstName)))
+        );
+    }
+
+    public void testPruneRedundantInsist_fieldExistsButOfDifferentType_replacedWithACastAndUpdatesRelation() {
         LogicalPlan plan = optimizedPlan("""
             FROM test
             | INSIST emp_no :: KEYWORD
             """);
 
-        LogicalPlan equivalentPlan = optimizedPlan("""
-            FROM test
-            | EVAL emp_no = emp_no :: KEYWORD
-            """);
-
-        assertThat(plan, is(equalTo(equivalentPlan)));
+        var eval = as(plan, Eval.class);
+        var cast = TestUtils.assertSingleton(eval.fields()).child();
+        assertThat(cast, is(equalTo(new ToString(EMPTY, new InsistedAttribute(EMPTY, "emp_no", INTEGER)))));
+        var limit = as(eval.child(), Limit.class);
+        assertRelationHasInsistedField(as(limit.child(), EsRelation.class), "emp_no", INTEGER);
     }
 
-    public void testPruneRedundantInsist_FieldDoesNotExistAndIsKeyword_UpdatesRelationWithNewField() {
-        LogicalPlan plan = optimizedPlan("""
-            FROM test
-            | INSIST foobar :: KEYWORD
-            """);
-
-        var limit = as(plan, Limit.class);
-        var relation = as(limit.child(), EsRelation.class);
-        assertThat(relation.output().getLast(), is(equalTo(new InsistedAttribute(EMPTY, "foobar", DataType.KEYWORD))));
-    }
-
-    public void testPruneRedundantInsist_FieldDoesNotExistAndIsNotKeyword_UpdatesRelationWithNewFieldAndAddsCast() {
+    public void testPruneRedundantInsist_fieldDoesNotExiSt_updatesRelationWithNewField() {
         LogicalPlan plan = optimizedPlan("""
             FROM test
             | INSIST foobar :: LONG
             """);
 
-        System.out.println(plan);
-        var eval = as(plan, Eval.class);
-        var limit = as(eval.child(), Limit.class);
+        var limit = as(plan, Limit.class);
         var relation = as(limit.child(), EsRelation.class);
-        assertThat(relation.output().getLast(), is(equalTo(new InsistedAttribute(EMPTY, "foobar", DataType.KEYWORD))));
+        var insistedAttribute = TestUtils.assertSingleton(CollectionUtils.filterType(relation.output(), InsistedAttribute.class));
+        assertThat(insistedAttribute, is(equalTo(new InsistedAttribute(EMPTY, "foobar", DataType.LONG))));
     }
 
     public void testSimplifyLikeNoWildcard() {
