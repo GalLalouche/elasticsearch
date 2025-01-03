@@ -42,8 +42,6 @@ import org.elasticsearch.xpack.esql.EsqlIllegalArgumentException;
 import org.elasticsearch.xpack.esql.TestBlockFactory;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
-import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
-import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.MultiTypeEsField;
 import org.elasticsearch.xpack.esql.core.util.SpatialCoordinateTypes;
@@ -54,7 +52,6 @@ import org.elasticsearch.xpack.esql.plan.physical.EsQueryExec;
 import org.elasticsearch.xpack.esql.plan.physical.FieldExtractExec;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.LocalExecutionPlannerContext;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.PhysicalOperation;
-import org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter;
 import org.elasticsearch.xpack.ml.MachineLearning;
 
 import java.io.IOException;
@@ -272,7 +269,7 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         }
         BiFunction<DocBlock, TestBlockCopier, Block> blockExtraction = switch (attribute) {
             case FieldAttribute fa when fa.field() instanceof MultiTypeEsField m -> (doc, copier) -> getBlockForMultiType(doc, m, copier);
-            case InsistedAttribute ia -> (indexDoc, blockCopier) -> getBlockForInsistedType(indexDoc, ia, blockCopier);
+            // case InsistedAttribute ia -> (indexDoc, blockCopier) -> getBlockForInsistedType(indexDoc, ia, blockCopier);
             default -> (indexDoc, blockCopier) -> extractBlockForSingleDoc(indexDoc, attribute.name(), blockCopier).getOrThrow();
         };
         return extractBlockForColumn(docBlock, attribute.dataType(), extractPreference, blockExtraction);
@@ -289,26 +286,26 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         return result.mapOrNulls(indexDoc, TypeConverter.fromConvertFunction(conversion)::convert);
     }
 
-    private Block getBlockForInsistedType(DocBlock indexDoc, InsistedAttribute attr, TestBlockCopier blockCopier) {
-        var indexId = indexDoc.asVector().shards().getInt(0);
-        var indexPage = indexPages.get(indexId);
-        var blockDataType = indexPage.columns.stream()
-            .filter(c -> c.name().equals(attr.name()))
-            .findFirst()
-            .map(PageColumn::dataType)
-            .orElseThrow();
+    // private Block getBlockForInsistedType(DocBlock indexDoc, InsistedAttribute attr, TestBlockCopier blockCopier) {
+    // var indexId = indexDoc.asVector().shards().getInt(0);
+    // var indexPage = indexPages.get(indexId);
+    // var blockDataType = indexPage.columns.stream()
+    // .filter(c -> c.name().equals(attr.name()))
+    // .findFirst()
+    // .map(PageColumn::dataType)
+    // .orElseThrow();
+    //
+    // return extractBlockForSingleDoc(indexDoc, attr.name(), blockCopier).mapOrNulls(
+    // indexDoc,
+    // block -> castInsisted(attr, block, blockDataType)
+    // );
+    // }
 
-        return extractBlockForSingleDoc(indexDoc, attr.name(), blockCopier).mapOrNulls(
-            indexDoc,
-            block -> castInsisted(attr, block, blockDataType)
-        );
-    }
-
-    private static Block castInsisted(InsistedAttribute insistedAttribute, Block block, DataType blockDataType) {
-        AbstractConvertFunction conversion = EsqlDataTypeConverter.converterFunctionFactory(insistedAttribute.dataType())
-            .apply(insistedAttribute.source(), new ReferenceAttribute(insistedAttribute.source(), insistedAttribute.name(), blockDataType));
-        return TypeConverter.fromConvertFunction(conversion).convert(block);
-    }
+    // private static Block castInsisted(InsistedAttribute insistedAttribute, Block block, DataType blockDataType) {
+    // AbstractConvertFunction conversion = EsqlDataTypeConverter.converterFunctionFactory(insistedAttribute.dataType())
+    // .apply(insistedAttribute.source(), new ReferenceAttribute(insistedAttribute.source(), insistedAttribute.name(), blockDataType));
+    // return TypeConverter.fromConvertFunction(conversion).convert(block);
+    // }
 
     private static Block getNullsBlock(DocBlock indexDoc) {
         return indexDoc.blockFactory().newConstantNullBlock(indexDoc.getPositionCount());

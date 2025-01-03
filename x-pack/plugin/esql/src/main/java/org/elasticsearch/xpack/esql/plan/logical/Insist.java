@@ -11,10 +11,11 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
-import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
+import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.core.expression.NameId;
 import org.elasticsearch.xpack.esql.core.tree.NodeInfo;
 import org.elasticsearch.xpack.esql.core.tree.Source;
+import org.elasticsearch.xpack.esql.core.type.InsistedEsField;
 import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
 import org.elasticsearch.xpack.esql.io.stream.PlanStreamInput;
 import org.elasticsearch.xpack.esql.plan.InsistParameters;
@@ -45,21 +46,16 @@ public final class Insist extends UnaryPlan {
         return lazyOutput;
     }
 
-    // Although we remove Insist clauses later on, we need to make sure that the output of the Insist node is correct while it exists.
     private List<Attribute> computeOutput() {
         var result = new ArrayList<>(child().output());
         OptionalInt index = CollectionUtils.findIndex(child().output(), c -> c.name().equals(parameters.identifier()));
-        InsistedAttribute insistedAttribute = new InsistedAttribute(Source.EMPTY, parameters.identifier(), parameters.dataType());
-        if (index.isPresent()) {
-            result.set(index.getAsInt(), insistedAttribute);
-        } else {
-            result.add(insistedAttribute);
-        }
+        index.ifPresentOrElse(i -> {
+            var field = ((FieldAttribute) child().output().get(i)).field();
+            result.set(i, new FieldAttribute(source(), parameters.identifier(), InsistedEsField.fromMappedField(field)));
+        },
+            () -> result.add(new FieldAttribute(source(), parameters.identifier(), InsistedEsField.fromStandalone(parameters.identifier())))
+        );
         return result;
-    }
-
-    public boolean isRedundant() {
-        return child().output().stream().anyMatch(parameters::isTheSameAs);
     }
 
     public InsistParameters parameters() {

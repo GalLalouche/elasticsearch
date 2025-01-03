@@ -131,7 +131,7 @@ fromCommand
     ;
 
 insistCommand
-    : INSIST identifier CAST_OP dataType
+    : INSIST identifier
     ;
 
 indexPattern

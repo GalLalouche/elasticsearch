@@ -33,7 +33,6 @@ import org.elasticsearch.xpack.esql.core.expression.AttributeSet;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Expressions;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
-import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.Nullability;
@@ -47,10 +46,10 @@ import org.elasticsearch.xpack.esql.core.expression.predicate.operator.compariso
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.EsField;
+import org.elasticsearch.xpack.esql.core.type.InsistedEsField;
 import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
 import org.elasticsearch.xpack.esql.core.util.Holder;
 import org.elasticsearch.xpack.esql.core.util.StringUtils;
-import org.elasticsearch.xpack.esql.core.util.TestUtils;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.function.EsqlFunctionRegistry;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
@@ -135,7 +134,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptyList;
@@ -2577,36 +2575,26 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         );
     }
 
-    public void testPushdownInsist_fieldExists_updatesRelationOutputAtIndex() {
-        LogicalPlan plan = optimizedPlan("""
-            FROM test
-            | INSIST emp_no :: keyword
-            """);
+    public void testPushdownInsist_fieldExistsSingleIndex_updatesRelationOutputAtIndex() {
+        LogicalPlan plan = optimizedPlan("FROM test | INSIST emp_no");
 
+        var expectedIndex = CollectionUtils.findIndex(optimizedPlan("FROM test").output(), e -> e.name().equals("emp_no")).getAsInt();
         var limit = as(plan, Limit.class);
-        assertRelationHasInsistedField(as(limit.child(), EsRelation.class), "emp_no", DataType.KEYWORD);
-    }
-
-    public void testPushdownInsist_fieldDoesNotExist_updatesRelationOutputAtIndex() {
-        LogicalPlan plan = optimizedPlan("""
-            FROM test
-            | INSIST emp_no :: keyword
-            """);
-
-        var limit = as(plan, Limit.class);
-        assertRelationHasInsistedField(as(limit.child(), EsRelation.class), "emp_no", DataType.KEYWORD);
-    }
-
-    private void assertRelationHasInsistedField(EsRelation relation, String fieldName, DataType fieldType) {
-        var insistedAttribute = TestUtils.assertSingleton(CollectionUtils.filterType(relation.output(), InsistedAttribute.class));
-        assertThat(insistedAttribute, is(equalTo(new InsistedAttribute(EMPTY, fieldName, fieldType))));
-
-        Predicate<Attribute> isFirstName = e -> e.name().equals(fieldName);
+        EsRelation relation = as(limit.child(), EsRelation.class);
+        var attribute = (FieldAttribute) relation.output().get(expectedIndex);
         assertThat(
-            "Index of first_name field should not have changed",
-            CollectionUtils.findIndex(relation.output(), isFirstName),
-            is(equalTo(CollectionUtils.findIndex(optimizedPlan("FROM test").output(), isFirstName)))
+            attribute.field(),
+            is(equalTo(InsistedEsField.fromMappedField(new EsField("emp_no", DataType.INTEGER, Map.of(), true))))
         );
+    }
+
+    public void testPushdownInsist_fieldDoesNotExist_updatesRelationWithNewField() {
+        LogicalPlan plan = optimizedPlan("FROM test | INSIST foo");
+
+        var limit = as(plan, Limit.class);
+        var relation = as(limit.child(), EsRelation.class);
+        assertThat(relation.output(), hasSize(optimizedPlan("FROM test").output().size() + 1));
+        assertThat(((FieldAttribute) relation.output().getLast()).field(), is(equalTo(InsistedEsField.fromStandalone("foo"))));
     }
 
     public void testSimplifyLikeNoWildcard() {

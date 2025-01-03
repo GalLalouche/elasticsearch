@@ -306,11 +306,7 @@ public class LogicalPlanBuilder extends ExpressionBuilder {
         var source = source(ctx);
         return input -> {
             if (input instanceof LeafPlan) {
-                return new Insist(
-                    source,
-                    new InsistParameters(visitIdentifier(ctx.identifier()), typedParsing(this, ctx.dataType(), DataType.class)),
-                    input
-                );
+                return new Insist(source, new InsistParameters(visitIdentifier(ctx.identifier())), input);
             }
             throw new ParsingException(source, "INSIST command can only be applied on top of a source");
         };
