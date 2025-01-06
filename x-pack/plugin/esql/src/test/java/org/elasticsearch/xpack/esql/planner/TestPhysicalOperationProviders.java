@@ -43,6 +43,7 @@ import org.elasticsearch.xpack.esql.TestBlockFactory;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.core.type.InsistedEsField;
 import org.elasticsearch.xpack.esql.core.type.MultiTypeEsField;
 import org.elasticsearch.xpack.esql.core.util.SpatialCoordinateTypes;
 import org.elasticsearch.xpack.esql.expression.function.UnsupportedAttribute;
@@ -269,7 +270,7 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         }
         BiFunction<DocBlock, TestBlockCopier, Block> blockExtraction = switch (attribute) {
             case FieldAttribute fa when fa.field() instanceof MultiTypeEsField m -> (doc, copier) -> getBlockForMultiType(doc, m, copier);
-            // case InsistedAttribute ia -> (indexDoc, blockCopier) -> getBlockForInsistedType(indexDoc, ia, blockCopier);
+            case FieldAttribute fa when fa.field() instanceof InsistedEsField i -> (doc, copier) -> getBlockForInsistedType(doc, i, copier);
             default -> (indexDoc, blockCopier) -> extractBlockForSingleDoc(indexDoc, attribute.name(), blockCopier).getOrThrow();
         };
         return extractBlockForColumn(docBlock, attribute.dataType(), extractPreference, blockExtraction);
@@ -286,20 +287,11 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         return result.mapOrNulls(indexDoc, TypeConverter.fromConvertFunction(conversion)::convert);
     }
 
-    // private Block getBlockForInsistedType(DocBlock indexDoc, InsistedAttribute attr, TestBlockCopier blockCopier) {
-    // var indexId = indexDoc.asVector().shards().getInt(0);
-    // var indexPage = indexPages.get(indexId);
-    // var blockDataType = indexPage.columns.stream()
-    // .filter(c -> c.name().equals(attr.name()))
-    // .findFirst()
-    // .map(PageColumn::dataType)
-    // .orElseThrow();
-    //
-    // return extractBlockForSingleDoc(indexDoc, attr.name(), blockCopier).mapOrNulls(
-    // indexDoc,
-    // block -> castInsisted(attr, block, blockDataType)
-    // );
-    // }
+    private Block getBlockForInsistedType(DocBlock indexDoc, InsistedEsField insistedEsField, TestBlockCopier blockCopier) {
+        BlockResult result = extractBlockForSingleDoc(indexDoc, insistedEsField.getName(), blockCopier);
+        // FIXME(gal, do-not-merge!) mapOrNulls identity is silly
+        return result.mapOrNulls(indexDoc, Function.identity());
+    }
 
     // private static Block castInsisted(InsistedAttribute insistedAttribute, Block block, DataType blockDataType) {
     // AbstractConvertFunction conversion = EsqlDataTypeConverter.converterFunctionFactory(insistedAttribute.dataType())
@@ -462,8 +454,9 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
                 TestBlockCopier blockCopier = mapToDocValues
                     ? TestSpatialPointStatsBlockCopier.create(indexDoc.asVector().docs(), dataType)
                     : new TestBlockCopier(indexDoc.asVector().docs());
-                Block blockForIndex = extractBlock.apply(indexDoc, blockCopier);
-                blockBuilder.copyFrom(blockForIndex, 0, blockForIndex.getPositionCount());
+                try (Block blockForIndex = extractBlock.apply(indexDoc, blockCopier)) {
+                    blockBuilder.copyFrom(blockForIndex, 0, blockForIndex.getPositionCount());
+                }
             });
             var result = blockBuilder.build();
             assert result.getPositionCount() == docBlock.getPositionCount()

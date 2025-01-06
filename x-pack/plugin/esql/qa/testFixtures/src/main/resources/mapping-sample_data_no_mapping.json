@@ -6,6 +6,9 @@
         },
         "client_ip": {
             "type": "ip"
+        },
+        "message": {
+            "type": "keyword"
         }
     }
 }

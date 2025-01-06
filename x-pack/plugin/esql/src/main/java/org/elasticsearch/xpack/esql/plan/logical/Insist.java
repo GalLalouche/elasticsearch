@@ -51,7 +51,7 @@ public final class Insist extends UnaryPlan {
         OptionalInt index = CollectionUtils.findIndex(child().output(), c -> c.name().equals(parameters.identifier()));
         index.ifPresentOrElse(i -> {
             var field = ((FieldAttribute) child().output().get(i)).field();
-            result.set(i, new FieldAttribute(source(), parameters.identifier(), InsistedEsField.fromMappedField(field)));
+            result.set(i, new FieldAttribute(source(), parameters.identifier(), InsistedEsField.fromField(field)));
         },
             () -> result.add(new FieldAttribute(source(), parameters.identifier(), InsistedEsField.fromStandalone(parameters.identifier())))
         );

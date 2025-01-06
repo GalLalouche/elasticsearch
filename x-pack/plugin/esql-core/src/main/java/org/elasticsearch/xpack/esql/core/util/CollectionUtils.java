@@ -86,8 +86,12 @@ public abstract class CollectionUtils {
         return list;
     }
 
-    public static <T, S extends T> List<S> filterType(Collection<T> list, Class<S> clazz) {
-        return list.stream().filter(clazz::isInstance).map(clazz::cast).toList();
+    public static <T, S extends T> List<S> collectType(Collection<T> list, Class<S> clazz) {
+        return list.stream().<S>mapMulti((e, c) -> {
+            if (clazz.isInstance(e)) {
+                c.accept(clazz.cast(e));
+            }
+        }).toList();
     }
 
     public static <T> OptionalInt findIndex(List<T> list, Predicate<T> predicate) {

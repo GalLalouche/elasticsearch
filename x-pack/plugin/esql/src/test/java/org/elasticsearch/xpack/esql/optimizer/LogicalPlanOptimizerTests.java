@@ -47,9 +47,11 @@ import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.EsField;
 import org.elasticsearch.xpack.esql.core.type.InsistedEsField;
+import org.elasticsearch.xpack.esql.core.type.InvalidMappedField;
 import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
 import org.elasticsearch.xpack.esql.core.util.Holder;
 import org.elasticsearch.xpack.esql.core.util.StringUtils;
+import org.elasticsearch.xpack.esql.core.util.TestUtils;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.function.EsqlFunctionRegistry;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
@@ -132,6 +134,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -159,6 +162,7 @@ import static org.elasticsearch.xpack.esql.analysis.AnalyzerTestUtils.analyze;
 import static org.elasticsearch.xpack.esql.analysis.AnalyzerTestUtils.defaultLookupResolution;
 import static org.elasticsearch.xpack.esql.core.expression.Literal.NULL;
 import static org.elasticsearch.xpack.esql.core.tree.Source.EMPTY;
+import static org.elasticsearch.xpack.esql.core.type.DataType.DATETIME;
 import static org.elasticsearch.xpack.esql.core.type.DataType.DOUBLE;
 import static org.elasticsearch.xpack.esql.core.type.DataType.GEO_POINT;
 import static org.elasticsearch.xpack.esql.core.type.DataType.INTEGER;
@@ -187,22 +191,23 @@ import static org.hamcrest.Matchers.startsWith;
 
 //@TestLogging(value = "org.elasticsearch.xpack.esql:TRACE", reason = "debug")
 public class LogicalPlanOptimizerTests extends ESTestCase {
-
     private static EsqlParser parser;
-    private static Analyzer analyzer;
     private static LogicalPlanOptimizer logicalOptimizer;
+
     private static Map<String, EsField> mapping;
+    private static Analyzer analyzer;
     private static Map<String, EsField> mappingAirports;
-    private static Map<String, EsField> mappingTypes;
     private static Analyzer analyzerAirports;
+    private static Map<String, EsField> mappingTypes;
     private static Analyzer analyzerTypes;
     private static Map<String, EsField> mappingExtra;
     private static Analyzer analyzerExtra;
-    private static EnrichResolution enrichResolution;
-    private static final LiteralsOnTheRight LITERALS_ON_THE_RIGHT = new LiteralsOnTheRight();
-
     private static Map<String, EsField> metricMapping;
     private static Analyzer metricsAnalyzer;
+    private static Analyzer multiIndexAnalyzer;
+
+    private static EnrichResolution enrichResolution;
+    private static final LiteralsOnTheRight LITERALS_ON_THE_RIGHT = new LiteralsOnTheRight();
 
     private static class SubstitutionOnlyOptimizer extends LogicalPlanOptimizer {
         static SubstitutionOnlyOptimizer INSTANCE = new SubstitutionOnlyOptimizer(new LogicalOptimizerContext(EsqlTestUtils.TEST_CFG));
@@ -270,6 +275,23 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         var metricsIndex = IndexResolution.valid(new EsIndex("k8s", metricMapping, Map.of("k8s", IndexMode.TIME_SERIES)));
         metricsAnalyzer = new Analyzer(
             new AnalyzerContext(EsqlTestUtils.TEST_CFG, new EsqlFunctionRegistry(), metricsIndex, enrichResolution),
+            TEST_VERIFIER
+        );
+
+        var multiIndexMapping = loadMapping("mapping-basic.json");
+        multiIndexMapping.put(
+            "multi_type_with_keyword",
+            new InvalidMappedField("multi_type_with_keyword", Map.of("long", Set.of("test1"), "keyword", Set.of("test2")))
+        );
+        multiIndexMapping.put(
+            "multi_type_without_keyword",
+            new InvalidMappedField("multi_type_without_keyword", Map.of("long", Set.of("test1"), "date", Set.of("test2")))
+        );
+        var multiIndex = IndexResolution.valid(
+            new EsIndex("multi_index", multiIndexMapping, Map.of("test1", IndexMode.STANDARD, "test2", IndexMode.STANDARD))
+        );
+        multiIndexAnalyzer = new Analyzer(
+            new AnalyzerContext(EsqlTestUtils.TEST_CFG, new EsqlFunctionRegistry(), multiIndex, enrichResolution),
             TEST_VERIFIER
         );
     }
@@ -2575,17 +2597,15 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         );
     }
 
+    // FIXME(gal, do-not-merge!) all of this should move to AnalyzerTests
     public void testPushdownInsist_fieldExistsSingleIndex_updatesRelationOutputAtIndex() {
-        LogicalPlan plan = optimizedPlan("FROM test | INSIST emp_no");
+        LogicalPlan plan = optimizedPlan("FROM test | INSIST first_name");
 
-        var expectedIndex = CollectionUtils.findIndex(optimizedPlan("FROM test").output(), e -> e.name().equals("emp_no")).getAsInt();
+        var expectedIndex = CollectionUtils.findIndex(optimizedPlan("FROM test").output(), e -> e.name().equals("first_name")).getAsInt();
         var limit = as(plan, Limit.class);
         EsRelation relation = as(limit.child(), EsRelation.class);
         var attribute = (FieldAttribute) relation.output().get(expectedIndex);
-        assertThat(
-            attribute.field(),
-            is(equalTo(InsistedEsField.fromMappedField(new EsField("emp_no", DataType.INTEGER, Map.of(), true))))
-        );
+        assertThat(attribute.field(), is(equalTo(InsistedEsField.fromField(new EsField("first_name", KEYWORD, Map.of(), true)))));
     }
 
     public void testPushdownInsist_fieldDoesNotExist_updatesRelationWithNewField() {
@@ -2595,6 +2615,70 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         var relation = as(limit.child(), EsRelation.class);
         assertThat(relation.output(), hasSize(optimizedPlan("FROM test").output().size() + 1));
         assertThat(((FieldAttribute) relation.output().getLast()).field(), is(equalTo(InsistedEsField.fromStandalone("foo"))));
+    }
+
+    public void testPushdownInsist_multiIndexFieldExistsWithSingleTypeButIsNotKeywordAndMissingCast_failsWithInsistMessage() {
+        var msg = assertThrows(VerificationException.class, () -> planMultiIndex("FROM multi_index | INSIST emp_no | SORT emp_no"));
+        String substring = "Cannot use field [emp_no] due to ambiguities caused by INSIST. "
+            + "INSISTed fields are treated as KEYWORD in unmapped indices, but field is mapped to type [INTEGER]";
+        assertThat(msg.getMessage(), containsString(substring));
+    }
+
+    public void testPushdownInsist_multiIndexFieldExistsButIsNotKeywordWithCast_createsTheCorrectInsistedField() {
+        var plan = planMultiIndex("FROM multi_index | INSIST emp_no | EVAL emp_no = emp_no :: LONG | SORT emp_no");
+        var project = as(plan, Project.class);
+        var topN = as(project.child(), TopN.class);
+        var relation = as(topN.child(), EsRelation.class);
+        var insistedField = TestUtils.assertSingleton(relation.output().stream().<InsistedEsField>mapMulti((attr, c) -> {
+            if (attr instanceof FieldAttribute fa && fa.field() instanceof InsistedEsField mf) {
+                c.accept(mf);
+            }
+        }).toList());
+        assertThat(insistedField.getDataType(), is(equalTo(LONG)));
+        var conversion = ((InsistedEsField.SimpleConversion) insistedField.getState()).conversionFromKeyword();
+        assertThat(conversion.dataType(), is(LONG));
+        assertThat(TestUtils.assertSingleton(conversion.children()).dataType(), is(KEYWORD));
+    }
+
+    public void testPushdownInsist_multiIndexFieldExistsWithMultiTypes_createsTheCorrectInsistedField() {
+        var plan = planMultiIndex("""
+            FROM multi_index |\
+            INSIST multi_type_without_keyword |\
+            EVAL multi_type_without_keyword = multi_type_without_keyword :: DATETIME |\
+            SORT multi_type_without_keyword""");
+        var project = as(plan, Project.class);
+        var topN = as(project.child(), TopN.class);
+        var relation = as(topN.child(), EsRelation.class);
+        var insistedField = TestUtils.assertSingleton(relation.output().stream().<InsistedEsField>mapMulti((attr, c) -> {
+            if (attr instanceof FieldAttribute fa && fa.field() instanceof InsistedEsField mf) {
+                c.accept(mf);
+            }
+        }).toList());
+        assertThat(insistedField.getDataType(), is(equalTo(DATETIME)));
+        var multiTypeConversion = ((InsistedEsField.MultiTypeConversion) insistedField.getState());
+        var conversionFromKeyword = multiTypeConversion.conversionFromKeyword();
+        assertThat(conversionFromKeyword.dataType(), is(DATETIME));
+        assertThat(TestUtils.assertSingleton(conversionFromKeyword.children()).dataType(), is(KEYWORD));
+    }
+
+    public void testPushdownInsist_multiIndexFieldExistsButIsInvalidMappedWithKeyword_failsWithRegularWithRegularMessageButAddsInsist() {
+        var msg = assertThrows(
+            VerificationException.class,
+            () -> planMultiIndex("FROM multi_index | INSIST multi_type_with_keyword | SORT multi_type_with_keyword")
+        );
+        String substring = "Cannot use field [multi_type_with_keyword] due to ambiguities being mapped as [2] incompatible types: "
+            + "[keyword] in [INSISTed field, test2], [long] in [test1]";
+        assertThat(msg.getMessage(), containsString(substring));
+    }
+
+    public void testPushdownInsist_multiIndexFieldExistsButIsInvalidMappedWithoutKeyword_failsWithRegularWithRegularMessageButAddsInsist() {
+        var msg = assertThrows(
+            VerificationException.class,
+            () -> planMultiIndex("FROM multi_index | INSIST multi_type_without_keyword | SORT multi_type_without_keyword")
+        );
+        String substring = "Cannot use field [multi_type_without_keyword] due to ambiguities being mapped as [3] incompatible types: "
+            + "[date] in [test2], [keyword] in [INSISTed field], [long] in [test1]";
+        assertThat(msg.getMessage(), containsString(substring));
     }
 
     public void testSimplifyLikeNoWildcard() {
@@ -5572,6 +5656,10 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
 
     private LogicalPlan planTypes(String query) {
         return logicalOptimizer.optimize(analyzerTypes.analyze(parser.createStatement(query)));
+    }
+
+    private LogicalPlan planMultiIndex(String query) {
+        return logicalOptimizer.optimize(multiIndexAnalyzer.analyze(parser.createStatement(query)));
     }
 
     private EsqlBinaryComparison extractPlannedBinaryComparison(String expression) {

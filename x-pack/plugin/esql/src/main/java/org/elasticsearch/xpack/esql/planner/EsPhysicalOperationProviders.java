@@ -31,7 +31,6 @@ import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.analysis.AnalysisRegistry;
 import org.elasticsearch.index.mapper.BlockLoader;
 import org.elasticsearch.index.mapper.FieldNamesFieldMapper;
-import org.elasticsearch.index.mapper.KeywordFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.NestedLookup;
 import org.elasticsearch.index.mapper.SourceFieldMapper;
@@ -48,10 +47,7 @@ import org.elasticsearch.search.sort.SortBuilder;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
-import org.elasticsearch.xpack.esql.core.expression.InsistedAttribute;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
-import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
-import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.MultiTypeEsField;
 import org.elasticsearch.xpack.esql.expression.function.scalar.convert.AbstractConvertFunction;
@@ -62,13 +58,10 @@ import org.elasticsearch.xpack.esql.plan.physical.FieldExtractExec;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.DriverParallelism;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.LocalExecutionPlannerContext;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner.PhysicalOperation;
-import org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -134,9 +127,9 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         DefaultShardContext shardContext = (DefaultShardContext) shardContexts.get(shardId);
         Optional<DataType> originalType = Optional.ofNullable(shardContext.fieldType(getFieldName(attr)))
             .map(e -> DataType.fromEs(e.typeName()));
-        if (attr instanceof InsistedAttribute ia) {
-            shardContext = new DefaultShardContextForInsistedAttribute(shardContext, ia);
-        }
+        // if (attr instanceof InsistedAttribute ia) {
+        // shardContext = new DefaultShardContextForInsistedAttribute(shardContext, ia);
+        // }
 
         boolean isUnsupported = attr.dataType() == DataType.UNSUPPORTED;
         BlockLoader blockLoader = shardContext.blockLoader(getFieldName(attr), isUnsupported, fieldExtractPreference);
@@ -149,39 +142,39 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
                 : new TypeConvertingBlockLoader(blockLoader, (AbstractConvertFunction) conversion);
         }
         // FIXME(gal, do-not-merge!) bad code
-        if (attr instanceof InsistedAttribute ia) {
-            return new TypeConvertingBlockLoader(
-                blockLoader,
-                EsqlDataTypeConverter.converterFunctionFactory(ia.dataType())
-                    .apply(
-                        Source.EMPTY,
-                        new ReferenceAttribute(
-                            Source.EMPTY,
-                            ia.name(),
-                            originalType.map(e -> DataType.valueOf(e.typeName().toUpperCase(Locale.ROOT))).orElse(DataType.KEYWORD)
-                        )
-                    )
-            );
-        }
+        // if (attr instanceof InsistedAttribute ia) {
+        // return new TypeConvertingBlockLoader(
+        // blockLoader,
+        // EsqlDataTypeConverter.converterFunctionFactory(ia.dataType())
+        // .apply(
+        // Source.EMPTY,
+        // new ReferenceAttribute(
+        // Source.EMPTY,
+        // ia.name(),
+        // originalType.map(e -> DataType.valueOf(e.typeName().toUpperCase(Locale.ROOT))).orElse(DataType.KEYWORD)
+        // )
+        // )
+        // );
+        // }
         return blockLoader;
     }
-
-    private static class DefaultShardContextForInsistedAttribute extends DefaultShardContext {
-        private final InsistedAttribute insistedAttribute;
-
-        DefaultShardContextForInsistedAttribute(DefaultShardContext ctx, InsistedAttribute insistedAttribute) {
-            super(ctx.index, ctx.ctx, ctx.aliasFilter);
-            this.insistedAttribute = insistedAttribute;
-        }
-
-        @Override
-        protected MappedFieldType fieldType(String name) {
-            var superResult = super.fieldType(name);
-            return superResult == null && name.equals(insistedAttribute.name())
-                ? new KeywordFieldMapper.KeywordFieldType(name, false /* isIndexed */, false /* hasDocValues */, Map.of() /* meta */)
-                : superResult;
-        }
-    }
+    //
+    // private static class DefaultShardContextForInsistedAttribute extends DefaultShardContext {
+    // private final InsistedAttribute insistedAttribute;
+    //
+    // DefaultShardContextForInsistedAttribute(DefaultShardContext ctx, InsistedAttribute insistedAttribute) {
+    // super(ctx.index, ctx.ctx, ctx.aliasFilter);
+    // this.insistedAttribute = insistedAttribute;
+    // }
+    //
+    // @Override
+    // protected MappedFieldType fieldType(String name) {
+    // var superResult = super.fieldType(name);
+    // return superResult == null && name.equals(insistedAttribute.name())
+    // ? new KeywordFieldMapper.KeywordFieldType(name, false /* isIndexed */, false /* hasDocValues */, Map.of() /* meta */)
+    // : superResult;
+    // }
+    // }
 
     private MultiTypeEsField findUnionTypes(Attribute attr) {
         if (attr instanceof FieldAttribute fa && fa.field() instanceof MultiTypeEsField multiTypeEsField) {
