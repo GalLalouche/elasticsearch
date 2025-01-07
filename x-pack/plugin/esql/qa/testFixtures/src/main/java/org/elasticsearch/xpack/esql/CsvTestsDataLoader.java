@@ -76,9 +76,7 @@ public class CsvTestsDataLoader {
     private static final TestDataset MV_SAMPLE_DATA = new TestDataset("mv_sample_data");
     private static final TestDataset SAMPLE_DATA_STR = SAMPLE_DATA.withIndex("sample_data_str")
         .withTypeMapping(Map.of("client_ip", "keyword"));
-    private static final TestDataset SAMPLE_DATA_NO_MAPPING = new TestDataset("sample_data_no_mapping").withTypeMapping(
-        Map.of("event_duration", "keyword")
-    );
+    private static final TestDataset SAMPLE_DATA_NO_MAPPING = new TestDataset("sample_data_no_mapping");
     private static final TestDataset SAMPLE_DATA_TS_LONG = SAMPLE_DATA.withIndex("sample_data_ts_long")
         .withData("sample_data_ts_long.csv")
         .withTypeMapping(Map.of("@timestamp", "long"));

@@ -4,14 +4,14 @@ FROM sample_data_no_mapping
 | SORT @timestamp DESC
 ;
 
-@timestamp:datetime      | client_ip:ip | message:keyword
-2023-10-23T13:55:01.543Z | 173.21.3.15  | Connected to 10.1.0.1
-2023-10-23T13:53:55.832Z | 173.21.3.15  | Connection error
-2023-10-23T13:52:55.015Z | 173.21.3.15  | Connection error
-2023-10-23T13:51:54.732Z | 173.21.3.15  | Connection error
-2023-10-23T13:33:34.937Z | 173.21.0.5   | 42
-2023-10-23T12:27:28.948Z | 173.21.2.113 | Connected to 10.1.0.2
-2023-10-23T12:15:03.360Z | 173.21.2.162 | Connected to 10.1.0.3
+@timestamp:datetime      | client_ip:ip | event_duration:long | message:keyword
+2023-10-23T13:55:01.543Z | 173.21.3.15  | 1756467                | Connected to 10.1.0.1
+2023-10-23T13:53:55.832Z | 173.21.3.15  | 5033755                | Connection error
+2023-10-23T13:52:55.015Z | 173.21.3.15  | 8268153                | Connection error
+2023-10-23T13:51:54.732Z | 173.21.3.15  | 725448                 | Connection error
+2023-10-23T13:33:34.937Z | 173.21.0.5   | 1232382                | 42
+2023-10-23T12:27:28.948Z | 173.21.2.113 | 2764889                | Connected to 10.1.0.2
+2023-10-23T12:15:03.360Z | 173.21.2.162 | 3450233                | Connected to 10.1.0.3
 ;
 
 fieldIsMappedToNonKeywordButNoCastSingleIndex
@@ -83,11 +83,43 @@ FROM sample_data_no_mapping
 2023-10-23T12:15:03.360Z  |  null
 ;
 
+fieldIsUnmappedSingleIndex
+FROM sample_data_no_mapping
+| INSIST unmapped_message
+| KEEP @timestamp, message, unmapped_message
+| SORT @timestamp DESC
+;
+
+@timestamp:date          | message:keyword       | unmapped_message:keyword
+2023-10-23T13:55:01.543Z | Connected to 10.1.0.1 | Disconnected from 10.1.0.1
+2023-10-23T13:53:55.832Z | Connection error      | Disconnection error
+2023-10-23T13:52:55.015Z | Connection error      | Disconnection error
+2023-10-23T13:51:54.732Z | Connection error      | Disconnection error
+2023-10-23T13:33:34.937Z | 42                    | 43
+2023-10-23T12:27:28.948Z | Connected to 10.1.0.2 | Disconnected from 10.1.0.2
+2023-10-23T12:15:03.360Z | Connected to 10.1.0.3 | Disconnected from 10.1.0.3
+;
+
+fieldIsUnmappedAndCastSingleIndex
+FROM sample_data_no_mapping
+| INSIST unmapped_event_duration
+| EVAL unmapped_event_duration = unmapped_event_duration :: LONG
+| KEEP @timestamp, event_duration, unmapped_event_duration
+| SORT @timestamp DESC
+;
+
+@timestamp:date          | event_duration:long | unmapped_event_duration:long
+2023-10-23T13:55:01.543Z | 1756467             | 1756468
+2023-10-23T13:53:55.832Z | 5033755             | 5033756
+2023-10-23T13:52:55.015Z | 8268153             | 8268154
+2023-10-23T13:51:54.732Z | 725448              | 725449
+2023-10-23T13:33:34.937Z | 1232382             | 1232383
+2023-10-23T12:27:28.948Z | 2764889             | 2764890
+2023-10-23T12:15:03.360Z | 3450233             | 3450234
+;
+
 // Tests we need:
 // Single index:
-// Field is not mapped and not cast
-// Field is not mapped and cast
-// Field does not exist
 // Field is mapped to non-keyword
 // Field is mapped to keyword
 // Field is mapped to non-keyword and cast
