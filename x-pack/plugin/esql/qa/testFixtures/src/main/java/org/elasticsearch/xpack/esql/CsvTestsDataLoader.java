@@ -76,7 +76,9 @@ public class CsvTestsDataLoader {
     private static final TestDataset MV_SAMPLE_DATA = new TestDataset("mv_sample_data");
     private static final TestDataset SAMPLE_DATA_STR = SAMPLE_DATA.withIndex("sample_data_str")
         .withTypeMapping(Map.of("client_ip", "keyword"));
-    private static final TestDataset SAMPLE_DATA_NO_MAPPING = new TestDataset("sample_data_no_mapping");
+    private static final TestDataset SAMPLE_DATA_PARTIAL_MAPPING = new TestDataset("sample_data_partial_mapping");
+    private static final TestDataset SAMPLE_DATA_NO_MAPPING = SAMPLE_DATA_PARTIAL_MAPPING.withIndex("sample_data_no_mapping")
+        .withTypeMapping(Map.of());
     private static final TestDataset SAMPLE_DATA_TS_LONG = SAMPLE_DATA.withIndex("sample_data_ts_long")
         .withData("sample_data_ts_long.csv")
         .withTypeMapping(Map.of("@timestamp", "long"));
@@ -129,6 +131,7 @@ public class CsvTestsDataLoader {
         Map.entry(LANGUAGES_NESTED_FIELDS.indexName, LANGUAGES_NESTED_FIELDS),
         Map.entry(UL_LOGS.indexName, UL_LOGS),
         Map.entry(SAMPLE_DATA.indexName, SAMPLE_DATA),
+        Map.entry(SAMPLE_DATA_PARTIAL_MAPPING.indexName, SAMPLE_DATA_PARTIAL_MAPPING),
         Map.entry(SAMPLE_DATA_NO_MAPPING.indexName, SAMPLE_DATA_NO_MAPPING),
         Map.entry(MV_SAMPLE_DATA.indexName, MV_SAMPLE_DATA),
         Map.entry(ALERTS.indexName, ALERTS),
