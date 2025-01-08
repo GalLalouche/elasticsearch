@@ -9,13 +9,13 @@ FROM sample_data_partial_mapping
 ;
 
 @timestamp:datetime      | client_ip:ip | event_duration:long | message:keyword
-2024-10-23T13:55:01.543Z | 173.21.3.15  | 1756467             | Connected to 10.1.0.1
-2024-10-23T13:53:55.832Z | 173.21.3.15  | 5033755             | Connection error
-2024-10-23T13:52:55.015Z | 173.21.3.15  | 8268153             | Connection error
-2024-10-23T13:51:54.732Z | 173.21.3.15  | 725448              | Connection error
-2024-10-23T13:33:34.937Z | 173.21.0.5   | 1232382             | 42
-2024-10-23T12:27:28.948Z | 173.21.2.113 | 2764889             | Connected to 10.1.0.2
-2024-10-23T12:15:03.360Z | 173.21.2.162 | 3450233             | Connected to 10.1.0.3
+2024-10-23T13:55:01.543Z | 173.21.3.15  | 1756466             | Connected to 10.1.0.1!
+2024-10-23T13:53:55.832Z | 173.21.3.15  | 5033754             | Connection error?
+2024-10-23T13:52:55.015Z | 173.21.3.15  | 8268152             | Connection error?
+2024-10-23T13:51:54.732Z | 173.21.3.15  | 725447              | Connection error?
+2024-10-23T13:33:34.937Z | 173.21.0.5   | 1232381             | 42
+2024-10-23T12:27:28.948Z | 173.21.2.113 | 2764888             | Connected to 10.1.0.2!
+2024-10-23T12:15:03.360Z | 173.21.2.162 | 3450232             | Connected to 10.1.0.3!
 ;
 
 fieldIsMappedToNonKeywordButNoCastSingleIndex
@@ -79,13 +79,13 @@ FROM sample_data_partial_mapping
 ;
 
 @timestamp:datetime      |  message:keyword
-2024-10-23T13:55:01.543Z |  Connected to 10.1.0.1
-2024-10-23T13:53:55.832Z |  Connection error
-2024-10-23T13:52:55.015Z |  Connection error
-2024-10-23T13:51:54.732Z |  Connection error
+2024-10-23T13:55:01.543Z |  Connected to 10.1.0.1!
+2024-10-23T13:53:55.832Z |  Connection error?
+2024-10-23T13:52:55.015Z |  Connection error?
+2024-10-23T13:51:54.732Z |  Connection error?
 2024-10-23T13:33:34.937Z |  42
-2024-10-23T12:27:28.948Z |  Connected to 10.1.0.2
-2024-10-23T12:15:03.360Z |  Connected to 10.1.0.3
+2024-10-23T12:27:28.948Z |  Connected to 10.1.0.2!
+2024-10-23T12:15:03.360Z |  Connected to 10.1.0.3!
 ;
 
 fieldDoesNotExistSingleIndex
@@ -112,14 +112,14 @@ FROM sample_data_partial_mapping
 | SORT @timestamp DESC
 ;
 
-@timestamp:date          | message:keyword       | unmapped_message:keyword
-2024-10-23T13:55:01.543Z | Connected to 10.1.0.1 | Disconnected from 10.1.0.1
-2024-10-23T13:53:55.832Z | Connection error      | Disconnection error
-2024-10-23T13:52:55.015Z | Connection error      | Disconnection error
-2024-10-23T13:51:54.732Z | Connection error      | Disconnection error
-2024-10-23T13:33:34.937Z | 42                    | 43
-2024-10-23T12:27:28.948Z | Connected to 10.1.0.2 | Disconnected from 10.1.0.2
-2024-10-23T12:15:03.360Z | Connected to 10.1.0.3 | Disconnected from 10.1.0.3
+@timestamp:date          | message:keyword        | unmapped_message:keyword
+2024-10-23T13:55:01.543Z | Connected to 10.1.0.1! | Disconnected from 10.1.0.1
+2024-10-23T13:53:55.832Z | Connection error?      | Disconnection error
+2024-10-23T13:52:55.015Z | Connection error?      | Disconnection error
+2024-10-23T13:51:54.732Z | Connection error?      | Disconnection error
+2024-10-23T13:33:34.937Z | 42                     | 43
+2024-10-23T12:27:28.948Z | Connected to 10.1.0.2! | Disconnected from 10.1.0.2
+2024-10-23T12:15:03.360Z | Connected to 10.1.0.3! | Disconnected from 10.1.0.3
 ;
 
 fieldIsUnmappedAndCastSingleIndex
@@ -131,13 +131,13 @@ FROM sample_data_partial_mapping
 ;
 
 @timestamp:date          | event_duration:long | unmapped_event_duration:long
-2024-10-23T13:55:01.543Z | 1756467             | 1756468
-2024-10-23T13:53:55.832Z | 5033755             | 5033756
-2024-10-23T13:52:55.015Z | 8268153             | 8268154
-2024-10-23T13:51:54.732Z | 725448              | 725449
-2024-10-23T13:33:34.937Z | 1232382             | 1232383
-2024-10-23T12:27:28.948Z | 2764889             | 2764890
-2024-10-23T12:15:03.360Z | 3450233             | 3450234
+2024-10-23T13:55:01.543Z | 1756466             | 1756468
+2024-10-23T13:53:55.832Z | 5033754             | 5033756
+2024-10-23T13:52:55.015Z | 8268152             | 8268154
+2024-10-23T13:51:54.732Z | 725447              | 725449
+2024-10-23T13:33:34.937Z | 1232381             | 1232383
+2024-10-23T12:27:28.948Z | 2764888             | 2764890
+2024-10-23T12:15:03.360Z | 3450232             | 3450234
 ;
 
 #####################
@@ -175,21 +175,21 @@ FROM sample_data_partial_mapping, sample_data
 | SORT @timestamp DESC
 ;
 
-@timestamp:date          | message:keyword       | unmapped_message:keyword
-2024-10-23T13:55:01.543Z | Connected to 10.1.0.1 | Disconnected from 10.1.0.1
-2024-10-23T13:53:55.832Z | Connection error      | Disconnection error
-2024-10-23T13:52:55.015Z | Connection error      | Disconnection error
-2024-10-23T13:51:54.732Z | Connection error      | Disconnection error
-2024-10-23T13:33:34.937Z | 42                    | 43
-2024-10-23T12:27:28.948Z | Connected to 10.1.0.2 | Disconnected from 10.1.0.2
-2024-10-23T12:15:03.360Z | Connected to 10.1.0.3 | Disconnected from 10.1.0.3
-2023-10-23T13:55:01.543Z | Connected to 10.1.0.1 | null
-2023-10-23T13:53:55.832Z | Connection error      | null
-2023-10-23T13:52:55.015Z | Connection error      | null
-2023-10-23T13:51:54.732Z | Connection error      | null
-2023-10-23T13:33:34.937Z | Disconnected          | null
-2023-10-23T12:27:28.948Z | Connected to 10.1.0.2 | null
-2023-10-23T12:15:03.360Z | Connected to 10.1.0.3 | null
+@timestamp:date          | message:keyword        | unmapped_message:keyword
+2024-10-23T13:55:01.543Z | Connected to 10.1.0.1! | Disconnected from 10.1.0.1
+2024-10-23T13:53:55.832Z | Connection error?      | Disconnection error
+2024-10-23T13:52:55.015Z | Connection error?      | Disconnection error
+2024-10-23T13:51:54.732Z | Connection error?      | Disconnection error
+2024-10-23T13:33:34.937Z | 42                     | 43
+2024-10-23T12:27:28.948Z | Connected to 10.1.0.2! | Disconnected from 10.1.0.2
+2024-10-23T12:15:03.360Z | Connected to 10.1.0.3! | Disconnected from 10.1.0.3
+2023-10-23T13:55:01.543Z | Connected to 10.1.0.1  | null
+2023-10-23T13:53:55.832Z | Connection error       | null
+2023-10-23T13:52:55.015Z | Connection error       | null
+2023-10-23T13:51:54.732Z | Connection error       | null
+2023-10-23T13:33:34.937Z | Disconnected           | null
+2023-10-23T12:27:28.948Z | Connected to 10.1.0.2  | null
+2023-10-23T12:15:03.360Z | Connected to 10.1.0.3  | null
 ;
 
 fieldIsUnmappedAndCastMultiIndex
@@ -201,13 +201,13 @@ FROM sample_data_partial_mapping, sample_data
 ;
 
 @timestamp:datetime      | event_duration:long | unmapped_event_duration:long
-2024-10-23T13:55:01.543Z | 1756467             | 1756468
-2024-10-23T13:53:55.832Z | 5033755             | 5033756
-2024-10-23T13:52:55.015Z | 8268153             | 8268154
-2024-10-23T13:51:54.732Z | 725448              | 725449
-2024-10-23T13:33:34.937Z | 1232382             | 1232383
-2024-10-23T12:27:28.948Z | 2764889             | 2764890
-2024-10-23T12:15:03.360Z | 3450233             | 3450234
+2024-10-23T13:55:01.543Z | 1756466             | 1756468
+2024-10-23T13:53:55.832Z | 5033754             | 5033756
+2024-10-23T13:52:55.015Z | 8268152             | 8268154
+2024-10-23T13:51:54.732Z | 725447              | 725449
+2024-10-23T13:33:34.937Z | 1232381             | 1232383
+2024-10-23T12:27:28.948Z | 2764888             | 2764890
+2024-10-23T12:15:03.360Z | 3450232             | 3450234
 2023-10-23T13:55:01.543Z | 1756467             | null
 2023-10-23T13:53:55.832Z | 5033755             | null
 2023-10-23T13:52:55.015Z | 8268153             | null
@@ -341,48 +341,60 @@ FROM sample_data, sample_data_partial_mapping
 fieldIsPartiallyUnmappedMultiIndex
 FROM sample_data, sample_data_no_mapping
 | INSIST message
-| KEEP @timestamp, message
-| SORT @timestamp DESC
+| KEEP message
+| SORT message DESC
 ;
 
-@timestamp:datetime      | message:keyword
-2024-10-23T13:55:01.543Z | Connected to 10.1.0.1
-2024-10-23T13:53:55.832Z | Connection error
-2024-10-23T13:52:55.015Z | Connection error
-2024-10-23T13:51:54.732Z | Connection error
-2024-10-23T13:33:34.937Z | 42
-2024-10-23T12:27:28.948Z | Connected to 10.1.0.2
-2024-10-23T12:15:03.360Z | Connected to 10.1.0.3
-2023-10-23T13:55:01.543Z | Connected to 10.1.0.1
-2023-10-23T13:53:55.832Z | Connection error
-2023-10-23T13:52:55.015Z | Connection error
-2023-10-23T13:51:54.732Z | Connection error
-2023-10-23T13:33:34.937Z | Disconnected
-2023-10-23T12:27:28.948Z | Connected to 10.1.0.2
-2023-10-23T12:15:03.360Z | Connected to 10.1.0.3
+message:keyword
+Disconnected
+Connection error?
+Connection error?
+Connection error?
+Connection error
+Connection error
+Connection error
+Connected to 10.1.0.3!
+Connected to 10.1.0.3
+Connected to 10.1.0.2!
+Connected to 10.1.0.2
+Connected to 10.1.0.1!
+Connected to 10.1.0.1
+42
 ;
 
-fieldIsPartiallyUnmappedWithCastMultiIndex
+fieldIsPartiallyUnmappedWithCastToOriginalTypeMultiIndex
 FROM sample_data, sample_data_no_mapping
 | INSIST event_duration
 | EVAL event_duration = event_duration :: LONG
-| KEEP @timestamp, event_duration
-| SORT @timestamp DESC
+| KEEP event_duration
+| SORT event_duration DESC
 ;
 
-@timestamp:datetime      | event_duration:long
-2024-10-23T13:55:01.543Z | 1756467
-2024-10-23T13:53:55.832Z | 5033755
-2024-10-23T13:52:55.015Z | 8268153
-2024-10-23T13:51:54.732Z | 725448
-2024-10-23T13:33:34.937Z | 1232382
-2024-10-23T12:27:28.948Z | 2764889
-2024-10-23T12:15:03.360Z | 3450233
-2023-10-23T13:55:01.543Z | 1756467
-2023-10-23T13:53:55.832Z | 5033755
-2023-10-23T13:52:55.015Z | 8268153
-2023-10-23T13:51:54.732Z | 725448
-2023-10-23T13:33:34.937Z | 1232382
-2023-10-23T12:27:28.948Z | 2764889
-2023-10-23T12:15:03.360Z | 3450233
+event_duration:long
+8268153
+8268152
+5033755
+5033754
+3450233
+3450232
+2764889
+2764888
+1756467
+1756466
+1232382
+1232381
+725448
+725447
+;
+
+fieldIsPartiallyUnmappedWithCastToDifferentTypeMultiIndex
+FROM sample_data, sample_data_no_mapping
+| INSIST event_duration
+| EVAL event_duration = event_duration :: DOUBLE
+| KEEP event_duration
+| SORT event_duration DESC
+;
+
+event_duration:double
+null
 ;

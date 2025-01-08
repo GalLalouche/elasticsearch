@@ -37,15 +37,15 @@ public class InvalidMappedField extends EsField {
         this(name, errorMessage, properties, Map.of());
     }
 
-    public InvalidMappedField(String name, String errorMessage) {
-        this(name, errorMessage, new TreeMap<>());
-    }
-
     /**
      * Constructor supporting union types, used in ES|QL.
      */
     public InvalidMappedField(String name, Map<String, Set<String>> typesToIndices) {
         this(name, makeErrorMessage(typesToIndices), new TreeMap<>(), typesToIndices);
+    }
+
+    public InvalidMappedField(String name, String errorMessage) {
+        this(name, errorMessage, new TreeMap<>());
     }
 
     private InvalidMappedField(String name, String errorMessage, Map<String, EsField> properties, Map<String, Set<String>> typesToIndices) {

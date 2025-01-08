@@ -2624,23 +2624,26 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         assertThat(msg.getMessage(), containsString(substring));
     }
 
-    public void testPushdownInsist_multiIndexFieldExistsButIsNotKeywordWithCast_createsTheCorrectInsistedField() {
+    public void testPushdownInsist_multiIndexFieldExistsButIsNotKeywordWithCastToSame_createsTheCorrectUnmappedField() {
         var plan = planMultiIndex("FROM multi_index | INSIST emp_no | EVAL emp_no = emp_no :: LONG | SORT emp_no");
         var project = as(plan, Project.class);
         var topN = as(project.child(), TopN.class);
         var relation = as(topN.child(), EsRelation.class);
         var insistedField = TestUtils.assertSingleton(relation.output().stream().<UnmappedEsField>mapMulti((attr, c) -> {
-            if (attr instanceof FieldAttribute fa && fa.field() instanceof UnmappedEsField mf) {
+            if (attr instanceof FieldAttribute fa
+                && fa.field() instanceof UnmappedEsField mf
+                && mf.getState() instanceof UnmappedEsField.SimpleResolution) {
                 c.accept(mf);
             }
         }).toList());
         assertThat(insistedField.getDataType(), is(equalTo(LONG)));
-        var conversion = ((UnmappedEsField.SimpleConversion) insistedField.getState()).conversionFromKeyword();
-        assertThat(conversion.dataType(), is(LONG));
-        assertThat(TestUtils.assertSingleton(conversion.children()).dataType(), is(KEYWORD));
+        var resolution = ((UnmappedEsField.SimpleResolution) insistedField.getState());
+        // The asserts in the constructor handle the other cases.
+        assertThat(resolution.mappedConversion().dataType(), is(LONG));
+        assertThat(resolution.mappedConversion().children().get(0).dataType(), is(INTEGER));
     }
 
-    public void testPushdownInsist_multiIndexFieldExistsWithMultiTypes_createsTheCorrectInsistedField() {
+    public void testPushdownInsist_multiIndexFieldExistsWithMultiTypes_createsTheCorrectUnmappedField() {
         var plan = planMultiIndex("""
             FROM multi_index |\
             INSIST multi_type_without_keyword |\
@@ -2655,7 +2658,7 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
             }
         }).toList());
         assertThat(insistedField.getDataType(), is(equalTo(DATETIME)));
-        var multiTypeConversion = ((UnmappedEsField.MultiTypeConversion) insistedField.getState());
+        var multiTypeConversion = ((UnmappedEsField.MultiType) insistedField.getState());
         var conversionFromKeyword = multiTypeConversion.conversionFromKeyword();
         assertThat(conversionFromKeyword.dataType(), is(DATETIME));
         assertThat(TestUtils.assertSingleton(conversionFromKeyword.children()).dataType(), is(KEYWORD));

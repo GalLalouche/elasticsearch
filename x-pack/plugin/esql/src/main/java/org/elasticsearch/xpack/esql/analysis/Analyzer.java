@@ -111,8 +111,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -1395,9 +1393,7 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
             // FIXME(gal, do-not-merge!) deduplicate
             if (convert.field() instanceof FieldAttribute fa
                 && fa.field() instanceof UnmappedEsField insisted
-                && insisted.getState() instanceof UnmappedEsField.Simple wrapping
-                && wrapping.field() instanceof InvalidMappedField imf) {
-                HashMap<TypeResolutionKey, Expression> typeResolutions = new HashMap<>();
+                && insisted.getState() instanceof UnmappedEsField.SimpleConflict(DataType otherType)) {
                 Set<DataType> supportedTypes = convert.supportedTypes();
                 if (convert instanceof FoldablesConvertFunction fcf) {
                     // FoldablesConvertFunction does not accept fields as inputs, they only accept constants
@@ -1409,23 +1405,20 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
                     Expression ua = new UnresolvedAttribute(fa.source(), fa.name(), unresolvedMessage);
                     return fcf.replaceChildren(Collections.singletonList(ua));
                 }
-                imf.types().forEach(type -> {
-                    if (supportedTypes.contains(type.widenSmallNumeric())) {
-                        TypeResolutionKey key = new TypeResolutionKey(fa.name(), type);
-                        var concreteConvert = typeSpecificConvert(convert, fa.source(), type, imf);
-                        typeResolutions.put(key, concreteConvert);
-                    }
-                });
+                var allTypes = List.of(otherType, DataType.KEYWORD);
+                var typeResolutions = allTypes.stream().filter(type -> supportedTypes.contains(type.widenSmallNumeric())).count();
                 // If all mapped types were resolved, create a new FieldAttribute with the resolved MultiTypeEsField
-                if (typeResolutions.size() == imf.getTypesToIndices().size()) {
-                    var resolvedField = resolvedMultiTypeEsField(insisted.getName(), imf, typeResolutions);
-                    var wrapped = UnmappedEsField.fromMultiType(typeSpecificConvert(convert, fa.source(), KEYWORD, imf), resolvedField);
+                if (typeResolutions == allTypes.size()) {
+                    var wrapped = UnmappedEsField.simpleResolution(
+                        typeSpecificConvert(convert, fa.source(), KEYWORD, fa.field()),
+                        typeSpecificConvert(convert, fa.source(), otherType, fa.field()),
+                        fa.name()
+                    );
                     return createIfDoesNotAlreadyExist(fa, wrapped, unionFieldAttributes);
                 }
             } else if (convert.field() instanceof FieldAttribute fa
                 && fa.field() instanceof UnmappedEsField insisted
-                && insisted.getState() instanceof UnmappedEsField.Simple wrapping
-                && wrapping.field().getDataType() != KEYWORD) {
+                && insisted.getState() instanceof UnmappedEsField.Invalid(var imf)) {
                     HashMap<TypeResolutionKey, Expression> typeResolutions = new HashMap<>();
                     Set<DataType> supportedTypes = convert.supportedTypes();
                     if (convert instanceof FoldablesConvertFunction fcf) {
@@ -1438,21 +1431,6 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
                         Expression ua = new UnresolvedAttribute(fa.source(), fa.name(), unresolvedMessage);
                         return fcf.replaceChildren(Collections.singletonList(ua));
                     }
-                    var errorMessage = Strings.format(
-                        "Cannot use field [%s] due to ambiguities caused by INSIST. "
-                            + "INSISTed fields are treated as KEYWORD in unmapped indices, but field is mapped to type [%s]",
-                        fa.name(),
-                        wrapping.field().getDataType().typeName()
-                    );
-                    var imf = new InvalidMappedField(
-                        fa.name(),
-                        Map.of(
-                            wrapping.field().getDataType().typeName(),
-                            Set.of("Mapped indices"),
-                            KEYWORD.typeName(),
-                            Set.of("Insisted field")
-                        )
-                    );
                     imf.types().forEach(type -> {
                         if (supportedTypes.contains(type.widenSmallNumeric())) {
                             TypeResolutionKey key = new TypeResolutionKey(fa.name(), type);
@@ -1462,11 +1440,9 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
                     });
                     // If all mapped types were resolved, create a new FieldAttribute with the resolved MultiTypeEsField
                     if (typeResolutions.size() == imf.getTypesToIndices().size()) {
-                        var resolvedField = UnmappedEsField.withConversion(
-                            insisted.getName(),
-                            typeSpecificConvert(convert, fa.source(), KEYWORD, imf)
-                        );
-                        return createIfDoesNotAlreadyExist(fa, resolvedField, unionFieldAttributes);
+                        var resolvedField = resolvedMultiTypeEsField(insisted.getName(), imf, typeResolutions);
+                        var wrapped = UnmappedEsField.fromMultiType(typeSpecificConvert(convert, fa.source(), KEYWORD, imf), resolvedField);
+                        return createIfDoesNotAlreadyExist(fa, wrapped, unionFieldAttributes);
                     }
                 } else if (convert.field() instanceof FieldAttribute fa && fa.field() instanceof InvalidMappedField imf) {
                     HashMap<TypeResolutionKey, Expression> typeResolutions = new HashMap<>();
@@ -1575,53 +1551,30 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
         }
 
         private static Attribute checkUnresolved(FieldAttribute fa) {
-            if (fa.field() instanceof UnmappedEsField insisted
-                && insisted.getState() instanceof UnmappedEsField.Simple wrapping
-                && wrapping.field().getDataType() != KEYWORD
-                && wrapping.field() instanceof MultiTypeEsField == false) {
-                if (wrapping.field() instanceof InvalidMappedField imf) {
-                    var newTypesToIndices = new TreeMap<>(imf.getTypesToIndices());
-                    newTypesToIndices.compute(KEYWORD.typeName(), (k, v) -> v == null ? new TreeSet<>() : new TreeSet<>(v))
-                        .add("INSISTed field");
-                    var updated = imf.withTypesToIndices(newTypesToIndices);
-                    String unresolvedMessage = "Cannot use field [" + fa.name() + "] due to ambiguities being " + updated.errorMessage();
-                    String types = updated.getTypesToIndices().keySet().stream().collect(Collectors.joining(","));
-                    return new UnsupportedAttribute(
-                        fa.source(),
-                        fa.name(),
-                        new UnsupportedEsField(updated.getName(), types),
-                        unresolvedMessage,
-                        fa.id()
-                    );
+            return switch (fa.field()) {
+                case InvalidMappedField imf -> unsupportedAttributeFromInvalidMappedField(fa, imf);
+                case UnmappedEsField insisted when insisted.getState() instanceof UnmappedEsField.Invalid(var imf) ->
+                    unsupportedAttributeFromInvalidMappedField(fa, imf);
+                case UnmappedEsField insisted when insisted.getState() instanceof UnmappedEsField.SimpleConflict(DataType otherType) -> {
+                    var format = "Cannot use field [%s] due to ambiguities caused by INSIST. "
+                        + "INSISTed fields are treated as KEYWORD in unmapped indices, but field is mapped to type [%s]";
+                    String unresolvedMessage = Strings.format(format, fa.name(), otherType);
+                    yield unsupportedAttributeFromInvalidMappedField(fa, new InvalidMappedField(fa.name(), unresolvedMessage));
                 }
-                // FIXME(gal, do-not-merge!) deduplicate
-                String unresolvedMessage = Strings.format(
-                    "Cannot use field [%s] due to ambiguities caused by INSIST. "
-                        + "INSISTed fields are treated as KEYWORD in unmapped indices, but field is mapped to type [%s]",
-                    fa.name(),
-                    wrapping.field().getDataType()
-                );
-                String types = Strings.format("%s,%s", wrapping.field().getDataType(), KEYWORD);
-                return new UnsupportedAttribute(
-                    fa.source(),
-                    fa.name(),
-                    new UnsupportedEsField(insisted.getName(), types),
-                    unresolvedMessage,
-                    fa.id()
-                );
-            }
-            if (fa.field() instanceof InvalidMappedField imf) {
-                String unresolvedMessage = "Cannot use field [" + fa.name() + "] due to ambiguities being " + imf.errorMessage();
-                String types = imf.getTypesToIndices().keySet().stream().collect(Collectors.joining(","));
-                return new UnsupportedAttribute(
-                    fa.source(),
-                    fa.name(),
-                    new UnsupportedEsField(imf.getName(), types),
-                    unresolvedMessage,
-                    fa.id()
-                );
-            }
-            return fa;
+                default -> fa;
+            };
+        }
+
+        private static UnsupportedAttribute unsupportedAttributeFromInvalidMappedField(FieldAttribute fa, InvalidMappedField imf) {
+            String unresolvedMessage = "Cannot use field [" + fa.name() + "] due to ambiguities being " + imf.errorMessage();
+            String types = imf.getTypesToIndices().keySet().stream().collect(Collectors.joining(","));
+            return new UnsupportedAttribute(
+                fa.source(),
+                fa.name(),
+                new UnsupportedEsField(imf.getName(), types),
+                unresolvedMessage,
+                fa.id()
+            );
         }
 
         private static LogicalPlan planWithoutSyntheticAttributes(LogicalPlan plan) {

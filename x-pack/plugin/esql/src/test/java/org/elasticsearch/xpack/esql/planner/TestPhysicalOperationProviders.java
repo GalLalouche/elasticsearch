@@ -60,6 +60,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -82,7 +83,7 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         return new TestPhysicalOperationProviders(indexPages, createAnalysisRegistry());
     }
 
-    public record IndexPage(String index, Page page, List<PageColumn> columns) {
+    public record IndexPage(String index, Page page, List<PageColumn> columns, Set<String> mappedFields) {
         List<String> columnNames() {
             return columns.stream().map(PageColumn::name).toList();
         }
@@ -270,16 +271,14 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         }
         BiFunction<DocBlock, TestBlockCopier, Block> blockExtraction = switch (attribute) {
             case FieldAttribute fa when fa.field() instanceof MultiTypeEsField m -> (doc, copier) -> getBlockForMultiType(doc, m, copier);
-            case FieldAttribute fa when fa.field() instanceof UnmappedEsField i -> (doc, copier) -> getBlockForInsistedType(doc, i, copier);
+            case FieldAttribute fa when fa.field() instanceof UnmappedEsField i -> (doc, copier) -> getBlockForUnmappedType(doc, i, copier);
             default -> (indexDoc, blockCopier) -> extractBlockForSingleDoc(indexDoc, attribute.name(), blockCopier).getOrThrow();
         };
         return extractBlockForColumn(docBlock, attribute.dataType(), extractPreference, blockExtraction);
     }
 
     private Block getBlockForMultiType(DocBlock indexDoc, MultiTypeEsField multiTypeEsField, TestBlockCopier blockCopier) {
-        var indexId = indexDoc.asVector().shards().getInt(0);
-        var indexPage = indexPages.get(indexId);
-        var conversion = (AbstractConvertFunction) multiTypeEsField.getConversionExpressionForIndex(indexPage.index);
+        var conversion = (AbstractConvertFunction) multiTypeEsField.getConversionExpressionForIndex(getIndexPage(indexDoc).index);
         if (conversion == null) {
             return getNullsBlock(indexDoc);
         }
@@ -287,17 +286,32 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         return result.mapOrNulls(indexDoc, TypeConverter.fromConvertFunction(conversion)::convert);
     }
 
-    private Block getBlockForInsistedType(DocBlock indexDoc, UnmappedEsField insistedEsField, TestBlockCopier blockCopier) {
-        BlockResult result = extractBlockForSingleDoc(indexDoc, insistedEsField.getName(), blockCopier);
-        // FIXME(gal, do-not-merge!) mapOrNulls identity is silly
-        return result.mapOrNulls(indexDoc, Function.identity());
+    private IndexPage getIndexPage(DocBlock indexDoc) {
+        return indexPages.get(indexDoc.asVector().shards().getInt(0));
     }
 
-    // private static Block castInsisted(InsistedAttribute insistedAttribute, Block block, DataType blockDataType) {
-    // AbstractConvertFunction conversion = EsqlDataTypeConverter.converterFunctionFactory(insistedAttribute.dataType())
-    // .apply(insistedAttribute.source(), new ReferenceAttribute(insistedAttribute.source(), insistedAttribute.name(), blockDataType));
-    // return TypeConverter.fromConvertFunction(conversion).convert(block);
-    // }
+    private Block getBlockForUnmappedType(DocBlock indexDoc, UnmappedEsField field, TestBlockCopier blockCopier) {
+        BlockResult result = extractBlockForSingleDoc(indexDoc, field.getName(), blockCopier);
+        // FIXME(gal, do-not-merge!) mapOrNulls identity is silly
+        return result.mapOrNulls(indexDoc, block -> castUnmapped(getIndexPage(indexDoc), field, block));
+    }
+
+    private static Block castUnmapped(IndexPage indexPage, UnmappedEsField field, Block block) {
+        return switch (field.getState()) {
+            case UnmappedEsField.SimpleResolution(var unmappedConversion, var mappedConversion) -> {
+                var isMapped = indexPage.mappedFields.contains(field.getName());
+                yield TypeConverter.fromConvertFunction((AbstractConvertFunction) (isMapped ? mappedConversion : unmappedConversion))
+                    .convert(block);
+            }
+            case UnmappedEsField.MultiType(var unused, MultiTypeEsField mf) -> {
+                yield TypeConverter.fromConvertFunction((AbstractConvertFunction) mf.getConversionExpressionForIndex(indexPage.index))
+                    .convert(block);
+            }
+            case UnmappedEsField.NoConflicts noConflicts -> block;
+            case UnmappedEsField.Invalid invalid -> throw new AssertionError("Invalid field should have been null");
+            case UnmappedEsField.SimpleConflict simpleConflict -> throw new AssertionError("Conflicted field should have been null");
+        };
+    }
 
     private static Block getNullsBlock(DocBlock indexDoc) {
         return indexDoc.blockFactory().newConstantNullBlock(indexDoc.getPositionCount());
