@@ -50,8 +50,8 @@ import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
-import org.elasticsearch.xpack.esql.core.type.InsistedEsField;
 import org.elasticsearch.xpack.esql.core.type.MultiTypeEsField;
+import org.elasticsearch.xpack.esql.core.type.UnmappedEsField;
 import org.elasticsearch.xpack.esql.expression.function.scalar.convert.AbstractConvertFunction;
 import org.elasticsearch.xpack.esql.plan.physical.AggregateExec;
 import org.elasticsearch.xpack.esql.plan.physical.EsQueryExec;
@@ -130,7 +130,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         DefaultShardContext shardContext = (DefaultShardContext) shardContexts.get(shardId);
         Optional<DataType> originalType = Optional.ofNullable(shardContext.fieldType(getFieldName(attr)))
             .map(e -> DataType.fromEs(e.typeName()));
-        if (attr instanceof FieldAttribute fa && fa.field() instanceof InsistedEsField ia) {
+        if (attr instanceof FieldAttribute fa && fa.field() instanceof UnmappedEsField ia) {
             shardContext = new DefaultShardContextForInsistedAttribute(shardContext, ia);
         }
 
@@ -163,9 +163,9 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
     }
 
     private static class DefaultShardContextForInsistedAttribute extends DefaultShardContext {
-        private final InsistedEsField insistedEsField;
+        private final UnmappedEsField insistedEsField;
 
-        DefaultShardContextForInsistedAttribute(DefaultShardContext ctx, InsistedEsField insistedEsField) {
+        DefaultShardContextForInsistedAttribute(DefaultShardContext ctx, UnmappedEsField insistedEsField) {
             super(ctx.index, ctx.ctx, ctx.aliasFilter);
             this.insistedEsField = insistedEsField;
         }

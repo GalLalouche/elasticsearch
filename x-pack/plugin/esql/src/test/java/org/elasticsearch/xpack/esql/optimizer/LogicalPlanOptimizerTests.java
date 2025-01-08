@@ -46,8 +46,8 @@ import org.elasticsearch.xpack.esql.core.expression.predicate.operator.compariso
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.EsField;
-import org.elasticsearch.xpack.esql.core.type.InsistedEsField;
 import org.elasticsearch.xpack.esql.core.type.InvalidMappedField;
+import org.elasticsearch.xpack.esql.core.type.UnmappedEsField;
 import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
 import org.elasticsearch.xpack.esql.core.util.Holder;
 import org.elasticsearch.xpack.esql.core.util.StringUtils;
@@ -2605,7 +2605,7 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         var limit = as(plan, Limit.class);
         EsRelation relation = as(limit.child(), EsRelation.class);
         var attribute = (FieldAttribute) relation.output().get(expectedIndex);
-        assertThat(attribute.field(), is(equalTo(InsistedEsField.fromField(new EsField("first_name", KEYWORD, Map.of(), true)))));
+        assertThat(attribute.field(), is(equalTo(UnmappedEsField.fromField(new EsField("first_name", KEYWORD, Map.of(), true)))));
     }
 
     public void testPushdownInsist_fieldDoesNotExist_updatesRelationWithNewField() {
@@ -2614,7 +2614,7 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         var limit = as(plan, Limit.class);
         var relation = as(limit.child(), EsRelation.class);
         assertThat(relation.output(), hasSize(optimizedPlan("FROM test").output().size() + 1));
-        assertThat(((FieldAttribute) relation.output().getLast()).field(), is(equalTo(InsistedEsField.fromStandalone("foo"))));
+        assertThat(((FieldAttribute) relation.output().getLast()).field(), is(equalTo(UnmappedEsField.fromStandalone("foo"))));
     }
 
     public void testPushdownInsist_multiIndexFieldExistsWithSingleTypeButIsNotKeywordAndMissingCast_failsWithInsistMessage() {
@@ -2629,13 +2629,13 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         var project = as(plan, Project.class);
         var topN = as(project.child(), TopN.class);
         var relation = as(topN.child(), EsRelation.class);
-        var insistedField = TestUtils.assertSingleton(relation.output().stream().<InsistedEsField>mapMulti((attr, c) -> {
-            if (attr instanceof FieldAttribute fa && fa.field() instanceof InsistedEsField mf) {
+        var insistedField = TestUtils.assertSingleton(relation.output().stream().<UnmappedEsField>mapMulti((attr, c) -> {
+            if (attr instanceof FieldAttribute fa && fa.field() instanceof UnmappedEsField mf) {
                 c.accept(mf);
             }
         }).toList());
         assertThat(insistedField.getDataType(), is(equalTo(LONG)));
-        var conversion = ((InsistedEsField.SimpleConversion) insistedField.getState()).conversionFromKeyword();
+        var conversion = ((UnmappedEsField.SimpleConversion) insistedField.getState()).conversionFromKeyword();
         assertThat(conversion.dataType(), is(LONG));
         assertThat(TestUtils.assertSingleton(conversion.children()).dataType(), is(KEYWORD));
     }
@@ -2649,13 +2649,13 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         var project = as(plan, Project.class);
         var topN = as(project.child(), TopN.class);
         var relation = as(topN.child(), EsRelation.class);
-        var insistedField = TestUtils.assertSingleton(relation.output().stream().<InsistedEsField>mapMulti((attr, c) -> {
-            if (attr instanceof FieldAttribute fa && fa.field() instanceof InsistedEsField mf) {
+        var insistedField = TestUtils.assertSingleton(relation.output().stream().<UnmappedEsField>mapMulti((attr, c) -> {
+            if (attr instanceof FieldAttribute fa && fa.field() instanceof UnmappedEsField mf) {
                 c.accept(mf);
             }
         }).toList());
         assertThat(insistedField.getDataType(), is(equalTo(DATETIME)));
-        var multiTypeConversion = ((InsistedEsField.MultiTypeConversion) insistedField.getState());
+        var multiTypeConversion = ((UnmappedEsField.MultiTypeConversion) insistedField.getState());
         var conversionFromKeyword = multiTypeConversion.conversionFromKeyword();
         assertThat(conversionFromKeyword.dataType(), is(DATETIME));
         assertThat(TestUtils.assertSingleton(conversionFromKeyword.children()).dataType(), is(KEYWORD));

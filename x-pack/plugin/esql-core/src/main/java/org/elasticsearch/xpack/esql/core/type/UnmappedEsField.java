@@ -19,8 +19,8 @@ import static org.elasticsearch.xpack.esql.core.util.PlanStreamInput.readCachedS
 import static org.elasticsearch.xpack.esql.core.util.PlanStreamOutput.writeCachedStringWithVersionCheck;
 
 // FIXME(gal, do-not-merge!) document, explain, fix, etc.
-public class InsistedEsField extends EsField {
-    private InsistedEsField(State state, String name, DataType dataType, Map<String, EsField> properties) {
+public class UnmappedEsField extends EsField {
+    private UnmappedEsField(State state, String name, DataType dataType, Map<String, EsField> properties) {
         super(name, dataType, properties, true /* aggregatable */);
         this.state = state;
     }
@@ -42,20 +42,20 @@ public class InsistedEsField extends EsField {
 
     private final State state;
 
-    public static InsistedEsField fromField(EsField f) {
-        return new InsistedEsField(new Simple(f), f.getName(), f.getDataType(), f.getProperties());
+    public static UnmappedEsField fromField(EsField f) {
+        return new UnmappedEsField(new Simple(f), f.getName(), f.getDataType(), f.getProperties());
     }
 
-    public static InsistedEsField fromStandalone(String name) {
-        return new InsistedEsField(Unmapped.INSTANCE, name, DataType.KEYWORD, Map.of());
+    public static UnmappedEsField fromStandalone(String name) {
+        return new UnmappedEsField(Unmapped.INSTANCE, name, DataType.KEYWORD, Map.of());
     }
 
-    public static InsistedEsField withConversion(String name, Expression conversionFromKeyword) {
-        return new InsistedEsField(new SimpleConversion(conversionFromKeyword), name, conversionFromKeyword.dataType(), Map.of());
+    public static UnmappedEsField withConversion(String name, Expression conversionFromKeyword) {
+        return new UnmappedEsField(new SimpleConversion(conversionFromKeyword), name, conversionFromKeyword.dataType(), Map.of());
     }
 
-    public static InsistedEsField fromMultiType(Expression expression, MultiTypeEsField resolvedField) {
-        return new InsistedEsField(
+    public static UnmappedEsField fromMultiType(Expression expression, MultiTypeEsField resolvedField) {
+        return new UnmappedEsField(
             new MultiTypeConversion(expression, resolvedField),
             resolvedField.getName(),
             resolvedField.getDataType(),
@@ -63,7 +63,7 @@ public class InsistedEsField extends EsField {
         );
     }
 
-    InsistedEsField(StreamInput in) throws IOException {
+    UnmappedEsField(StreamInput in) throws IOException {
         this(readState(in), readCachedStringWithVersionCheck(in), DataType.readFrom(in), in.readImmutableMap(EsField::readFrom));
     }
 

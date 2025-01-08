@@ -43,8 +43,8 @@ import org.elasticsearch.xpack.esql.TestBlockFactory;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
-import org.elasticsearch.xpack.esql.core.type.InsistedEsField;
 import org.elasticsearch.xpack.esql.core.type.MultiTypeEsField;
+import org.elasticsearch.xpack.esql.core.type.UnmappedEsField;
 import org.elasticsearch.xpack.esql.core.util.SpatialCoordinateTypes;
 import org.elasticsearch.xpack.esql.expression.function.UnsupportedAttribute;
 import org.elasticsearch.xpack.esql.expression.function.scalar.convert.AbstractConvertFunction;
@@ -270,7 +270,7 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         }
         BiFunction<DocBlock, TestBlockCopier, Block> blockExtraction = switch (attribute) {
             case FieldAttribute fa when fa.field() instanceof MultiTypeEsField m -> (doc, copier) -> getBlockForMultiType(doc, m, copier);
-            case FieldAttribute fa when fa.field() instanceof InsistedEsField i -> (doc, copier) -> getBlockForInsistedType(doc, i, copier);
+            case FieldAttribute fa when fa.field() instanceof UnmappedEsField i -> (doc, copier) -> getBlockForInsistedType(doc, i, copier);
             default -> (indexDoc, blockCopier) -> extractBlockForSingleDoc(indexDoc, attribute.name(), blockCopier).getOrThrow();
         };
         return extractBlockForColumn(docBlock, attribute.dataType(), extractPreference, blockExtraction);
@@ -287,7 +287,7 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
         return result.mapOrNulls(indexDoc, TypeConverter.fromConvertFunction(conversion)::convert);
     }
 
-    private Block getBlockForInsistedType(DocBlock indexDoc, InsistedEsField insistedEsField, TestBlockCopier blockCopier) {
+    private Block getBlockForInsistedType(DocBlock indexDoc, UnmappedEsField insistedEsField, TestBlockCopier blockCopier) {
         BlockResult result = extractBlockForSingleDoc(indexDoc, insistedEsField.getName(), blockCopier);
         // FIXME(gal, do-not-merge!) mapOrNulls identity is silly
         return result.mapOrNulls(indexDoc, Function.identity());

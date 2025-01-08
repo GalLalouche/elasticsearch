@@ -37,9 +37,9 @@ import org.elasticsearch.xpack.esql.core.expression.predicate.operator.compariso
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.EsField;
-import org.elasticsearch.xpack.esql.core.type.InsistedEsField;
 import org.elasticsearch.xpack.esql.core.type.InvalidMappedField;
 import org.elasticsearch.xpack.esql.core.type.MultiTypeEsField;
+import org.elasticsearch.xpack.esql.core.type.UnmappedEsField;
 import org.elasticsearch.xpack.esql.core.type.UnsupportedEsField;
 import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
 import org.elasticsearch.xpack.esql.core.util.Holder;
@@ -1394,8 +1394,8 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
             // FIXME(gal, do-not-merge!) deduplicate
             // FIXME(gal, do-not-merge!) deduplicate
             if (convert.field() instanceof FieldAttribute fa
-                && fa.field() instanceof InsistedEsField insisted
-                && insisted.getState() instanceof InsistedEsField.Simple wrapping
+                && fa.field() instanceof UnmappedEsField insisted
+                && insisted.getState() instanceof UnmappedEsField.Simple wrapping
                 && wrapping.field() instanceof InvalidMappedField imf) {
                 HashMap<TypeResolutionKey, Expression> typeResolutions = new HashMap<>();
                 Set<DataType> supportedTypes = convert.supportedTypes();
@@ -1419,12 +1419,12 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
                 // If all mapped types were resolved, create a new FieldAttribute with the resolved MultiTypeEsField
                 if (typeResolutions.size() == imf.getTypesToIndices().size()) {
                     var resolvedField = resolvedMultiTypeEsField(insisted.getName(), imf, typeResolutions);
-                    var wrapped = InsistedEsField.fromMultiType(typeSpecificConvert(convert, fa.source(), KEYWORD, imf), resolvedField);
+                    var wrapped = UnmappedEsField.fromMultiType(typeSpecificConvert(convert, fa.source(), KEYWORD, imf), resolvedField);
                     return createIfDoesNotAlreadyExist(fa, wrapped, unionFieldAttributes);
                 }
             } else if (convert.field() instanceof FieldAttribute fa
-                && fa.field() instanceof InsistedEsField insisted
-                && insisted.getState() instanceof InsistedEsField.Simple wrapping
+                && fa.field() instanceof UnmappedEsField insisted
+                && insisted.getState() instanceof UnmappedEsField.Simple wrapping
                 && wrapping.field().getDataType() != KEYWORD) {
                     HashMap<TypeResolutionKey, Expression> typeResolutions = new HashMap<>();
                     Set<DataType> supportedTypes = convert.supportedTypes();
@@ -1462,7 +1462,7 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
                     });
                     // If all mapped types were resolved, create a new FieldAttribute with the resolved MultiTypeEsField
                     if (typeResolutions.size() == imf.getTypesToIndices().size()) {
-                        var resolvedField = InsistedEsField.withConversion(
+                        var resolvedField = UnmappedEsField.withConversion(
                             insisted.getName(),
                             typeSpecificConvert(convert, fa.source(), KEYWORD, imf)
                         );
@@ -1575,8 +1575,8 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
         }
 
         private static Attribute checkUnresolved(FieldAttribute fa) {
-            if (fa.field() instanceof InsistedEsField insisted
-                && insisted.getState() instanceof InsistedEsField.Simple wrapping
+            if (fa.field() instanceof UnmappedEsField insisted
+                && insisted.getState() instanceof UnmappedEsField.Simple wrapping
                 && wrapping.field().getDataType() != KEYWORD
                 && wrapping.field() instanceof MultiTypeEsField == false) {
                 if (wrapping.field() instanceof InvalidMappedField imf) {
