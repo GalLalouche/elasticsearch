@@ -292,7 +292,6 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
 
     private Block getBlockForUnmappedType(DocBlock indexDoc, UnmappedEsField field, TestBlockCopier blockCopier) {
         BlockResult result = extractBlockForSingleDoc(indexDoc, field.getName(), blockCopier);
-        // FIXME(gal, do-not-merge!) mapOrNulls identity is silly
         return result.mapOrNulls(indexDoc, block -> castUnmapped(getIndexPage(indexDoc), field, block));
     }
 

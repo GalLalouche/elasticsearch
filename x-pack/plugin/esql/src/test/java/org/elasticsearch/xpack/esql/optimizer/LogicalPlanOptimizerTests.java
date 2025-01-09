@@ -2597,7 +2597,6 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
         );
     }
 
-    // FIXME(gal, do-not-merge!) all of this should move to AnalyzerTests
     public void testPushdownInsist_fieldExistsSingleIndex_updatesRelationOutputAtIndex() {
         LogicalPlan plan = optimizedPlan("FROM test | INSIST first_name");
 

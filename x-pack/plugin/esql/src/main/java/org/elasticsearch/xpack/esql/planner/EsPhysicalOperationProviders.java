@@ -136,20 +136,16 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
 
         boolean isUnsupported = attr.dataType() == DataType.UNSUPPORTED;
         BlockLoader blockLoader = shardContext.blockLoader(getFieldName(attr), isUnsupported, fieldExtractPreference);
-        if (isUnmapped
-            && attr instanceof FieldAttribute fa
-            && fa.field() instanceof UnmappedEsField uf
-            && uf.getState() instanceof UnmappedEsField.MultiType(var conversion, var unused)) {
-            return new TypeConvertingBlockLoader(blockLoader, (AbstractConvertFunction) conversion);
-        }
-        // FIXME(gal, do-not-merge!) deduplicate
-        if (attr instanceof FieldAttribute fa
-            && fa.field() instanceof UnmappedEsField uf
-            && uf.getState() instanceof UnmappedEsField.SimpleResolution sr) {
-            return new TypeConvertingBlockLoader(
-                blockLoader,
-                (AbstractConvertFunction) (isUnmapped ? sr.unmappedConversion() : sr.mappedConversion())
-            );
+        if (attr instanceof FieldAttribute fa && fa.field() instanceof UnmappedEsField uf) {
+            if (isUnmapped && uf.getState() instanceof UnmappedEsField.MultiType(Expression conversion, var unused)) {
+                return new TypeConvertingBlockLoader(blockLoader, (AbstractConvertFunction) conversion);
+            }
+            if (uf.getState() instanceof UnmappedEsField.SimpleResolution sr) {
+                return new TypeConvertingBlockLoader(
+                    blockLoader,
+                    (AbstractConvertFunction) (isUnmapped ? sr.unmappedConversion() : sr.mappedConversion())
+                );
+            }
         }
         var unionTypes = findUnionTypes(attr);
         if (unionTypes != null) {
@@ -162,7 +158,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         return blockLoader;
     }
 
-    // FIXME(gal, do-not-merge!) document
+    /// A hack to pretend an unmapped field still exists.
     private static class DefaultShardContextForUnmappedField extends DefaultShardContext {
         private final UnmappedEsField unmappedEsField;
 
