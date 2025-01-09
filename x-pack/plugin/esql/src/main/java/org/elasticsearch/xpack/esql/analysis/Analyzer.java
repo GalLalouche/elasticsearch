@@ -1316,7 +1316,7 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
         }
     }
 
-    // FIXME(gal, do-not-merge!) document etc.
+    /// Removes INSIST clauses by pushing down the output attributes to the EsRelation.
     private static class PushdownInsists extends Rule<LogicalPlan, LogicalPlan> {
         @Override
         public LogicalPlan apply(LogicalPlan plan) {
@@ -1557,7 +1557,7 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
                     unsupportedAttributeFromInvalidMappedField(fa, imf);
                 case UnmappedEsField insisted when insisted.getState() instanceof UnmappedEsField.SimpleConflict(DataType otherType) -> {
                     var format = "Cannot use field [%s] due to ambiguities caused by INSIST. "
-                        + "INSISTed fields are treated as KEYWORD in unmapped indices, but field is mapped to type [%s]";
+                        + "unmapped fields are treated as KEYWORD in unmapped indices, but field is mapped to type [%s]";
                     String unresolvedMessage = Strings.format(format, fa.name(), otherType);
                     yield unsupportedAttributeFromInvalidMappedField(fa, new InvalidMappedField(fa.name(), unresolvedMessage));
                 }

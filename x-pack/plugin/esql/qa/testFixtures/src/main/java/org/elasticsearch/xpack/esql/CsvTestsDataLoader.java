@@ -42,6 +42,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.elasticsearch.common.logging.LoggerMessageFormat.format;
 import static org.elasticsearch.xpack.esql.CsvTestUtils.COMMA_ESCAPING_REGEX;
@@ -81,7 +83,7 @@ public class CsvTestsDataLoader {
         "sample_data_no_mapping",
         "mapping-sample_data_no_mapping.json",
         "sample_data_partial_mapping.csv"
-    );
+    ).withTypeMapping(Stream.of("timestamp", "client_ip", "event_duration").collect(Collectors.toMap(k -> k, k -> "keyword")));
     private static final TestDataset SAMPLE_DATA_TS_LONG = SAMPLE_DATA.withIndex("sample_data_ts_long")
         .withData("sample_data_ts_long.csv")
         .withTypeMapping(Map.of("@timestamp", "long"));

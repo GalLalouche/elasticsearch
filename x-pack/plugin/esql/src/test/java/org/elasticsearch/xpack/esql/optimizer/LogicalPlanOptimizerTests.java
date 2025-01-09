@@ -2620,7 +2620,7 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
     public void testPushdownInsist_multiIndexFieldExistsWithSingleTypeButIsNotKeywordAndMissingCast_failsWithInsistMessage() {
         var msg = assertThrows(VerificationException.class, () -> planMultiIndex("FROM multi_index | INSIST emp_no | SORT emp_no"));
         String substring = "Cannot use field [emp_no] due to ambiguities caused by INSIST. "
-            + "INSISTed fields are treated as KEYWORD in unmapped indices, but field is mapped to type [INTEGER]";
+            + "unmapped fields are treated as KEYWORD in unmapped indices, but field is mapped to type [INTEGER]";
         assertThat(msg.getMessage(), containsString(substring));
     }
 
@@ -2670,7 +2670,7 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
             () -> planMultiIndex("FROM multi_index | INSIST multi_type_with_keyword | SORT multi_type_with_keyword")
         );
         String substring = "Cannot use field [multi_type_with_keyword] due to ambiguities being mapped as [2] incompatible types: "
-            + "[keyword] in [INSISTed field, test2], [long] in [test1]";
+            + "[keyword] in [test2, unmapped field], [long] in [test1]";
         assertThat(msg.getMessage(), containsString(substring));
     }
 
@@ -2680,7 +2680,7 @@ public class LogicalPlanOptimizerTests extends ESTestCase {
             () -> planMultiIndex("FROM multi_index | INSIST multi_type_without_keyword | SORT multi_type_without_keyword")
         );
         String substring = "Cannot use field [multi_type_without_keyword] due to ambiguities being mapped as [3] incompatible types: "
-            + "[date] in [test2], [keyword] in [INSISTed field], [long] in [test1]";
+            + "[date] in [test2], [keyword] in [unmapped field], [long] in [test1]";
         assertThat(msg.getMessage(), containsString(substring));
     }
 

@@ -72,7 +72,7 @@ public class UnmappedEsField extends EsField {
             case InvalidMappedField imf -> {
                 var newTypesToIndices = new TreeMap<>(imf.getTypesToIndices());
                 newTypesToIndices.compute(KEYWORD.typeName(), (k, v) -> v == null ? new TreeSet<>() : new TreeSet<>(v))
-                    .add("INSISTed field");
+                    .add("unmapped field");
                 yield new Invalid(imf.withTypesToIndices(newTypesToIndices));
             }
             case MultiTypeEsField mf -> throw new IllegalArgumentException("Use fromMultiType for MultiTypeEsField");
@@ -155,11 +155,11 @@ public class UnmappedEsField extends EsField {
 
     @Override
     public String getWriteableName() {
-        return "InsistedEsField";
+        return "UnmappedEsField";
     }
 
     @Override
     public String toString() {
-        return Strings.format("InsistedEsField{state=%s}", state);
+        return Strings.format("UnmappedEsField{state=%s}", state);
     }
 }
