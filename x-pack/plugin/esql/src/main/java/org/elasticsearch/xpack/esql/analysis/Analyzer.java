@@ -110,6 +110,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -1389,90 +1390,85 @@ public class Analyzer extends ParameterizedRuleExecutor<LogicalPlan, AnalyzerCon
         }
 
         private Expression resolveConvertFunction(AbstractConvertFunction convert, List<FieldAttribute> unionFieldAttributes) {
-            // FIXME(gal, do-not-merge!) deduplicate
-            // FIXME(gal, do-not-merge!) deduplicate
-            if (convert.field() instanceof FieldAttribute fa
-                && fa.field() instanceof UnmappedEsField insisted
-                && insisted.getState() instanceof UnmappedEsField.SimpleConflict(DataType otherType)) {
-                Set<DataType> supportedTypes = convert.supportedTypes();
-                if (convert instanceof FoldablesConvertFunction fcf) {
-                    // FoldablesConvertFunction does not accept fields as inputs, they only accept constants
-                    String unresolvedMessage = "argument of ["
-                        + fcf.sourceText()
-                        + "] must be a constant, received ["
-                        + Expressions.name(fa)
-                        + "]";
-                    Expression ua = new UnresolvedAttribute(fa.source(), fa.name(), unresolvedMessage);
-                    return fcf.replaceChildren(Collections.singletonList(ua));
-                }
-                var allTypes = List.of(otherType, DataType.KEYWORD);
-                var typeResolutions = allTypes.stream().filter(type -> supportedTypes.contains(type.widenSmallNumeric())).count();
-                // If all mapped types were resolved, create a new FieldAttribute with the resolved MultiTypeEsField
-                if (typeResolutions == allTypes.size()) {
-                    var wrapped = UnmappedEsField.simpleResolution(
-                        typeSpecificConvert(convert, fa.source(), KEYWORD, fa.field()),
-                        typeSpecificConvert(convert, fa.source(), otherType, fa.field()),
-                        fa.name()
-                    );
-                    return createIfDoesNotAlreadyExist(fa, wrapped, unionFieldAttributes);
-                }
-            } else if (convert.field() instanceof FieldAttribute fa
-                && fa.field() instanceof UnmappedEsField insisted
-                && insisted.getState() instanceof UnmappedEsField.Invalid(var imf)) {
-                    HashMap<TypeResolutionKey, Expression> typeResolutions = new HashMap<>();
-                    Set<DataType> supportedTypes = convert.supportedTypes();
-                    if (convert instanceof FoldablesConvertFunction fcf) {
-                        // FoldablesConvertFunction does not accept fields as inputs, they only accept constants
-                        String unresolvedMessage = "argument of ["
-                            + fcf.sourceText()
-                            + "] must be a constant, received ["
-                            + Expressions.name(fa)
-                            + "]";
-                        Expression ua = new UnresolvedAttribute(fa.source(), fa.name(), unresolvedMessage);
-                        return fcf.replaceChildren(Collections.singletonList(ua));
-                    }
-                    imf.types().forEach(type -> {
-                        if (supportedTypes.contains(type.widenSmallNumeric())) {
-                            TypeResolutionKey key = new TypeResolutionKey(fa.name(), type);
-                            var concreteConvert = typeSpecificConvert(convert, fa.source(), type, imf);
-                            typeResolutions.put(key, concreteConvert);
+            if (convert.field() instanceof FieldAttribute fa) {
+                if (fa.field() instanceof UnmappedEsField unmapped) {
+                    if (unmapped.getState() instanceof UnmappedEsField.SimpleConflict(DataType otherType)) {
+                        var imf = new InvalidMappedField(
+                            fa.name(),
+                            Map.of(KEYWORD.typeName(), Set.of("unmapped field"), otherType.typeName(), Set.of("mapped field"))
+                        );
+                        Optional<Expression> expr = convertHelper(convert, fa, imf, f -> unmappedSimpleResolution(convert, fa, otherType));
+                        if (expr.orElse(null) instanceof Expression e) {
+                            return e;
                         }
-                    });
-                    // If all mapped types were resolved, create a new FieldAttribute with the resolved MultiTypeEsField
-                    if (typeResolutions.size() == imf.getTypesToIndices().size()) {
-                        var resolvedField = resolvedMultiTypeEsField(insisted.getName(), imf, typeResolutions);
-                        var wrapped = UnmappedEsField.fromMultiType(typeSpecificConvert(convert, fa.source(), KEYWORD, imf), resolvedField);
-                        return createIfDoesNotAlreadyExist(fa, wrapped, unionFieldAttributes);
                     }
-                } else if (convert.field() instanceof FieldAttribute fa && fa.field() instanceof InvalidMappedField imf) {
-                    HashMap<TypeResolutionKey, Expression> typeResolutions = new HashMap<>();
-                    Set<DataType> supportedTypes = convert.supportedTypes();
-                    if (convert instanceof FoldablesConvertFunction fcf) {
-                        // FoldablesConvertFunction does not accept fields as inputs, they only accept constants
-                        String unresolvedMessage = "argument of ["
-                            + fcf.sourceText()
-                            + "] must be a constant, received ["
-                            + Expressions.name(fa)
-                            + "]";
-                        Expression ua = new UnresolvedAttribute(fa.source(), fa.name(), unresolvedMessage);
-                        return fcf.replaceChildren(Collections.singletonList(ua));
-                    }
-                    imf.types().forEach(type -> {
-                        if (supportedTypes.contains(type.widenSmallNumeric())) {
-                            TypeResolutionKey key = new TypeResolutionKey(fa.name(), type);
-                            var concreteConvert = typeSpecificConvert(convert, fa.source(), type, imf);
-                            typeResolutions.put(key, concreteConvert);
+                    if (unmapped.getState() instanceof UnmappedEsField.Invalid(InvalidMappedField imf)) {
+                        Optional<Expression> expr = convertHelper(convert, fa, imf, f -> unmappedMultiType(convert, fa, imf, f));
+                        if (expr.orElse(null) instanceof Expression e) {
+                            return e;
                         }
-                    });
-                    // If all mapped types were resolved, create a new FieldAttribute with the resolved MultiTypeEsField
-                    if (typeResolutions.size() == imf.getTypesToIndices().size()) {
-                        var resolvedField = resolvedMultiTypeEsField(fa.name(), imf, typeResolutions);
-                        return createIfDoesNotAlreadyExist(fa, resolvedField, unionFieldAttributes);
                     }
-                } else if (convert.field() instanceof AbstractConvertFunction subConvert) {
-                    return convert.replaceChildren(Collections.singletonList(resolveConvertFunction(subConvert, unionFieldAttributes)));
                 }
-            return convert;
+                if (fa.field() instanceof InvalidMappedField imf) {
+                    var expr = convertHelper(convert, fa, imf, f -> f);
+                    if (expr.orElse(null) instanceof Expression e) {
+                        return e;
+                    }
+                }
+            }
+            return convert.field() instanceof AbstractConvertFunction subConvert
+                ? convert.replaceChildren(Collections.singletonList(resolveConvertFunction(subConvert, unionFieldAttributes)))
+                : convert;
+        }
+
+        private static UnmappedEsField unmappedMultiType(
+            AbstractConvertFunction convert,
+            FieldAttribute fa,
+            InvalidMappedField imf,
+            MultiTypeEsField f
+        ) {
+            return UnmappedEsField.fromMultiType(typeSpecificConvert(convert, fa.source(), KEYWORD, imf), f);
+        }
+
+        private static UnmappedEsField unmappedSimpleResolution(AbstractConvertFunction convert, FieldAttribute fa, DataType otherType) {
+            return UnmappedEsField.simpleResolution(
+                typeSpecificConvert(convert, fa.source(), KEYWORD, fa.field()),
+                typeSpecificConvert(convert, fa.source(), otherType, fa.field()),
+                fa.name()
+            );
+        }
+
+        private Optional<Expression> convertHelper(
+            AbstractConvertFunction convert,
+            FieldAttribute fa,
+            InvalidMappedField imf,
+            Function<MultiTypeEsField, EsField> fieldFinisher
+        ) {
+            HashMap<TypeResolutionKey, Expression> typeResolutions = new HashMap<>();
+            Set<DataType> supportedTypes = convert.supportedTypes();
+            if (convert instanceof FoldablesConvertFunction fcf) {
+                // FoldablesConvertFunction does not accept fields as inputs, they only accept constants
+                String unresolvedMessage = "argument of ["
+                    + fcf.sourceText()
+                    + "] must be a constant, received ["
+                    + Expressions.name(fa)
+                    + "]";
+                Expression ua = new UnresolvedAttribute(fa.source(), fa.name(), unresolvedMessage);
+                return Optional.of(fcf.replaceChildren(Collections.singletonList(ua)));
+            }
+            imf.types().forEach(type -> {
+                if (supportedTypes.contains(type.widenSmallNumeric())) {
+                    TypeResolutionKey key = new TypeResolutionKey(fa.name(), type);
+                    var concreteConvert = typeSpecificConvert(convert, fa.source(), type, imf);
+                    typeResolutions.put(key, concreteConvert);
+                }
+            });
+            // If all mapped types were resolved, create a new FieldAttribute with the resolved MultiTypeEsField
+            if (typeResolutions.size() != imf.getTypesToIndices().size()) {
+                return Optional.empty();
+            }
+            MultiTypeEsField multiTypeEsField = resolvedMultiTypeEsField(fa.name(), imf, typeResolutions);
+            return Optional.of(createIfDoesNotAlreadyExist(fa, fieldFinisher.apply(multiTypeEsField), unionFieldAttributes));
         }
 
         private Expression createIfDoesNotAlreadyExist(

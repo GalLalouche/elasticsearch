@@ -78,12 +78,6 @@ public class CsvTestsDataLoader {
     private static final TestDataset MV_SAMPLE_DATA = new TestDataset("mv_sample_data");
     private static final TestDataset SAMPLE_DATA_STR = SAMPLE_DATA.withIndex("sample_data_str")
         .withTypeMapping(Map.of("client_ip", "keyword"));
-    private static final TestDataset SAMPLE_DATA_PARTIAL_MAPPING = new TestDataset("sample_data_partial_mapping");
-    private static final TestDataset SAMPLE_DATA_NO_MAPPING = new TestDataset(
-        "sample_data_no_mapping",
-        "mapping-sample_data_no_mapping.json",
-        "sample_data_partial_mapping.csv"
-    ).withTypeMapping(Stream.of("timestamp", "client_ip", "event_duration").collect(Collectors.toMap(k -> k, k -> "keyword")));
     private static final TestDataset SAMPLE_DATA_TS_LONG = SAMPLE_DATA.withIndex("sample_data_ts_long")
         .withData("sample_data_ts_long.csv")
         .withTypeMapping(Map.of("@timestamp", "long"));
@@ -91,6 +85,12 @@ public class CsvTestsDataLoader {
         .withData("sample_data_ts_nanos.csv")
         .withTypeMapping(Map.of("@timestamp", "date_nanos"));
     private static final TestDataset MISSING_IP_SAMPLE_DATA = new TestDataset("missing_ip_sample_data");
+    private static final TestDataset SAMPLE_DATA_PARTIAL_MAPPING = new TestDataset("partial_mapping_sample_data");
+    private static final TestDataset SAMPLE_DATA_NO_MAPPING = new TestDataset(
+        "no_mapping_sample_data",
+        "mapping-no_mapping_sample_data.json",
+        "partial_mapping_sample_data.csv"
+    ).withTypeMapping(Stream.of("timestamp", "client_ip", "event_duration").collect(Collectors.toMap(k -> k, k -> "keyword")));
     private static final TestDataset CLIENT_IPS = new TestDataset("clientips");
     private static final TestDataset CLIENT_IPS_LOOKUP = CLIENT_IPS.withIndex("clientips_lookup")
         .withSetting("clientips_lookup-settings.json");
