@@ -353,7 +353,7 @@ public class CsvTests extends ESTestCase {
         CsvAssert.assertResults(expected, actual, ignoreOrder, logger);
     }
 
-    private static IndexResolution loadIndexResolution(CsvTestsDataLoader.MultiIndexTestDataset datasets) {
+    public static IndexResolution loadIndexResolution(CsvTestsDataLoader.MultiIndexTestDataset datasets) {
         var indexNames = datasets.datasets().stream().map(CsvTestsDataLoader.TestDataset::indexName);
         Map<String, IndexMode> indexModes = indexNames.collect(Collectors.toMap(x -> x, x -> IndexMode.STANDARD));
         List<MappingPerIndex> mappings = datasets.datasets()
@@ -467,7 +467,7 @@ public class CsvTests extends ESTestCase {
         return plan;
     }
 
-    private static CsvTestsDataLoader.MultiIndexTestDataset testDatasets(LogicalPlan parsed) {
+    public static CsvTestsDataLoader.MultiIndexTestDataset testDatasets(LogicalPlan parsed) {
         var preAnalysis = new PreAnalyzer().preAnalyze(parsed);
         var indices = preAnalysis.indices;
         if (indices.isEmpty()) {

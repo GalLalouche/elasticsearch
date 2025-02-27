@@ -58,6 +58,7 @@ public abstract class NodeUtils {
 
     private static final int TO_STRING_LIMIT = 52;
 
+    // FIXME(gal, do-not-merge!) Find out who uses this method, and replace the testToString variant with the non-limited version.
     public static <E> String limitedToString(Collection<E> c) {
         Iterator<E> it = c.iterator();
         if (it.hasNext() == false) {

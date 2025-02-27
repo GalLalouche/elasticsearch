@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.elasticsearch.TransportVersions.ESQL_SKIP_ES_INDEX_SERIALIZATION;
 
@@ -209,6 +210,18 @@ public class EsRelation extends LeafPlan {
             + "]"
             + (indexMode != IndexMode.STANDARD ? "[" + indexMode.name() + "]" : "")
             + NodeUtils.limitedToString(attrs);
+    }
+
+
+    // FIXME(gal, do-not-merge!) document, rename, reduce duplication
+    @Override
+    public String nodeTestString() {
+        return nodeName()
+            + "["
+            + indexPattern
+            + "]"
+            + (indexMode != IndexMode.STANDARD ? "[" + indexMode.name() + "]" : "")
+            + attrs.stream().map(s -> s.nodeTestString()).collect(Collectors.joining(", ", "[", "]"));
     }
 
     public static IndexMode readIndexMode(StreamInput in) throws IOException {

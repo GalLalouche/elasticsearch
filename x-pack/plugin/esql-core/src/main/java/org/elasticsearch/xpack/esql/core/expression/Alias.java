@@ -136,6 +136,11 @@ public final class Alias extends NamedExpression {
     }
 
     @Override
+    public String toTestString() {
+        return child + " AS " + name();
+    }
+
+    @Override
     public String nodeString() {
         return child.nodeString() + " AS " + name();
     }

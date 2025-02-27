@@ -241,6 +241,11 @@ public class EsQueryExec extends LeafExec implements EstimatesRowSize {
         return attrs;
     }
 
+    @Override
+    public String toTestString() {
+        return "";
+    }
+
     public Expression limit() {
         return limit;
     }

@@ -1,0 +1,6 @@
+ProjectExec[[x{r}]]
+\_EvalExec[[Alias[x,false]]]
+  \_LimitExec[Literal[1000,INTEGER]]
+    \_AggregateExec[[emp_no{f}],[emp_no{f}],FINAL,[emp_no{f}],null]
+      \_ExchangeExec[[emp_no{f}],true]
+        \_FragmentExec[Aggregate[STANDARD,[emp_no{f}],[emp_no{f}]],null,0]

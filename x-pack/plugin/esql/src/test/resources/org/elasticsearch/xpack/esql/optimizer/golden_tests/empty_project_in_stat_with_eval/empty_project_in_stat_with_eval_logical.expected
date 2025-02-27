@@ -1,0 +1,4 @@
+EsqlProject[[x{r}]]
+\_Eval[[Alias[x,false]]]
+  \_Limit[Literal[1000,INTEGER],false]
+    \_LocalRelation[[{e}],[ConstantNullBlock[positions=1]]]

@@ -8,6 +8,7 @@ package org.elasticsearch.xpack.esql.core.tree;
 
 import org.elasticsearch.common.io.stream.NamedWriteable;
 import org.elasticsearch.xpack.esql.core.QlIllegalArgumentException;
+import org.elasticsearch.xpack.esql.core.expression.NameId;
 
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -315,9 +316,24 @@ public abstract class Node<T extends Node<T>> implements NamedWriteable {
         return sb.toString();
     }
 
+
+    // FIXME(gal, do-not-merge!) document, rename, reduce duplication
+    public String nodeTestString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(nodeName());
+        sb.append("[");
+        sb.append(propertiesToTestString(true));
+        sb.append("]");
+        return sb.toString();
+    }
+
     @Override
     public String toString() {
         return treeString(new StringBuilder(), 0, new BitSet()).toString();
+    }
+
+    public String toTestString() {
+        return treeTestString(new StringBuilder(), 0, new BitSet()).toString();
     }
 
     /**
@@ -417,9 +433,69 @@ public abstract class Node<T extends Node<T>> implements NamedWriteable {
         return sb.toString();
     }
 
+    /**
+     * Render the properties of this {@link Node} one by
+     * one like {@code foo bar baz}. These go inside the
+     * {@code [} and {@code ]} of the output of {@link #treeString}.
+     */
+    // FIXME(gal, do-not-merge!) document, rename, reduce duplication
+    public String propertiesToTestString(boolean skipIfChild) {
+        StringBuilder sb = new StringBuilder();
+
+        @SuppressWarnings("HiddenField")
+        List<?> children = children();
+        // eliminate children (they are rendered as part of the tree)
+        int remainingProperties = TO_STRING_MAX_PROP;
+        int maxWidth = 0;
+        boolean needsComma = false;
+
+        List<Object> props = nodeProperties();
+        for (Object prop : props) {
+            if (prop instanceof NameId) {
+                continue;
+            }
+            // consider a property if it is not ignored AND
+            // it's not a child (optional)
+            if ((skipIfChild && (children.contains(prop) || children.equals(prop))) == false) {
+                if (remainingProperties-- < 0) {
+                    sb.append("...").append(props.size() - TO_STRING_MAX_PROP).append("fields not shown");
+                    break;
+                }
+
+                if (needsComma) {
+                    sb.append(",");
+                }
+
+                String stringValue = toTestString(prop);
+
+                // : Objects.toString(prop);
+                if (maxWidth + stringValue.length() > TO_STRING_MAX_WIDTH) {
+                    int cutoff = Math.max(0, TO_STRING_MAX_WIDTH - maxWidth);
+                    sb.append(stringValue.substring(0, cutoff));
+                    sb.append("\n");
+                    stringValue = stringValue.substring(cutoff);
+                    maxWidth = 0;
+                }
+                maxWidth += stringValue.length();
+                sb.append(stringValue);
+
+                needsComma = true;
+            }
+        }
+
+        return sb.toString();
+    }
+
     private static String toString(Object obj) {
         StringBuilder sb = new StringBuilder();
         toString(sb, obj);
+        return sb.toString();
+    }
+
+    // FIXME(gal, do-not-merge!) document, rename, reduce duplication
+    private static String toTestString(Object obj) {
+        StringBuilder sb = new StringBuilder();
+        toTestString(sb, obj);
         return sb.toString();
     }
 
@@ -441,6 +517,25 @@ public abstract class Node<T extends Node<T>> implements NamedWriteable {
         }
     }
 
+    // FIXME(gal, do-not-merge!) document, rename, reduce duplication
+    private static void toTestString(StringBuilder sb, Object obj) {
+        if (obj instanceof Iterable) {
+            sb.append("[");
+            for (Iterator<?> it = ((Iterable<?>) obj).iterator(); it.hasNext();) {
+                Object o = it.next();
+                toTestString(sb, o);
+                if (it.hasNext()) {
+                    sb.append(", ");
+                }
+            }
+            sb.append("]");
+        } else if (obj instanceof Node<?>) {
+            sb.append(((Node<?>) obj).nodeTestString());
+        } else {
+            sb.append(Objects.toString(obj));
+        }
+    }
+
     private <U> boolean containsNull(List<U> us) {
         // Use custom implementation because some implementations of `List.contains` (e.g. ImmutableCollections$AbstractImmutableList) throw
         // a NPE if any of the elements is null.
@@ -450,5 +545,46 @@ public abstract class Node<T extends Node<T>> implements NamedWriteable {
             }
         }
         return false;
+    }
+
+    // FIXME(gal, do-not-merge!) rename, reduce duplication
+    /**
+     * Ensures consistent tree rendering for tests.
+     */
+    final StringBuilder treeTestString(StringBuilder sb, int depth, BitSet hasParentPerDepth) {
+        if (depth > 0) {
+            // draw children
+            for (int column = 0; column < depth; column++) {
+                if (hasParentPerDepth.get(column)) {
+                    sb.append("|");
+                    // if not the last elder, adding padding (since each column has two chars ("|_" or "\_")
+                    if (column < depth - 1) {
+                        sb.append(" ");
+                    }
+                } else {
+                    // if the child has no parent (elder on the previous level), it means its the last sibling
+                    sb.append((column == depth - 1) ? "\\" : "  ");
+                }
+            }
+
+            sb.append("_");
+        }
+
+        sb.append(nodeTestString());
+
+        @SuppressWarnings("HiddenField")
+        List<T> children = children();
+        if (children.isEmpty() == false) {
+            sb.append("\n");
+        }
+        for (int i = 0; i < children.size(); i++) {
+            T t = children.get(i);
+            hasParentPerDepth.set(depth, i < children.size() - 1);
+            t.treeTestString(sb, depth + 1, hasParentPerDepth);
+            if (i < children.size() - 1) {
+                sb.append("\n");
+            }
+        }
+        return sb;
     }
 }

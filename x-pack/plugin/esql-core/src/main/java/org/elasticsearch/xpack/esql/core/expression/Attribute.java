@@ -132,8 +132,18 @@ public abstract class Attribute extends NamedExpression {
     }
 
     @Override
+    public String toTestString() {
+        return name() + "{" + label() + (synthetic() ? "$" : "") + "}";
+    }
+
+    @Override
     public String nodeString() {
         return toString();
+    }
+
+    @Override
+    public String nodeTestString() {
+        return toTestString();
     }
 
     protected abstract String label();

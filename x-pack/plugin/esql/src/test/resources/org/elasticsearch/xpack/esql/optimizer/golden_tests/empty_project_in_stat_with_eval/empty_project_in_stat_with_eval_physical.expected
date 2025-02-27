@@ -1,0 +1,4 @@
+ProjectExec[[x{r}]]
+\_EvalExec[[Alias[x,false]]]
+  \_LimitExec[Literal[1000,INTEGER]]
+    \_LocalSourceExec[[{e}],[ConstantNullBlock[positions=1]]]

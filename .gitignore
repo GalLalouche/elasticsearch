@@ -69,6 +69,9 @@ testfixtures_shared/
 # Generated
 checkstyle_ide.xml
 x-pack/plugin/esql/src/main/generated-src/generated/
+x-pack/plugin/esql/src/test/resources/org/elasticsearch/xpack/esql/optimizer/golden_tests/*/*.md
+x-pack/plugin/esql/src/test/resources/org/elasticsearch/xpack/esql/optimizer/golden_tests/*/*.actual
+
 
 # JEnv
 .java-version

@@ -9,8 +9,9 @@ plugins {
   id 'idea'
 }
 
-import org.elasticsearch.gradle.internal.precommit.CheckForbiddenApisTask;
-import org.elasticsearch.gradle.internal.util.SourceDirectoryCommandLineArgumentProvider;
+
+import org.elasticsearch.gradle.internal.util.SourceDirectoryCommandLineArgumentProvider
+
 import static org.elasticsearch.gradle.util.PlatformUtils.normalize
 
 apply plugin: 'elasticsearch.internal-es-plugin'
@@ -21,7 +22,7 @@ apply plugin: 'elasticsearch.publish'
 esplugin {
   name = 'x-pack-esql'
   description = 'The plugin that powers ESQL for Elasticsearch'
-  classname ='org.elasticsearch.xpack.esql.plugin.EsqlPlugin'
+  classname = 'org.elasticsearch.xpack.esql.plugin.EsqlPlugin'
   extendedPlugins = ['x-pack-esql-core', 'lang-painless', 'x-pack-ml']
 }
 
@@ -45,7 +46,7 @@ dependencies {
   annotationProcessor project('compute:gen')
 
   testImplementation(project('qa:testFixtures')) {
-    exclude(group:"org.elasticsearch.plugin", module: "esql")
+    exclude(group: "org.elasticsearch.plugin", module: "esql")
   }
   testImplementation project(':test:framework')
   testImplementation(testArtifact(project(xpackModule('core'))))
@@ -61,6 +62,8 @@ dependencies {
   testImplementation project(xpackModule('esql:compute:test'))
   testImplementation('net.nextencia:rrdiagram:0.9.4')
   testImplementation('org.webjars.npm:fontsource__roboto-mono:4.5.7')
+  testImplementation('org.fusesource.jansi:jansi:2.4.0')
+  testImplementation('io.github.java-diff-utils:java-diff-utils:4.12')
 
   internalClusterTestImplementation project(":modules:mapper-extras")
 }
@@ -79,7 +82,8 @@ idea.module {
 }
 
 interface Injected {
-  @Inject FileSystemOperations getFs()
+  @Inject
+  FileSystemOperations getFs()
 }
 
 tasks.named("test").configure {
@@ -97,10 +101,11 @@ tasks.named("test").configure {
     def effectiveProjectDir = projectDir
 
     doLast {
-      List types = typesFolder.list().findAll {it.endsWith("asciidoc")}
+      List types = typesFolder.list().findAll { it.endsWith("asciidoc") }
       int count = types == null ? 0 : types.size()
       Closure readExample = line -> {
-        line.replaceAll(/read-example::([^\[]+)\[tag=([^,\]]+)(, ?json)?\]/, {
+        line.replaceAll(
+          /read-example::([^\[]+)\[tag=([^,\]]+)(, ?json)?\]/, {
           String file = it[1]
           String tag = it[2]
           boolean isJson = it[3]
@@ -109,7 +114,7 @@ tasks.named("test").configure {
           int start = allExamples.indexOf("tag::${tag}[]")
           int end = allExamples.indexOf("end::${tag}[]", start)
           if (start < 0 || end < 0) {
-              throw new IllegalAccessException("can't find example ${file}::${tag}")
+            throw new IllegalAccessException("can't find example ${file}::${tag}")
           }
           // Slice out the newlines
           start = allExamples.indexOf('\n', start) + 1
@@ -119,7 +124,8 @@ tasks.named("test").configure {
             example = example.replace("\"", "\\\"").replace("\n", "\\n")
           }
           return example;
-        })
+        }
+        )
       }
       if (count == 0) {
         logger.quiet("ESQL Docs: No function signatures created. Skipping sync.")
@@ -281,27 +287,27 @@ tasks.register("regen") {
 
 tasks.named("spotlessJava") { dependsOn "stringTemplates" }
 tasks.named('checkstyleMain').configure {
-  excludes = [ "**/*.java.st" ]
+  excludes = ["**/*.java.st"]
   exclude { normalize(it.file.toString()).contains("src/main/generated-src/generated") }
   exclude { normalize(it.file.toString()).contains("src/main/generated") }
 }
 
 def prop(Name, Type, type, TYPE, BYTES, Array) {
   return [
-    "Name" : Name,
-    "Type" : Type,
-    "type" : type,
-    "TYPE" : TYPE,
-    "BYTES" : BYTES,
-    "Array" : Array,
+    "Name"       : Name,
+    "Type"       : Type,
+    "type"       : type,
+    "TYPE"       : TYPE,
+    "BYTES"      : BYTES,
+    "Array"      : Array,
 
-    "int" : type == "int" ? "true" : "",
-    "long" : type == "long" ? "true" : "",
-    "double" : type == "double" ? "true" : "",
-    "BytesRef" : type == "BytesRef" ? "true" : "",
-    "boolean" : type == "boolean" ? "true" : "",
-    "nanosMillis" : Name == "NanosMillis" ? "true" : "",
-    "millisNanos" : Name == "MillisNanos" ? "true" : "",
+    "int"        : type == "int" ? "true" : "",
+    "long"       : type == "long" ? "true" : "",
+    "double"     : type == "double" ? "true" : "",
+    "BytesRef"   : type == "BytesRef" ? "true" : "",
+    "boolean"    : type == "boolean" ? "true" : "",
+    "nanosMillis": Name == "NanosMillis" ? "true" : "",
+    "millisNanos": Name == "MillisNanos" ? "true" : "",
   ]
 }
 
@@ -317,64 +323,74 @@ tasks.named('stringTemplates').configure {
   File inInputFile = file("src/main/java/org/elasticsearch/xpack/esql/expression/predicate/operator/comparison/X-InEvaluator.java.st")
   template {
     it.properties = booleanProperties
-    it.inputFile =  inInputFile
+    it.inputFile = inInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/predicate/operator/comparison/InBooleanEvaluator.java"
   }
   template {
     it.properties = intProperties
-    it.inputFile =  inInputFile
+    it.inputFile = inInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/predicate/operator/comparison/InIntEvaluator.java"
   }
   template {
     it.properties = longProperties
-    it.inputFile =  inInputFile
+    it.inputFile = inInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/predicate/operator/comparison/InLongEvaluator.java"
   }
   template {
     it.properties = nanosMillisProperties
-    it.inputFile =  inInputFile
+    it.inputFile = inInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/predicate/operator/comparison/InNanosMillisEvaluator.java"
   }
   template {
     it.properties = millisNanosProperties
-    it.inputFile =  inInputFile
+    it.inputFile = inInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/predicate/operator/comparison/InMillisNanosEvaluator.java"
   }
   template {
     it.properties = doubleProperties
-    it.inputFile =  inInputFile
+    it.inputFile = inInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/predicate/operator/comparison/InDoubleEvaluator.java"
   }
   template {
     it.properties = bytesRefProperties
-    it.inputFile =  inInputFile
+    it.inputFile = inInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/predicate/operator/comparison/InBytesRefEvaluator.java"
   }
 
   File coalesceInputFile = file("src/main/java/org/elasticsearch/xpack/esql/expression/function/scalar/nulls/X-CoalesceEvaluator.java.st")
   template {
     it.properties = booleanProperties
-    it.inputFile =  coalesceInputFile
+    it.inputFile = coalesceInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/function/scalar/nulls/CoalesceBooleanEvaluator.java"
   }
   template {
     it.properties = intProperties
-    it.inputFile =  coalesceInputFile
+    it.inputFile = coalesceInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/function/scalar/nulls/CoalesceIntEvaluator.java"
   }
   template {
     it.properties = longProperties
-    it.inputFile =  coalesceInputFile
+    it.inputFile = coalesceInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/function/scalar/nulls/CoalesceLongEvaluator.java"
   }
   template {
     it.properties = doubleProperties
-    it.inputFile =  coalesceInputFile
+    it.inputFile = coalesceInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/function/scalar/nulls/CoalesceDoubleEvaluator.java"
   }
   template {
     it.properties = bytesRefProperties
-    it.inputFile =  coalesceInputFile
+    it.inputFile = coalesceInputFile
     it.outputFile = "org/elasticsearch/xpack/esql/expression/function/scalar/nulls/CoalesceBytesRefEvaluator.java"
   }
+}
+
+
+test {
+  def goldenMode = System.getProperty("golden.mode")
+  if (goldenMode != null) {
+    systemProperty "golden.mode", goldenMode
+  }
+  systemProperty "policy.directory", file("${projectDir}").absolutePath
+  systemProperty "java.security.policy", file("${projectDir}/test.policy").absolutePath
 }

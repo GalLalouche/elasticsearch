@@ -1,0 +1,4 @@
+ProjectExec[[Alias[f2,false]]]
+\_LimitExec[Literal[1000,INTEGER]]
+  \_ExchangeExec[[languages{f}],false]
+    \_FragmentExec[Project[[languages{f}]],null,0]
