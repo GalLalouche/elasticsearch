@@ -6,8 +6,11 @@
  */
 package org.elasticsearch.xpack.esql.core.tree;
 
+import org.elasticsearch.xpack.esql.core.expression.Attribute;
+
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.stream.Collectors;
 
 public abstract class NodeUtils {
     public static <A extends Node<A>, B extends Node<B>> String diffString(A left, B right) {
@@ -58,7 +61,6 @@ public abstract class NodeUtils {
 
     private static final int TO_STRING_LIMIT = 52;
 
-    // FIXME(gal, do-not-merge!) Find out who uses this method, and replace the testToString variant with the non-limited version.
     public static <E> String limitedToString(Collection<E> c) {
         Iterator<E> it = c.iterator();
         if (it.hasNext() == false) {
@@ -83,5 +85,9 @@ public abstract class NodeUtils {
             }
             sb.append(',').append(' ');
         }
+    }
+
+    public static String unlimitedToString(Collection<Attribute> c) {
+        return c.stream().map(s -> s != null ? s.goldenTestToString() : "null").collect(Collectors.joining(", ", "[", "]"));
     }
 }

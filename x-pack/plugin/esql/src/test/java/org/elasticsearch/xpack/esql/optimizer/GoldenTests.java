@@ -14,6 +14,7 @@ import com.github.difflib.text.DiffRow;
 import com.github.difflib.text.DiffRowGenerator;
 
 import org.elasticsearch.core.Strings;
+import org.elasticsearch.core.Tuple;
 import org.elasticsearch.logging.LogManager;
 import org.elasticsearch.logging.Logger;
 import org.elasticsearch.test.ESTestCase;
@@ -34,6 +35,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -44,15 +46,10 @@ import static org.elasticsearch.xpack.esql.EsqlTestUtils.unboundLogicalOptimizer
 import static org.elasticsearch.xpack.esql.EsqlTestUtils.withDefaultLimitWarning;
 import static org.elasticsearch.xpack.esql.analysis.AnalyzerTestUtils.defaultLookupResolution;
 
-// TODOs
-// - Better solution than disabling security for writing new files.
-// - Better diff viewing, using some diff tool for Java.
-// - Write the tests inline instead of in separate files.
 public class GoldenTests extends ESTestCase {
     private static final Logger logger = LogManager.getLogger(GoldenTests.class);
 
     public void testBasic() throws Exception {
-        // get the function name via reflection
         doTest("FROM employees");
     }
 
@@ -116,7 +113,16 @@ public class GoldenTests extends ESTestCase {
     }
 
     private record Test(String testName, String esqlQuery, EnumSet<Stage> stages) {
+
         public void doTest() throws IOException {
+            var results = doTests();
+            var failedStages = results.stream().filter(e -> e.v2() == TestResult.FAILURE).map(e -> e.v1()).toList();
+            if (failedStages.isEmpty() == false) {
+                fail(Strings.format("Output for test '%s' does not match for stages '%s'", testName, failedStages));
+            }
+        }
+
+        public List<Tuple<Stage, TestResult>> doTests() throws IOException {
             var parsedStatement = new EsqlParser().createStatement(esqlQuery);
             var analyzer = new Analyzer(
                 new AnalyzerContext(
@@ -128,65 +134,80 @@ public class GoldenTests extends ESTestCase {
                 ),
                 TEST_VERIFIER
             );
+            var result = new ArrayList<Tuple<Stage, TestResult>>();
             var analyzed = analyzer.analyze(parsedStatement);
             if (stages.contains(Stage.ANALYZER)) {
-                verifyOrWrite(analyzed, Stage.ANALYZER);
+                result.add(Tuple.tuple(Stage.ANALYZER, verifyOrWrite(analyzed, Stage.ANALYZER)));
             }
             if (stages.contains(Stage.LOGICAL) == false && stages.contains(Stage.PHYSICAL) == false) {
-                return;
+                return result;
             }
             var logicallyOptimized = new LogicalPlanOptimizer(unboundLogicalOptimizerContext()).optimize(analyzed);
             if (stages.contains(Stage.LOGICAL)) {
-                verifyOrWrite(logicallyOptimized, Stage.LOGICAL);
+                result.add(Tuple.tuple(Stage.LOGICAL, verifyOrWrite(logicallyOptimized, Stage.LOGICAL)));
             }
             if (stages.contains(Stage.PHYSICAL) == false) {
-                return;
+                return result;
             }
             var physicalPlanOptimizer = new PhysicalPlanOptimizer(new PhysicalOptimizerContext(null));
-            verifyOrWrite(physicalPlanOptimizer.optimize(new Mapper().map(logicallyOptimized)), Stage.PHYSICAL);
+            result.add(
+                Tuple.tuple(
+                    Stage.PHYSICAL,
+                    verifyOrWrite(physicalPlanOptimizer.optimize(new Mapper().map(logicallyOptimized)), Stage.PHYSICAL)
+                )
+            );
+            return result;
         }
 
-        private <T extends QueryPlan<T>> void verifyOrWrite(T plan, Stage stage) throws IOException {
+        enum TestResult {
+            SUCCESS,
+            FAILURE,
+            CREATED
+        }
+
+        private <T extends QueryPlan<T>> TestResult verifyOrWrite(T plan, Stage stage) throws IOException {
             var outputFile = outputFile(stage);
-            switch (getGoldenMode()) {
+            GoldenMode goldenMode = getGoldenMode();
+            switch (goldenMode) {
                 case BULLDOZE -> {
                     logger.info("Bulldozing file {}", outputFile);
-                    createNewOutput(plan, stage);
+                    return createNewOutput(plan, stage);
                 }
                 case VERIFY -> {
-                    if (outputFile.toFile().exists() && getGoldenMode() == GoldenMode.VERIFY) {
-                        verifyExisting(plan, stage);
+                    if (outputFile.toFile().exists() && goldenMode == GoldenMode.VERIFY) {
+                        return verifyExisting(plan, stage);
                     } else {
                         logger.debug("No output exists for file {}, writing new output", outputFile);
-                        createNewOutput(plan, stage);
+                        return createNewOutput(plan, stage);
                     }
                 }
+                default -> throw new AssertionError("Unknown golden mode: " + goldenMode);
             }
         }
 
-        private void createNewOutput(QueryPlan<?> plan, Stage stage) throws IOException {
+        private TestResult createNewOutput(QueryPlan<?> plan, Stage stage) throws IOException {
             Files.createDirectories(outputFile(stage).getParent());
-            Files.write(outputFile(stage), plan.toTestString().getBytes());
+            Files.write(outputFile(stage), plan.goldenTestToString().getBytes());
+            return TestResult.CREATED;
         }
 
-        // We load the existing data from binary, since using .equals is more robust than comparing toString, e.g., with regard to NameIDs.
-        private void verifyExisting(QueryPlan<?> plan, Stage stage) throws IOException {
+        private TestResult verifyExisting(QueryPlan<?> plan, Stage stage) throws IOException {
             Path output = outputFile(stage);
             var read = Files.readString(output);
-            String testString = normalize(plan.toTestString());
+            String testString = normalize(plan.goldenTestToString());
             if (normalize(testString).equals(normalize(read))) {
-                return;
+                return TestResult.SUCCESS;
             }
             List<String> actualLines = normalize(testString.lines());
             List<String> expectedLines = normalize(read.lines());
-            printUnifiedDiff(actualLines, expectedLines);
+            printUnifiedDiff(stage, actualLines, expectedLines);
             Path path = output.resolveSibling(output.getFileName().toString().replaceAll(".expected", "_diff.md"));
             logger.info("Creating markdown file at " + path.toAbsolutePath());
             Files.write(path, createMarkdownDiff(actualLines, expectedLines).getBytes());
             Path actualFile = output.resolveSibling(output.getFileName().toString().replaceAll("expected", "actual"));
             logger.info("Creating actual file at " + actualFile.toAbsolutePath());
             Files.write(actualFile, actualLines);
-            fail(Strings.format("Output for test '%s' does not match for stage '%s'", testName, stage));
+            return TestResult.FAILURE;
         }
 
         private Path outputFile(Stage stage) {
@@ -194,7 +215,6 @@ public class GoldenTests extends ESTestCase {
                 BASE_FILE.getAbsolutePath(),
                 "golden_tests",
                 testName,
-                // We keep the .esql_ prefix to ensure the order of the plans when viewing the files.
                 Strings.format("%s_%s.expected", testName, stage.name().toLowerCase())
             );
         }
@@ -232,16 +252,13 @@ public class GoldenTests extends ESTestCase {
         PHYSICAL;
     }
 
-    private static void printUnifiedDiff(List<String> actual, List<String> expected) {
+    private static void printUnifiedDiff(Stage stage, List<String> actual, List<String> expected) {
+        Patch<String> patch = DiffUtils.diff(actual, expected);
 
-        // Calculate line-based diff
-        Patch<String> patch = DiffUtils.diff(expected, actual);
+        logger.error(Ansi.ansi().fg(Ansi.Color.YELLOW).a("For stage '" + stage + "'").reset().toString());
+        logger.error(Ansi.ansi().fg(Ansi.Color.RED).a("+++ Actual").reset().toString());
+        logger.error(Ansi.ansi().fg(Ansi.Color.GREEN).a("--- Expected").reset().toString());
 
-        // Print header
-        logger.error(Ansi.ansi().fg(Ansi.Color.RED).a("--- Actual").reset().toString());
-        logger.error(Ansi.ansi().fg(Ansi.Color.GREEN).a("+++ Expected").reset().toString());
-
-        // Print each change in unified diff format
         for (AbstractDelta<String> delta : patch.getDeltas()) {
             int origStart = delta.getSource().getPosition() + 1;
             int revisedStart = delta.getTarget().getPosition() + 1;
@@ -254,14 +271,12 @@ public class GoldenTests extends ESTestCase {
                     .toString()
             );
 
-            // Print removed lines
             for (String line : delta.getSource().getLines()) {
-                logger.error(Ansi.ansi().fg(Ansi.Color.RED).a("- " + line).reset().toString());
+                logger.error(Ansi.ansi().fg(Ansi.Color.RED).a("+ " + line).reset().toString());
             }
 
-            // Print added lines
             for (String line : delta.getTarget().getLines()) {
-                logger.error(Ansi.ansi().fg(Ansi.Color.GREEN).a("+ " + line).reset().toString());
+                logger.error(Ansi.ansi().fg(Ansi.Color.GREEN).a("- " + line).reset().toString());
             }
         }
     }
@@ -272,17 +287,17 @@ public class GoldenTests extends ESTestCase {
             .mergeOriginalRevised(true)
             .inlineDiffByWord(true)
             .ignoreWhiteSpaces(true)
-            .oldTag(f -> "~")      // introduce markdown style for strikethrough
-            .newTag(f -> "**")     // introduce markdown style for bold
+            .oldTag(f -> "~")
+            .newTag(f -> "**")
             .build();
         var sb = new StringBuilder();
-        sb.append("|Line #|Actual|Expected|\n");
+        sb.append("|Line #|Expected|Actual|\n");
         sb.append("|------|------|--------|\n");
         List<DiffRow> diffRows = generator.generateDiffRows(actual, expected);
         for (int i = 0; i < diffRows.size(); i++) {
             var row = diffRows.get(i);
             var line = switch (row.getTag()) {
-                case INSERT, DELETE, CHANGE -> "|%d|<span style='color:red'>%s</span>|<span style='color:green'>%s</span>|";
+                case INSERT, DELETE, CHANGE -> "|%d|<span style='color:green'>%s</span>|<span style='color:red'>%s</span>|";
                 case EQUAL -> "|%d|%s|%s|";
             };
             sb.append(Strings.format(line + "\n", i, row.getNewLine(), row.getOldLine()));

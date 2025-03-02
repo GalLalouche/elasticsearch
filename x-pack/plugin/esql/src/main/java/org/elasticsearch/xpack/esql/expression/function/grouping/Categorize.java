@@ -11,6 +11,7 @@ import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.compute.operator.EvalOperator.ExpressionEvaluator;
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Nullability;
 import org.elasticsearch.xpack.esql.core.tree.NodeInfo;
@@ -132,6 +133,15 @@ public class Categorize extends GroupingFunction {
 
     @Override
     public String toString() {
-        return "Categorize{field=" + field + "}";
+        return toString(String.valueOf(field));
+    }
+
+    @Override
+    public String goldenTestToString() {
+        return toString(field != null ? field.goldenTestToString() : null);
+    }
+
+    public String toString(@Nullable String fieldToString) {
+        return "Categorize{field=" + fieldToString + "}";
     }
 }

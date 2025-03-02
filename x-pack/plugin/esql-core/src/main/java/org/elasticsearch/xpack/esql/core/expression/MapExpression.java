@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.elasticsearch.xpack.esql.core.type.DataType.UNSUPPORTED;
@@ -138,7 +139,17 @@ public class MapExpression extends Expression {
 
     @Override
     public String toString() {
-        String str = entryExpressions.stream().map(String::valueOf).collect(Collectors.joining(", "));
-        return "{ " + str + " }";
+        return toString(Expression::toString);
+    }
+
+    @Override
+    public String goldenTestToString() {
+        return toString(Expression::goldenTestToString);
+    }
+
+    private String toString(Function<Expression, String> expressionToString) {
+        return entryExpressions.stream()
+            .map(s -> s == null ? "null" : expressionToString.apply(s))
+            .collect(Collectors.joining(", ", "{", "}"));
     }
 }

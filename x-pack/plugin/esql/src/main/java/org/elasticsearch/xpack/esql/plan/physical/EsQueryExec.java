@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 import static org.elasticsearch.TransportVersions.ESQL_SKIP_ES_INDEX_SERIALIZATION;
 
@@ -242,7 +243,7 @@ public class EsQueryExec extends LeafExec implements EstimatesRowSize {
     }
 
     @Override
-    public String toTestString() {
+    public String goldenTestToString() {
         return "";
     }
 
@@ -331,6 +332,15 @@ public class EsQueryExec extends LeafExec implements EstimatesRowSize {
 
     @Override
     public String nodeString() {
+        return nodeString(NodeUtils.limitedToString(attrs), Expression::nodeString);
+    }
+
+    @Override
+    public String goldenTestNodeString() {
+        return nodeString(NodeUtils.unlimitedToString(attrs), Expression::goldenTestNodeString);
+    }
+
+    private String nodeString(String attrsString, Function<Expression, String> limitToString) {
         return nodeName()
             + "["
             + indexPattern
@@ -341,9 +351,9 @@ public class EsQueryExec extends LeafExec implements EstimatesRowSize {
             + "query["
             + (query != null ? Strings.toString(query, false, true) : "")
             + "]"
-            + NodeUtils.limitedToString(attrs)
+            + attrsString
             + ", limit["
-            + (limit != null ? limit.toString() : "")
+            + (limit != null ? limitToString.apply(limit) : "")
             + "], sort["
             + (sorts != null ? sorts.toString() : "")
             + "] estimatedRowSize["

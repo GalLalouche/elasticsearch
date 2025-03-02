@@ -464,4 +464,9 @@ public class Bucket extends GroupingFunction implements PostOptimizationVerifica
     public String toString() {
         return "Bucket{" + "field=" + field + ", buckets=" + buckets + ", from=" + from + ", to=" + to + '}';
     }
+
+    @Override
+    public String goldenTestToString() {
+        return toString();
+    }
 }

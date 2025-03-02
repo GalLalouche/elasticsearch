@@ -167,4 +167,9 @@ public class UnresolvedRelation extends LeafPlan implements Unresolvable, Teleme
     public String toString() {
         return UNRESOLVED_PREFIX + indexPattern.indexPattern();
     }
+
+    @Override
+    public String goldenTestToString() {
+        return toString();
+    }
 }

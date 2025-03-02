@@ -130,8 +130,18 @@ public class Literal extends LeafExpression {
     }
 
     @Override
+    public String goldenTestToString() {
+        return toString();
+    }
+
+    @Override
     public String nodeString() {
-        return toString() + "[" + dataType + "]";
+        return this + "[" + dataType + "]";
+    }
+
+    @Override
+    public String goldenTestNodeString() {
+        return nodeString();
     }
 
     /**

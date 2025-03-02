@@ -34,6 +34,7 @@ import org.elasticsearch.xpack.esql.planner.ToAggregator;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.elasticsearch.xpack.esql.core.expression.TypeResolutions.ParamOrdinal.FIRST;
 import static org.elasticsearch.xpack.esql.core.expression.TypeResolutions.ParamOrdinal.SECOND;
@@ -182,8 +183,17 @@ public class Rate extends AggregateFunction implements OptionalArgument, ToAggre
 
     @Override
     public String toString() {
+        return toString(Expression::toString);
+    }
+
+    @Override
+    public String goldenTestToString() {
+        return toString(Expression::goldenTestToString);
+    }
+
+    private String toString(Function<Expression, String> unitToString) {
         if (unit != null) {
-            return "rate(" + field() + "," + unit + ")";
+            return "rate(" + field() + "," + unitToString.apply(unit) + ")";
         } else {
             return "rate(" + field() + ")";
         }
