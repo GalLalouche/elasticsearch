@@ -681,6 +681,7 @@ public abstract class MappedFieldType {
     }
 
     public enum FieldExtractPreference {
+        SOURCE_HACKER,
         /**
          * Load the field from doc-values into a BlockLoader supporting doc-values.
          */

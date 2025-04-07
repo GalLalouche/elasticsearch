@@ -61,6 +61,8 @@ import org.elasticsearch.script.field.KeywordDocValuesField;
 import org.elasticsearch.search.aggregations.support.CoreValuesSourceType;
 import org.elasticsearch.search.lookup.FieldValues;
 import org.elasticsearch.search.lookup.SearchLookup;
+import org.elasticsearch.search.lookup.Source;
+import org.elasticsearch.search.lookup.SourceFilter;
 import org.elasticsearch.search.runtime.StringScriptFieldFuzzyQuery;
 import org.elasticsearch.search.runtime.StringScriptFieldPrefixQuery;
 import org.elasticsearch.search.runtime.StringScriptFieldRegexpQuery;
@@ -879,6 +881,12 @@ public final class KeywordFieldMapper extends FieldMapper {
 
         private SourceValueFetcher sourceValueFetcher(Set<String> sourcePaths) {
             return new SourceValueFetcher(sourcePaths, nullValue) {
+                @Override
+                public List<Object> fetchValues(Source source, int doc, List<Object> ignoredValues) {
+                    var sf = new SourceFilter(sourcePaths.toArray(new String[(sourcePaths.size())]), null);
+                    return super.fetchValues(sf.filterMap(source), doc, ignoredValues);
+                }
+
                 @Override
                 protected String parseSourceValue(Object value) {
                     String keywordValue = value.toString();

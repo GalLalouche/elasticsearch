@@ -35,6 +35,7 @@ import org.elasticsearch.common.lucene.search.Queries;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.IndexVersion;
 import org.elasticsearch.index.IndexVersions;
@@ -63,10 +64,13 @@ import org.elasticsearch.search.aggregations.support.TimeSeriesValuesSourceType;
 import org.elasticsearch.search.aggregations.support.ValuesSourceType;
 import org.elasticsearch.search.lookup.FieldValues;
 import org.elasticsearch.search.lookup.SearchLookup;
+import org.elasticsearch.search.lookup.Source;
 import org.elasticsearch.search.lookup.SourceProvider;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentParser.Token;
+import org.elasticsearch.xcontent.XContentParserConfiguration;
+import org.elasticsearch.xcontent.XContentType;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -1969,7 +1973,9 @@ public class NumberFieldMapper extends FieldMapper {
 
         @Override
         public BlockLoader blockLoader(BlockLoaderContext blContext) {
-            if (hasDocValues() && (blContext.fieldExtractPreference() != FieldExtractPreference.STORED || isSyntheticSource)) {
+            if (hasDocValues()
+                && ((blContext.fieldExtractPreference() != FieldExtractPreference.STORED
+                    && blContext.fieldExtractPreference() != FieldExtractPreference.SOURCE_HACKER) || isSyntheticSource)) {
                 return type.blockLoaderFromDocValues(name());
             }
 
@@ -1981,7 +1987,13 @@ public class NumberFieldMapper extends FieldMapper {
                 // We only write the field names field if there aren't doc values or norms
                 ? BlockSourceReader.lookupFromFieldNames(blContext.fieldNames(), name())
                 : BlockSourceReader.lookupMatchingAll();
-            return type.blockLoaderFromSource(sourceValueFetcher(blContext.sourcePaths(name())), lookup);
+            return type.blockLoaderFromSource(
+                sourceValueFetcher(
+                    blContext.sourcePaths(name()),
+                    blContext.fieldExtractPreference() == FieldExtractPreference.SOURCE_HACKER
+                ),
+                lookup
+            );
         }
 
         @Override
@@ -2003,7 +2015,7 @@ public class NumberFieldMapper extends FieldMapper {
             if (operation == FielddataOperation.SCRIPT) {
                 SearchLookup searchLookup = fieldDataContext.lookupSupplier().get();
                 Set<String> sourcePaths = fieldDataContext.sourcePathsLookup().apply(name());
-                return type.getValueFetcherFieldDataBuilder(name(), valuesSourceType, searchLookup, sourceValueFetcher(sourcePaths));
+                return type.getValueFetcherFieldDataBuilder(name(), valuesSourceType, searchLookup, sourceValueFetcher(sourcePaths, false));
             }
 
             throw new IllegalStateException("unknown field data type [" + operation.name() + "]");
@@ -2025,11 +2037,72 @@ public class NumberFieldMapper extends FieldMapper {
             if (this.scriptValues != null) {
                 return FieldValues.valueFetcher(this.scriptValues, context);
             }
-            return sourceValueFetcher(context.isSourceEnabled() ? context.sourcePath(name()) : Collections.emptySet());
+            return sourceValueFetcher(context.isSourceEnabled() ? context.sourcePath(name()) : Collections.emptySet(), false);
         }
 
-        private SourceValueFetcher sourceValueFetcher(Set<String> sourcePaths) {
+        private SourceValueFetcher sourceValueFetcher(Set<String> sourcePaths, Boolean hackit) {
+            // ObjectParser<List<Object>, List<Object>> parser = new ObjectParser<>("long parser", true, ArrayList::new);
+            // var internalParser = new ObjectParser<>("long parser internal", true, ArrayList::new);
+            // internalParser.declareLong(List::add, new ParseField("value"));
+            // parser.declareObject(List::addAll, (p, c) -> internalParser.apply(p, c), new ParseField("a"));
             return new SourceValueFetcher(sourcePaths, nullValue) {
+                @Override
+                public List<Object> fetchValues(Source source, int doc, List<Object> ignoredValues) {
+                    // return super.fetchValues(hackit ? sourceFilter.filterBytes(source) : source, doc, ignoredValues);
+                    // List<Object> nullRes = new ArrayList<>();
+                    // nullRes.add(null);
+                    // try {
+                    // var parser = XContentHelper.createParser(
+                    // XContentParserConfiguration.EMPTY,
+                    // source.internalSourceRef(),
+                    // XContentType.JSON
+                    // );
+                    // Token token;
+                    // List<Tuple<Token, String>> tokens = new ArrayList<>();
+                    // token = Token.START_OBJECT;
+                    // if (token != Token.START_OBJECT) {
+                    // return nullRes;
+                    // }
+                    // parser.nextToken();
+                    // if (token != Token.FIELD_NAME || parser.currentName() != "a") {
+                    // return nullRes;
+                    // }
+                    // if (token != Token.START_OBJECT) {
+                    // return nullRes;
+                    // }
+                    // parser.nextToken();
+                    // if (token != Token.FIELD_NAME || parser.currentName() != "a") {
+                    // return nullRes;
+                    // }
+                    // while ((token = parser.nextToken()) != null) {
+                    // tokens.add(new Tuple<>(token, parser.currentName()));
+                    // }
+                    // return super.fetchValues(source, doc, ignoredValues);
+                    // } catch (IOException e) {
+                    // throw new RuntimeException(e);
+                    // }
+                    if (hackit) {
+                        try {
+                            assert false;
+                            // List<Object> context = new ArrayList<>();
+                            long sum = 0;
+                            var parser = XContentHelper.createParser(
+                                XContentParserConfiguration.EMPTY,
+                                source.internalSourceRef(),
+                                XContentType.JSON
+                            );
+                            while (parser.nextToken() != null) {
+                                sum += 1;
+                            }
+                            return List.of(sum);
+                        } catch (IOException e) {
+                            throw new IllegalArgumentException(e);
+                        }
+                    } else {
+                        return super.fetchValues(source, doc, ignoredValues);
+                    }
+                }
+
                 @Override
                 protected Object parseSourceValue(Object value) {
                     if (value.equals("")) {

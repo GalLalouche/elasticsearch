@@ -108,20 +108,22 @@ public final class SpatialExtent extends SpatialAggregateFunction implements ToA
         return switch (type) {
             case DataType.GEO_POINT -> switch (fieldExtractPreference) {
                 case DOC_VALUES -> new SpatialExtentGeoPointDocValuesAggregatorFunctionSupplier();
-                case NONE, EXTRACT_SPATIAL_BOUNDS, STORED -> new SpatialExtentGeoPointSourceValuesAggregatorFunctionSupplier();
+                case NONE, EXTRACT_SPATIAL_BOUNDS, STORED, SOURCE_HACKER ->
+                    new SpatialExtentGeoPointSourceValuesAggregatorFunctionSupplier();
             };
             case DataType.CARTESIAN_POINT -> switch (fieldExtractPreference) {
                 case DOC_VALUES -> new SpatialExtentCartesianPointDocValuesAggregatorFunctionSupplier();
-                case NONE, EXTRACT_SPATIAL_BOUNDS, STORED -> new SpatialExtentCartesianPointSourceValuesAggregatorFunctionSupplier();
+                case NONE, EXTRACT_SPATIAL_BOUNDS, STORED, SOURCE_HACKER ->
+                    new SpatialExtentCartesianPointSourceValuesAggregatorFunctionSupplier();
             };
             case DataType.GEO_SHAPE -> switch (fieldExtractPreference) {
                 case EXTRACT_SPATIAL_BOUNDS -> new SpatialExtentGeoShapeDocValuesAggregatorFunctionSupplier();
-                case NONE, STORED -> new SpatialExtentGeoShapeSourceValuesAggregatorFunctionSupplier();
+                case NONE, STORED, SOURCE_HACKER -> new SpatialExtentGeoShapeSourceValuesAggregatorFunctionSupplier();
                 case DOC_VALUES -> throw new EsqlIllegalArgumentException("Illegal field extract preference: " + fieldExtractPreference);
             };
             case DataType.CARTESIAN_SHAPE -> switch (fieldExtractPreference) {
                 case EXTRACT_SPATIAL_BOUNDS -> new SpatialExtentCartesianShapeDocValuesAggregatorFunctionSupplier();
-                case NONE, STORED -> new SpatialExtentCartesianShapeSourceValuesAggregatorFunctionSupplier();
+                case NONE, STORED, SOURCE_HACKER -> new SpatialExtentCartesianShapeSourceValuesAggregatorFunctionSupplier();
                 case DOC_VALUES -> throw new EsqlIllegalArgumentException("Illegal field extract preference: " + fieldExtractPreference);
             };
             default -> throw EsqlIllegalArgumentException.illegalDataType(type);

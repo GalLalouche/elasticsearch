@@ -830,7 +830,7 @@ public class ElasticsearchNode implements TestClusterConfiguration {
                 }
             }).collect(Collectors.joining(" "));
         }
-        String heapSize = System.getProperty("tests.heap.size", "512m");
+        String heapSize = System.getProperty("tests.heap.size", "4g");
         defaultEnv.put(
             "ES_JAVA_OPTS",
             "-Xms"
