@@ -2091,10 +2091,7 @@ public class NumberFieldMapper extends FieldMapper {
                                 source.internalSourceRef(),
                                 XContentType.JSON
                             );
-                            while (parser.nextToken() != null) {
-                                sum += 1;
-                            }
-                            return List.of(sum);
+                            return List.of((long) parser.countHack());
                         } catch (IOException e) {
                             throw new IllegalArgumentException(e);
                         }

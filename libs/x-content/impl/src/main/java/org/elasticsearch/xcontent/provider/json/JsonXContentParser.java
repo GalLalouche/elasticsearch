@@ -311,4 +311,17 @@ public class JsonXContentParser extends AbstractXContentParser {
     public boolean isClosed() {
         return parser.isClosed();
     }
+
+    @Override
+    public int countHack() {
+        int sum = 0;
+        try {
+            while (parser.nextToken() != null) {
+                sum++;
+            }
+            return sum;
+        } catch (IOException e) {
+            throw new AssertionError(e);
+        }
+    }
 }
