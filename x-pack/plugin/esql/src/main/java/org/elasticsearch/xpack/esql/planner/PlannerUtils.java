@@ -38,6 +38,8 @@ import org.elasticsearch.xpack.esql.optimizer.rules.physical.local.LucenePushdow
 import org.elasticsearch.xpack.esql.plan.QueryPlan;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
+import org.elasticsearch.xpack.esql.plan.logical.TopN;
+import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 import org.elasticsearch.xpack.esql.plan.physical.AggregateExec;
 import org.elasticsearch.xpack.esql.plan.physical.EsSourceExec;
 import org.elasticsearch.xpack.esql.plan.physical.EstimatesRowSize;
@@ -126,6 +128,21 @@ public class PlannerUtils {
         if (reducePlan instanceof AggregateExec agg) {
             reducePlan = agg.withMode(AggregatorMode.INTERMEDIATE);
         }
+        return EstimatesRowSize.estimateRowSize(fragment.estimatedRowSize(), reducePlan);
+    }
+
+    // FIXME(gal, NOCOMMIT) copy paste hack
+    public static PhysicalPlan topNReductionPlan(PhysicalPlan plan) {
+        // find the logical fragment
+        var fragments = plan.collectFirstChildren(p -> p instanceof FragmentExec);
+        if (fragments.isEmpty()) {
+            return null;
+        }
+        final FragmentExec fragment = (FragmentExec) fragments.getFirst();
+
+        var topNHolder = fragment.fragment().collectFirstChildren(p -> p instanceof UnaryPlan up && up.child() instanceof TopN).getFirst();
+        final LocalMapper mapper = new LocalMapper();
+        PhysicalPlan reducePlan = mapper.map(topNHolder);
         return EstimatesRowSize.estimateRowSize(fragment.estimatedRowSize(), reducePlan);
     }
 

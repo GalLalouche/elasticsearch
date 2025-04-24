@@ -53,6 +53,7 @@ import org.elasticsearch.xpack.esql.core.expression.FoldContext;
 import org.elasticsearch.xpack.esql.enrich.EnrichLookupService;
 import org.elasticsearch.xpack.esql.enrich.LookupFromIndexService;
 import org.elasticsearch.xpack.esql.inference.InferenceRunner;
+import org.elasticsearch.xpack.esql.plan.physical.EvalExec;
 import org.elasticsearch.xpack.esql.plan.physical.ExchangeSinkExec;
 import org.elasticsearch.xpack.esql.plan.physical.ExchangeSourceExec;
 import org.elasticsearch.xpack.esql.plan.physical.OutputExec;
@@ -622,6 +623,11 @@ public class ComputeService {
             if (p != null) {
                 reducePlan = p.replaceChildren(List.of(reducePlan));
             }
+        } else {
+            // FIXME(gal, NOCOMMIT) another stupid hack
+            PhysicalPlan p = PlannerUtils.topNReductionPlan(plan);
+            var foo = reducePlan;
+            reducePlan = p.transformUp(EvalExec.class, topN -> topN.replaceChild(foo));
         }
         return new ExchangeSinkExec(plan.source(), plan.output(), plan.isIntermediateAgg(), reducePlan);
     }
