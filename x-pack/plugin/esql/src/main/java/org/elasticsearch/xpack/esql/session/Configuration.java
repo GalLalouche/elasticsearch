@@ -50,6 +50,7 @@ public class Configuration implements Writeable {
     private final String query;
 
     private final boolean profile;
+    private boolean withTopNHack = true;
     private final boolean allowPartialResults;
 
     private final Map<String, Map<String, Column>> tables;
@@ -197,6 +198,10 @@ public class Configuration implements Writeable {
         return queryStartTimeNanos;
     }
 
+    public boolean withTopNHack() {
+        return withTopNHack;
+    }
+
     /**
      * Create a new {@link FoldContext} with the limit configured in the {@link QueryPragmas}.
      */
@@ -265,7 +270,9 @@ public class Configuration implements Writeable {
             && Objects.equals(that.query, query)
             && profile == that.profile
             && tables.equals(that.tables)
-            && allowPartialResults == that.allowPartialResults;
+            && allowPartialResults == that.allowPartialResults
+            && Objects.equals(withTopNHack, that.withTopNHack);
+
     }
 
     @Override
@@ -282,7 +289,8 @@ public class Configuration implements Writeable {
             query,
             profile,
             tables,
-            allowPartialResults
+            allowPartialResults,
+            withTopNHack
         );
     }
 
@@ -309,4 +317,22 @@ public class Configuration implements Writeable {
             + '}';
     }
 
+    public Configuration withoutTopNHack() {
+        var result = new Configuration(
+            zoneId,
+            locale,
+            username,
+            clusterName,
+            pragmas,
+            resultTruncationMaxSize,
+            resultTruncationDefaultSize,
+            query,
+            profile,
+            tables,
+            queryStartTimeNanos,
+            allowPartialResults
+        );
+        result.withTopNHack = false;
+        return result;
+    }
 }

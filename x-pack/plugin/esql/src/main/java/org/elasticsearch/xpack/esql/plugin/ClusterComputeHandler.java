@@ -248,7 +248,14 @@ final class ClusterComputeHandler implements TransportRequestHandler<ClusterComp
             () -> exchangeService.finishSinkHandler(globalSessionId, new TaskCancelledException(parentTask.getReasonCancelled()))
         );
         final String localSessionId = clusterAlias + ":" + globalSessionId;
-        final PhysicalPlan coordinatorPlan = ComputeService.reductionPlan(plan, true);
+        final PhysicalPlan coordinatorPlan = ComputeService.reductionPlan(
+            // FIXME(gal, NOCOMMIT) Empty search contexts here is very like to be wrong
+            List.of(),
+            configuration,
+            configuration.newFoldContext(),
+            plan,
+            true
+        );
         final AtomicReference<ComputeResponse> finalResponse = new AtomicReference<>();
         final long startTimeInNanos = System.nanoTime();
         final Runnable cancelQueryOnFailure = computeService.cancelQueryOnFailure(parentTask);

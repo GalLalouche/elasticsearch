@@ -56,7 +56,7 @@ public class LocalPhysicalPlanOptimizer extends ParameterizedRuleExecutor<Physic
 
     @Override
     protected List<Batch<PhysicalPlan>> batches() {
-        return RULES;
+        return context().configuration().withTopNHack() ? RULES : rulesNoHack(false);
     }
 
     protected static List<Batch<PhysicalPlan>> rules(boolean optimizeForEsSource) {
@@ -84,6 +84,35 @@ public class LocalPhysicalPlanOptimizer extends ParameterizedRuleExecutor<Physic
             new SpatialDocValuesExtraction(),
             new SpatialShapeBoundsExtraction(),
             new ParallelizeTimeSeriesSource()
+        );
+        return List.of(pushdown, fieldExtraction);
+    }
+
+    // FIXME(gal, NOCOMMIT)
+    protected static List<Batch<PhysicalPlan>> rulesNoHack(boolean optimizeForEsSource) {
+        List<Rule<?, PhysicalPlan>> esSourceRules = new ArrayList<>(6);
+        esSourceRules.add(new ReplaceSourceAttributes());
+        if (optimizeForEsSource) {
+            esSourceRules.add(new PushTopNToSource());
+            esSourceRules.add(new PushLimitToSource());
+            esSourceRules.add(new PushFiltersToSource());
+            esSourceRules.add(new PushSampleToSource());
+            esSourceRules.add(new PushStatsToSource());
+            esSourceRules.add(new EnableSpatialDistancePushdown());
+        }
+
+        // execute the rules multiple times to improve the chances of things being pushed down
+        @SuppressWarnings("unchecked")
+        var pushdown = new Batch<PhysicalPlan>("Push to ES", esSourceRules.toArray(Rule[]::new));
+        // add the field extraction in just one pass
+        // add it at the end after all the other rules have ran
+        var fieldExtraction = new Batch<>(
+            "Field extraction",
+            Limiter.ONCE,
+            new InsertFieldExtraction(),
+            new SpatialDocValuesExtraction(),
+            new SpatialShapeBoundsExtraction(),
+            new PushDownFieldExtractionToTimeSeriesSource()
         );
         return List.of(pushdown, fieldExtraction);
     }

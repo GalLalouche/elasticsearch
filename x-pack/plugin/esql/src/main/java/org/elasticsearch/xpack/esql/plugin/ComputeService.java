@@ -53,11 +53,11 @@ import org.elasticsearch.xpack.esql.core.expression.FoldContext;
 import org.elasticsearch.xpack.esql.enrich.EnrichLookupService;
 import org.elasticsearch.xpack.esql.enrich.LookupFromIndexService;
 import org.elasticsearch.xpack.esql.inference.InferenceRunner;
-import org.elasticsearch.xpack.esql.plan.physical.EvalExec;
 import org.elasticsearch.xpack.esql.plan.physical.ExchangeSinkExec;
 import org.elasticsearch.xpack.esql.plan.physical.ExchangeSourceExec;
 import org.elasticsearch.xpack.esql.plan.physical.OutputExec;
 import org.elasticsearch.xpack.esql.plan.physical.PhysicalPlan;
+import org.elasticsearch.xpack.esql.plan.physical.TopNExec;
 import org.elasticsearch.xpack.esql.planner.EsPhysicalOperationProviders;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner;
 import org.elasticsearch.xpack.esql.planner.PlannerUtils;
@@ -616,20 +616,28 @@ public class ComputeService {
         }
     }
 
-    static PhysicalPlan reductionPlan(ExchangeSinkExec plan, boolean enable) {
+    static PhysicalPlan reductionPlan(
+        List<SearchExecutionContext> searchContexts,
+        Configuration configuration,
+        FoldContext foldCtx,
+        ExchangeSinkExec plan,
+        boolean enable
+    ) {
         PhysicalPlan reducePlan = new ExchangeSourceExec(plan.source(), plan.output(), plan.isIntermediateAgg());
         if (enable) {
             PhysicalPlan p = PlannerUtils.reductionPlan(plan);
             if (p != null) {
                 reducePlan = p.replaceChildren(List.of(reducePlan));
             }
+            return new ExchangeSinkExec(plan.source(), plan.output(), plan.isIntermediateAgg(), reducePlan);
         } else {
             // FIXME(gal, NOCOMMIT) another stupid hack
-            PhysicalPlan p = PlannerUtils.topNReductionPlan(plan);
-            var foo = reducePlan;
-            reducePlan = p.transformUp(EvalExec.class, topN -> topN.replaceChild(foo));
+            PhysicalPlan p = PlannerUtils.topNReductionPlan(searchContexts, configuration, foldCtx, plan);
+            return p.transformUp(TopNExec.class, topN -> {
+                var child = topN.child();
+                return topN.replaceChild(new ExchangeSourceExec(topN.source(), child.output(), false /* isIntermediateAgg */));
+            });
         }
-        return new ExchangeSinkExec(plan.source(), plan.output(), plan.isIntermediateAgg(), reducePlan);
     }
 
     String newChildSession(String session) {
