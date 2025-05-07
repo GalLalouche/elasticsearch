@@ -342,7 +342,7 @@ public abstract class AbstractLookupService<R extends AbstractLookupService.Requ
                 driverContext.blockFactory(),
                 EnrichQuerySourceOperator.DEFAULT_MAX_PAGE_SIZE,
                 queryList,
-                shardContext.context.searcher().getIndexReader(),
+                shardContext.context,
                 warnings
             );
             releasables.add(queryOperator);
@@ -438,7 +438,7 @@ public abstract class AbstractLookupService<R extends AbstractLookupService.Requ
             fields,
             List.of(
                 new ValuesSourceReaderOperator.ShardContext(
-                    shardContext.searcher().getIndexReader(),
+                    shardContext,
                     shardContext::newSourceLoader,
                     EsqlPlugin.STORED_FIELDS_SEQUENTIAL_PROPORTION.getDefault(Settings.EMPTY)
                 )

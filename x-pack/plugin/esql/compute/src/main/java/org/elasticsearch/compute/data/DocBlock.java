@@ -9,6 +9,7 @@ package org.elasticsearch.compute.data;
 
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.unit.ByteSizeValue;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.ReleasableIterator;
 import org.elasticsearch.core.Releasables;
 
@@ -17,7 +18,7 @@ import java.io.IOException;
 /**
  * Wrapper around {@link DocVector} to make a valid {@link Block}.
  */
-public class DocBlock extends AbstractVectorBlock implements Block {
+public class DocBlock extends AbstractVectorBlock implements Block, RefCounted {
 
     private final DocVector vector;
 
@@ -183,7 +184,7 @@ public class DocBlock extends AbstractVectorBlock implements Block {
                 shards = this.shards.build();
                 segments = this.segments.build();
                 docs = this.docs.build();
-                result = new DocVector(shards, segments, docs, null);
+                result = DocVector.withoutShardRefCounter(shards, segments, docs);
                 return result.asBlock();
             } finally {
                 if (result == null) {

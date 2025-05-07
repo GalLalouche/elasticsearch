@@ -12,6 +12,7 @@ import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.BlockFactory;
 import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.data.IntVector;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasables;
 
 class ResultBuilderForDoc implements ResultBuilder {
@@ -20,6 +21,7 @@ class ResultBuilderForDoc implements ResultBuilder {
     private final int[] segments;
     private final int[] docs;
     private int position;
+    private RefCounted shardRefCounter;
 
     ResultBuilderForDoc(BlockFactory blockFactory, int positions) {
         // TODO use fixed length builders
@@ -51,7 +53,8 @@ class ResultBuilderForDoc implements ResultBuilder {
             shardsVector = blockFactory.newIntArrayVector(shards, position);
             segmentsVector = blockFactory.newIntArrayVector(segments, position);
             var docsVector = blockFactory.newIntArrayVector(docs, position);
-            var docsBlock = new DocVector(shardsVector, segmentsVector, docsVector, null).asBlock();
+            assert shardRefCounter != null;
+            var docsBlock = new DocVector(shardRefCounter, shardsVector, segmentsVector, docsVector, null).asBlock();
             success = true;
             return docsBlock;
         } finally {
@@ -69,5 +72,11 @@ class ResultBuilderForDoc implements ResultBuilder {
     @Override
     public void close() {
         // TODO memory accounting
+    }
+
+    // FIXME(gal, NOCOMMIT) More yuckness
+    public void decodeValue(BytesRef values, RefCounted shardRefCounter) {
+        decodeValue(values);
+        this.shardRefCounter = shardRefCounter;
     }
 }

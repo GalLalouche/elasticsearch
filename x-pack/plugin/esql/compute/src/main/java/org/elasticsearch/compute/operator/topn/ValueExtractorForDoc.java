@@ -9,6 +9,7 @@ package org.elasticsearch.compute.operator.topn;
 
 import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.operator.BreakingBytesRefBuilder;
+import org.elasticsearch.core.RefCounted;
 
 class ValueExtractorForDoc implements ValueExtractor {
     private final DocVector vector;
@@ -23,10 +24,15 @@ class ValueExtractorForDoc implements ValueExtractor {
         TopNEncoder.DEFAULT_UNSORTABLE.encodeInt(vector.shards().getInt(position), values);
         TopNEncoder.DEFAULT_UNSORTABLE.encodeInt(vector.segments().getInt(position), values);
         TopNEncoder.DEFAULT_UNSORTABLE.encodeInt(vector.docs().getInt(position), values);
+        values.addShardRefCounter(vector.shardRefCounter);
     }
 
     @Override
     public String toString() {
         return "ValueExtractorForDoc";
+    }
+
+    public RefCounted shardRefCounter() {
+        return vector.shardRefCounter;
     }
 }

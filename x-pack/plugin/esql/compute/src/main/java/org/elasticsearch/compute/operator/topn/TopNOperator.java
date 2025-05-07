@@ -20,6 +20,8 @@ import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.operator.BreakingBytesRefBuilder;
 import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.compute.operator.Operator;
+import org.elasticsearch.core.Nullable;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.Releasables;
 
@@ -70,6 +72,10 @@ public class TopNOperator implements Operator, Accountable {
          * what is required to reconstruct the row that isn't already stored in {@link #values}.
          */
         final BreakingBytesRefBuilder values;
+
+        // FIXME(gal, NOCOMMIT) IS this assumption correct? That every row has at most one doc block? Might break for joins.
+        @Nullable
+        RefCounted shardRefCounter;
 
         Row(CircuitBreaker breaker, List<SortOrder> sortOrders, int preAllocatedKeysSize, int preAllocatedValueSize) {
             boolean success = false;
@@ -174,7 +180,7 @@ public class TopNOperator implements Operator, Accountable {
          */
         void row(int position, Row destination) {
             writeKey(position, destination);
-            writeValues(position, destination.values);
+            writeValues(position, destination);
         }
 
         private void writeKey(int position, Row row) {
@@ -187,9 +193,13 @@ public class TopNOperator implements Operator, Accountable {
             }
         }
 
-        private void writeValues(int position, BreakingBytesRefBuilder values) {
+        private void writeValues(int position, Row destination) {
             for (ValueExtractor e : valueExtractors) {
-                e.writeValue(values, position);
+                // FIXME(gal, NOCOMMIT) Yuck!
+                if (e instanceof ValueExtractorForDoc forDoc) {
+                    destination.shardRefCounter = forDoc.shardRefCounter();
+                }
+                e.writeValue(destination.values, position);
             }
         }
     }
@@ -456,7 +466,13 @@ public class TopNOperator implements Operator, Accountable {
 
                 BytesRef values = row.values.bytesRefView();
                 for (ResultBuilder builder : builders) {
-                    builder.decodeValue(values);
+                    // FIXME(gal, NOCOMMIT) yuck
+                    if (builder instanceof ResultBuilderForDoc fd) {
+                        assert row.shardRefCounter != null;
+                        fd.decodeValue(values, row.shardRefCounter);
+                    } else {
+                        builder.decodeValue(values);
+                    }
                 }
                 if (values.length != 0) {
                     throw new IllegalArgumentException("didn't read all values");

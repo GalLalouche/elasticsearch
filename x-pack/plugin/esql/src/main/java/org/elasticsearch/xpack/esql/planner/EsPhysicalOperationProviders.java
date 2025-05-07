@@ -13,6 +13,7 @@ import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.util.SetOnce;
 import org.elasticsearch.common.logging.HeaderWarning;
 import org.elasticsearch.compute.aggregation.AggregatorMode;
 import org.elasticsearch.compute.aggregation.GroupingAggregator;
@@ -31,6 +32,7 @@ import org.elasticsearch.compute.operator.Operator;
 import org.elasticsearch.compute.operator.OrdinalsGroupingOperator;
 import org.elasticsearch.compute.operator.SourceOperator;
 import org.elasticsearch.compute.operator.TimeSeriesAggregationOperator;
+import org.elasticsearch.core.AbstractRefCounted;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.IndexSettings;
@@ -92,12 +94,46 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
     /**
      * Context of each shard we're operating against.
      */
-    public interface ShardContext extends org.elasticsearch.compute.lucene.ShardContext {
+    public abstract static class ShardContext implements org.elasticsearch.compute.lucene.ShardContext {
+        // FIXME(gal, NOCOMMIT) There is probably a smarter way to do this using AbstractRefCounted
+        private final SetOnce<AbstractRefCounted> refCounted = new SetOnce<>();
+
+        @Override
+        public void incRef() {
+            if (maybeCreate() == false) {
+                refCounted.get().incRef();
+            }
+        }
+
+        @Override
+        public boolean tryIncRef() {
+            return maybeCreate() || refCounted.get().tryIncRef();
+        }
+
+        private boolean maybeCreate() {
+            return refCounted.trySet(new AbstractRefCounted() {
+                @Override
+                protected void closeInternal() {
+                    throw new AssertionError("TODO(gal) NOCOMMIT");
+                }
+            });
+        }
+
+        @Override
+        public boolean decRef() {
+            assert refCounted.get() != null;
+            return refCounted.get().decRef();
+        }
+
+        @Override
+        public boolean hasReferences() {
+            return Optional.ofNullable(refCounted.get()).map(AbstractRefCounted::hasReferences).orElse(false);
+        }
 
         /**
          * Convert a {@link QueryBuilder} into a real {@link Query lucene query}.
          */
-        Query toQuery(QueryBuilder queryBuilder);
+        public abstract Query toQuery(QueryBuilder queryBuilder);
 
         /**
          * Tuning parameter for deciding when to use the "merge" stored field loader.
@@ -107,7 +143,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
          * A value of {@code .2} means we'll use the sequential reader even if we only
          * need one in ten documents.
          */
-        double storedFieldsSequentialProportion();
+        public abstract double storedFieldsSequentialProportion();
     }
 
     private final List<ShardContext> shardContexts;
@@ -129,13 +165,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         Layout.Builder layout = source.layout.builder();
         var sourceAttr = fieldExtractExec.sourceAttribute();
         List<ValuesSourceReaderOperator.ShardContext> readers = shardContexts.stream()
-            .map(
-                s -> new ValuesSourceReaderOperator.ShardContext(
-                    s.searcher().getIndexReader(),
-                    s::newSourceLoader,
-                    s.storedFieldsSequentialProportion()
-                )
-            )
+            .map(s -> new ValuesSourceReaderOperator.ShardContext(s, s::newSourceLoader, s.storedFieldsSequentialProportion()))
             .toList();
         int docChannel = source.layout.get(sourceAttr.id()).channel();
         for (Attribute attr : fieldExtractExec.attributesToExtract()) {
@@ -310,13 +340,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         var sourceAttribute = FieldExtractExec.extractSourceAttributesFrom(aggregateExec.child());
         int docChannel = source.layout.get(sourceAttribute.id()).channel();
         List<ValuesSourceReaderOperator.ShardContext> vsShardContexts = shardContexts.stream()
-            .map(
-                s -> new ValuesSourceReaderOperator.ShardContext(
-                    s.searcher().getIndexReader(),
-                    s::newSourceLoader,
-                    s.storedFieldsSequentialProportion()
-                )
-            )
+            .map(s -> new ValuesSourceReaderOperator.ShardContext(s, s::newSourceLoader, s.storedFieldsSequentialProportion()))
             .toList();
         // The grouping-by values are ready, let's group on them directly.
         // Costin: why are they ready and not already exposed in the layout?
@@ -349,7 +373,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         );
     }
 
-    public static class DefaultShardContext implements ShardContext {
+    public static class DefaultShardContext extends ShardContext {
         private final int index;
         private final SearchExecutionContext ctx;
         private final AliasFilter aliasFilter;

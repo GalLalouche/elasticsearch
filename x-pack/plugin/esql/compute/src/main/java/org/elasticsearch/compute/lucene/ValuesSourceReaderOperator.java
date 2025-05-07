@@ -106,7 +106,16 @@ public class ValuesSourceReaderOperator extends AbstractPageMappingOperator {
      */
     public record FieldInfo(String name, ElementType type, IntFunction<BlockLoader> blockLoader) {}
 
-    public record ShardContext(IndexReader reader, Supplier<SourceLoader> newSourceLoader, double storedFieldsSequentialProportion) {}
+    public record ShardContext(
+        org.elasticsearch.compute.lucene.ShardContext shardContext,
+        // FIXME(gal, NOCOMMIT) the source loader is redundant since it can be extracted from the shard context.
+        Supplier<SourceLoader> newSourceLoader,
+        double storedFieldsSequentialProportion
+    ) {
+        public IndexReader reader() {
+            return shardContext.searcher().getIndexReader();
+        }
+    }
 
     private final FieldWork[] fields;
     private final List<ShardContext> shardContexts;
@@ -529,7 +538,7 @@ public class ValuesSourceReaderOperator extends AbstractPageMappingOperator {
     }
 
     private LeafReaderContext ctx(int shard, int segment) {
-        return shardContexts.get(shard).reader.leaves().get(segment);
+        return shardContexts.get(shard).reader().leaves().get(segment);
     }
 
     @Override

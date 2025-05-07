@@ -10,6 +10,8 @@ package org.elasticsearch.compute.data;
 import org.apache.lucene.util.IntroSorter;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.common.unit.ByteSizeValue;
+import org.elasticsearch.core.Nullable;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.ReleasableIterator;
 import org.elasticsearch.core.Releasables;
 
@@ -48,7 +50,16 @@ public final class DocVector extends AbstractVector implements Vector {
      */
     private int[] shardSegmentDocMapBackwards;
 
-    public DocVector(IntVector shards, IntVector segments, IntVector docs, Boolean singleSegmentNonDecreasing) {
+    // FIXME(gal, NOCOMMIT) Use a freaking getter
+    public final @Nullable RefCounted shardRefCounter;
+
+    public DocVector(
+        @Nullable RefCounted shardRefCounter,
+        IntVector shards,
+        IntVector segments,
+        IntVector docs,
+        Boolean singleSegmentNonDecreasing
+    ) {
         super(shards.getPositionCount(), shards.blockFactory());
         this.shards = shards;
         this.segments = segments;
@@ -65,12 +76,30 @@ public final class DocVector extends AbstractVector implements Vector {
             );
         }
         blockFactory().adjustBreaker(BASE_RAM_BYTES_USED);
+        if (shardRefCounter != null) {
+            shardRefCounter.incRef();
+        }
+        this.shardRefCounter = shardRefCounter;
     }
 
-    public DocVector(IntVector shards, IntVector segments, IntVector docs, int[] docMapForwards, int[] docMapBackwards) {
-        this(shards, segments, docs, null);
+    public DocVector(
+        RefCounted shardRefCounter,
+        IntVector shards,
+        IntVector segments,
+        IntVector docs,
+        int[] docMapForwards,
+        int[] docMapBackwards
+    ) {
+        this(shardRefCounter, shards, segments, docs, null);
         this.shardSegmentDocMapForwards = docMapForwards;
         this.shardSegmentDocMapBackwards = docMapBackwards;
+    }
+
+    /**
+     * Usable by tests. This does not DocVector does not decrement the shard context counter on close.
+     */
+    public static DocVector withoutShardRefCounter(IntVector shards, IntVector segments, IntVector docs) {
+        return new DocVector(null, shards, segments, docs, null);
     }
 
     public IntVector shards() {
@@ -238,7 +267,7 @@ public final class DocVector extends AbstractVector implements Vector {
             filteredShards = shards.filter(positions);
             filteredSegments = segments.filter(positions);
             filteredDocs = docs.filter(positions);
-            result = new DocVector(filteredShards, filteredSegments, filteredDocs, null);
+            result = new DocVector(shardRefCounter, filteredShards, filteredSegments, filteredDocs, null);
             return result;
         } finally {
             if (result == null) {
@@ -317,5 +346,8 @@ public final class DocVector extends AbstractVector implements Vector {
             segments,
             docs
         );
+        if (shardRefCounter != null) {
+            shardRefCounter.decRef();
+        }
     }
 }

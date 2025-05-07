@@ -12,7 +12,12 @@ import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.common.breaker.CircuitBreaker;
+import org.elasticsearch.compute.lucene.ShardContext;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasable;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Builder for bytes arrays that checks its size against a {@link CircuitBreaker}.
@@ -21,6 +26,7 @@ public class BreakingBytesRefBuilder implements Accountable, Releasable {
     static final long SHALLOW_SIZE = RamUsageEstimator.shallowSizeOfInstance(BreakingBytesRefBuilder.class) + RamUsageEstimator
         .shallowSizeOfInstance(BytesRef.class);
 
+    private final Map<Integer, ShardContext> shardContexts = new HashMap<>();
     private final BytesRef bytes;
     private final CircuitBreaker breaker;
     private final String label;
@@ -169,5 +175,9 @@ public class BreakingBytesRefBuilder implements Accountable, Releasable {
     @Override
     public void close() {
         breaker.addWithoutBreaking(-ramBytesUsed());
+    }
+
+    public void addShardRefCounter(RefCounted shardRefCounter) {
+
     }
 }

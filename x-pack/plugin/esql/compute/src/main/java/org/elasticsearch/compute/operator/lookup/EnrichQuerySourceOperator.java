@@ -21,6 +21,7 @@ import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.data.IntBlock;
 import org.elasticsearch.compute.data.IntVector;
 import org.elasticsearch.compute.data.Page;
+import org.elasticsearch.compute.lucene.ShardContext;
 import org.elasticsearch.compute.operator.SourceOperator;
 import org.elasticsearch.compute.operator.Warnings;
 import org.elasticsearch.core.Releasables;
@@ -37,6 +38,7 @@ public final class EnrichQuerySourceOperator extends SourceOperator {
     private final BlockFactory blockFactory;
     private final QueryList queryList;
     private int queryPosition = -1;
+    private final ShardContext shardContext;
     private final IndexReader indexReader;
     private final IndexSearcher searcher;
     private final Warnings warnings;
@@ -49,14 +51,15 @@ public final class EnrichQuerySourceOperator extends SourceOperator {
         BlockFactory blockFactory,
         int maxPageSize,
         QueryList queryList,
-        IndexReader indexReader,
+        ShardContext shardContext,
         Warnings warnings
     ) {
         this.blockFactory = blockFactory;
         this.maxPageSize = maxPageSize;
         this.queryList = queryList;
-        this.indexReader = indexReader;
-        this.searcher = new IndexSearcher(indexReader);
+        this.shardContext = shardContext;
+        this.searcher = shardContext.searcher();
+        this.indexReader = searcher.getIndexReader();
         this.warnings = warnings;
     }
 
@@ -142,7 +145,10 @@ public final class EnrichQuerySourceOperator extends SourceOperator {
                 segmentsVector = segmentsBuilder.build();
             }
             docsVector = docsBuilder.build();
-            page = new Page(new DocVector(shardsVector, segmentsVector, docsVector, null).asBlock(), positionsVector.asBlock());
+            page = new Page(
+                new DocVector(shardContext, shardsVector, segmentsVector, docsVector, null).asBlock(),
+                positionsVector.asBlock()
+            );
         } finally {
             if (page == null) {
                 Releasables.close(positionsBuilder, segmentsVector, docsBuilder, positionsVector, shardsVector, docsVector);
