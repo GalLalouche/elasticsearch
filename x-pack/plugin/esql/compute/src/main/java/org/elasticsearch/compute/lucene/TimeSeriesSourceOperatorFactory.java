@@ -52,7 +52,7 @@ public class TimeSeriesSourceOperatorFactory extends LuceneOperator.Factory {
 
     @Override
     public SourceOperator get(DriverContext driverContext) {
-        return new TimeSeriesSourceOperator(driverContext.blockFactory(), sliceQueue, maxPageSize, limit);
+        return new TimeSeriesSourceOperator(contexts, driverContext.blockFactory(), sliceQueue, maxPageSize, limit);
     }
 
     @Override

@@ -12,7 +12,6 @@ import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.BlockFactory;
 import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.data.IntVector;
-import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasables;
 
 class ResultBuilderForDoc implements ResultBuilder {
@@ -21,7 +20,7 @@ class ResultBuilderForDoc implements ResultBuilder {
     private final int[] segments;
     private final int[] docs;
     private int position;
-    private RefCounted shardRefCounter;
+    private DocVector docVector;
 
     ResultBuilderForDoc(BlockFactory blockFactory, int positions) {
         // TODO use fixed length builders
@@ -38,9 +37,16 @@ class ResultBuilderForDoc implements ResultBuilder {
 
     @Override
     public void decodeValue(BytesRef values) {
+        throw new AssertionError("TODO(gal) NOCOMMIT");
+    }
+
+    // FIXME(gal, NOCOMMIT) More yuckness
+    public void decodeValue(BytesRef values, DocVector docVector) {
+        assert position == 0;
         shards[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         segments[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         docs[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
+        this.docVector = docVector;
         position++;
     }
 
@@ -53,8 +59,8 @@ class ResultBuilderForDoc implements ResultBuilder {
             shardsVector = blockFactory.newIntArrayVector(shards, position);
             segmentsVector = blockFactory.newIntArrayVector(segments, position);
             var docsVector = blockFactory.newIntArrayVector(docs, position);
-            assert shardRefCounter != null;
-            var docsBlock = new DocVector(shardRefCounter, shardsVector, segmentsVector, docsVector, null).asBlock();
+            assert docVector != null;
+            var docsBlock = new DocVector(docVector.shardRefCounters, shardsVector, segmentsVector, docsVector, null).asBlock();
             success = true;
             return docsBlock;
         } finally {
@@ -72,11 +78,5 @@ class ResultBuilderForDoc implements ResultBuilder {
     @Override
     public void close() {
         // TODO memory accounting
-    }
-
-    // FIXME(gal, NOCOMMIT) More yuckness
-    public void decodeValue(BytesRef values, RefCounted shardRefCounter) {
-        decodeValue(values);
-        this.shardRefCounter = shardRefCounter;
     }
 }

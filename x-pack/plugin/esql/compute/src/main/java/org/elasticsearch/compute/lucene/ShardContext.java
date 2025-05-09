@@ -60,4 +60,6 @@ public interface ShardContext extends RefCounted {
      * By default, this delegate to {@link org.elasticsearch.index.query.SearchExecutionContext#getFieldType(String)}
      */
     MappedFieldType fieldType(String name);
+
+    Integer refCount();
 }

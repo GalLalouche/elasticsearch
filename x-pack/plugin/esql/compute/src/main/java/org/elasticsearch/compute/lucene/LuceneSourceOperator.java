@@ -48,6 +48,7 @@ import static org.elasticsearch.compute.lucene.LuceneSliceQueue.PartitioningStra
  */
 public class LuceneSourceOperator extends LuceneOperator {
     private static final Logger log = LogManager.getLogger(LuceneSourceOperator.class);
+    private final List<? extends ShardContext> contexts;
 
     private int currentPagePos = 0;
     private int remainingDocs;
@@ -89,7 +90,7 @@ public class LuceneSourceOperator extends LuceneOperator {
 
         @Override
         public SourceOperator get(DriverContext driverContext) {
-            return new LuceneSourceOperator(driverContext.blockFactory(), maxPageSize, sliceQueue, limit, limiter, needsScore);
+            return new LuceneSourceOperator(contexts, driverContext.blockFactory(), maxPageSize, sliceQueue, limit, limiter, needsScore);
         }
 
         public int maxPageSize() {
@@ -216,6 +217,7 @@ public class LuceneSourceOperator extends LuceneOperator {
 
     @SuppressWarnings("this-escape")
     public LuceneSourceOperator(
+        List<? extends ShardContext> contexts,
         BlockFactory blockFactory,
         int maxPageSize,
         LuceneSliceQueue sliceQueue,
@@ -224,6 +226,7 @@ public class LuceneSourceOperator extends LuceneOperator {
         boolean needsScore
     ) {
         super(blockFactory, maxPageSize, sliceQueue);
+        this.contexts = contexts;
         this.minPageSize = Math.max(1, maxPageSize / 2);
         this.remainingDocs = limit;
         this.limiter = limiter;
@@ -329,7 +332,7 @@ public class LuceneSourceOperator extends LuceneOperator {
                     docs = buildDocsVector(currentPagePos);
                     docsBuilder = blockFactory.newIntVectorBuilder(Math.min(remainingDocs, maxPageSize));
                     int b = 0;
-                    blocks[b++] = new DocVector(scorer.shardContext(), shard, leaf, docs, true).asBlock();
+                    blocks[b++] = new DocVector(new DocVector.ShardRefCountedList(contexts), shard, leaf, docs, true).asBlock();
                     shard = null;
                     leaf = null;
                     docs = null;

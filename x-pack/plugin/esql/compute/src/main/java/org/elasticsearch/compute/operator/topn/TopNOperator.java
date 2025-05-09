@@ -15,13 +15,13 @@ import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.common.collect.Iterators;
 import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.BlockFactory;
+import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.data.ElementType;
 import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.operator.BreakingBytesRefBuilder;
 import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.compute.operator.Operator;
 import org.elasticsearch.core.Nullable;
-import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.Releasables;
 
@@ -73,9 +73,15 @@ public class TopNOperator implements Operator, Accountable {
          */
         final BreakingBytesRefBuilder values;
 
-        // FIXME(gal, NOCOMMIT) IS this assumption correct? That every row has at most one doc block? Might break for joins.
+        // FIXME(gal, NOCOMMIT) Is this assumption correct? That every row has at most one doc vector? Might break for joins.
         @Nullable
-        RefCounted shardRefCounter;
+        DocVector docVector;
+
+        void setDocVector(DocVector docVector) {
+            assert this.docVector == null;
+            this.docVector = docVector;
+            this.docVector.incRefHack();
+        }
 
         Row(CircuitBreaker breaker, List<SortOrder> sortOrders, int preAllocatedKeysSize, int preAllocatedValueSize) {
             boolean success = false;
@@ -98,7 +104,15 @@ public class TopNOperator implements Operator, Accountable {
 
         @Override
         public void close() {
+            clearRefCounters();
             Releasables.closeExpectNoException(keys, values, bytesOrder);
+        }
+
+        public void clearRefCounters() {
+            if (docVector != null) {
+                docVector.decRefHack();
+            }
+            docVector = null;
         }
     }
 
@@ -195,9 +209,9 @@ public class TopNOperator implements Operator, Accountable {
 
         private void writeValues(int position, Row destination) {
             for (ValueExtractor e : valueExtractors) {
-                // FIXME(gal, NOCOMMIT) Yuck!
-                if (e instanceof ValueExtractorForDoc forDoc) {
-                    destination.shardRefCounter = forDoc.shardRefCounter();
+                if (e instanceof ValueExtractorForDoc fd) {
+                    // FIXME(gal, NOCOMMIT) Use a proper getter.
+                    destination.setDocVector(fd.vector);
                 }
                 e.writeValue(destination.values, position);
             }
@@ -396,6 +410,9 @@ public class TopNOperator implements Operator, Accountable {
                 spareValuesPreAllocSize = Math.max(spare.values.length(), spareValuesPreAllocSize / 2);
 
                 spare = inputQueue.insertWithOverflow(spare);
+                if (spare != null) {
+                    spare.clearRefCounters();
+                }
             }
         } finally {
             page.releaseBlocks();
@@ -468,8 +485,7 @@ public class TopNOperator implements Operator, Accountable {
                 for (ResultBuilder builder : builders) {
                     // FIXME(gal, NOCOMMIT) yuck
                     if (builder instanceof ResultBuilderForDoc fd) {
-                        assert row.shardRefCounter != null;
-                        fd.decodeValue(values, row.shardRefCounter);
+                        fd.decodeValue(values, row.docVector);
                     } else {
                         builder.decodeValue(values);
                     }
@@ -479,7 +495,6 @@ public class TopNOperator implements Operator, Accountable {
                 }
 
                 list.set(i, null);
-                row.close();
 
                 p++;
                 if (p == size) {
@@ -497,6 +512,8 @@ public class TopNOperator implements Operator, Accountable {
                     Releasables.closeExpectNoException(builders);
                     builders = null;
                 }
+                // It's important to close the row after we build the new block, so we don't pre-release any shard counter.
+                row.close();
             }
             assert builders == null;
             success = true;

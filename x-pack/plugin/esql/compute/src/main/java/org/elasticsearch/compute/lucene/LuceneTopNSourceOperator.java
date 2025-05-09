@@ -82,7 +82,7 @@ public final class LuceneTopNSourceOperator extends LuceneOperator {
 
         @Override
         public SourceOperator get(DriverContext driverContext) {
-            return new LuceneTopNSourceOperator(driverContext.blockFactory(), maxPageSize, sorts, limit, sliceQueue, needsScore);
+            return new LuceneTopNSourceOperator(contexts, driverContext.blockFactory(), maxPageSize, sorts, limit, sliceQueue, needsScore);
         }
 
         public int maxPageSize() {
@@ -116,11 +116,13 @@ public final class LuceneTopNSourceOperator extends LuceneOperator {
     private int offset = 0;
 
     private PerShardCollector perShardCollector;
+    private final List<? extends ShardContext> contexts;
     private final List<SortBuilder<?>> sorts;
     private final int limit;
     private final boolean needsScore;
 
     public LuceneTopNSourceOperator(
+        List<? extends ShardContext> contexts,
         BlockFactory blockFactory,
         int maxPageSize,
         List<SortBuilder<?>> sorts,
@@ -129,6 +131,7 @@ public final class LuceneTopNSourceOperator extends LuceneOperator {
         boolean needsScore
     ) {
         super(blockFactory, maxPageSize, sliceQueue);
+        this.contexts = contexts;
         this.sorts = sorts;
         this.limit = limit;
         this.needsScore = needsScore;
@@ -239,7 +242,7 @@ public final class LuceneTopNSourceOperator extends LuceneOperator {
             shard = blockFactory.newConstantIntBlockWith(perShardCollector.shardContext.index(), size);
             segments = currentSegmentBuilder.build();
             docs = currentDocsBuilder.build();
-            docBlock = new DocVector(perShardCollector.shardContext, shard.asVector(), segments, docs, null).asBlock();
+            docBlock = new DocVector(new DocVector.ShardRefCountedList(contexts), shard.asVector(), segments, docs, null).asBlock();
             shard = null;
             segments = null;
             docs = null;

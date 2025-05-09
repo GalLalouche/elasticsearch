@@ -13,7 +13,6 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.compute.lucene.ShardContext;
-import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasable;
 
 import java.util.HashMap;
@@ -175,9 +174,5 @@ public class BreakingBytesRefBuilder implements Accountable, Releasable {
     @Override
     public void close() {
         breaker.addWithoutBreaking(-ramBytesUsed());
-    }
-
-    public void addShardRefCounter(RefCounted shardRefCounter) {
-
     }
 }

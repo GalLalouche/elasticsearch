@@ -684,8 +684,11 @@ public abstract class AbstractLookupService<R extends AbstractLookupService.Requ
     ) {
         public static LookupShardContext fromSearchContext(SearchContext context) {
             return new LookupShardContext(
+                // FIXME(gal, NOCOMMIT) No reason to pass both the context and the alias filter. In fact, this entire thing can be replaced
+                // with context.
                 new EsPhysicalOperationProviders.DefaultShardContext(
                     0,
+                    context,
                     context.getSearchExecutionContext(),
                     context.request().getAliasFilter()
                 ),

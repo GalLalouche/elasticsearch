@@ -34,6 +34,7 @@ import org.elasticsearch.compute.operator.SourceOperator;
 import org.elasticsearch.compute.operator.TimeSeriesAggregationOperator;
 import org.elasticsearch.core.AbstractRefCounted;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.core.Releasable;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.analysis.AnalysisRegistry;
@@ -94,40 +95,48 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
     /**
      * Context of each shard we're operating against.
      */
-    public abstract static class ShardContext implements org.elasticsearch.compute.lucene.ShardContext {
+    public abstract static class ShardContext implements org.elasticsearch.compute.lucene.ShardContext, Releasable {
         // FIXME(gal, NOCOMMIT) There is probably a smarter way to do this using AbstractRefCounted
-        private final SetOnce<AbstractRefCounted> refCounted = new SetOnce<>();
+        private final SetOnce<AbstractRefCounted> refCounter = new SetOnce<>();
 
         @Override
         public void incRef() {
             if (maybeCreate() == false) {
-                refCounted.get().incRef();
+                refCounter.get().incRef();
             }
+            System.out.println(refCounter);
+            System.out.println(refCounter.get().refCount());
         }
 
         @Override
         public boolean tryIncRef() {
-            return maybeCreate() || refCounted.get().tryIncRef();
+            return maybeCreate() || refCounter.get().tryIncRef();
         }
 
         private boolean maybeCreate() {
-            return refCounted.trySet(new AbstractRefCounted() {
+            return refCounter.trySet(new AbstractRefCounted() {
                 @Override
                 protected void closeInternal() {
-                    throw new AssertionError("TODO(gal) NOCOMMIT");
+                    ShardContext.this.close();
                 }
             });
         }
 
         @Override
         public boolean decRef() {
-            assert refCounted.get() != null;
-            return refCounted.get().decRef();
+            assert refCounter.get() != null;
+            return refCounter.get().decRef();
+        }
+
+        @Override
+        public Integer refCount() {
+            AbstractRefCounted value = refCounter.get();
+            return value != null ? value.refCount() : null;
         }
 
         @Override
         public boolean hasReferences() {
-            return Optional.ofNullable(refCounted.get()).map(AbstractRefCounted::hasReferences).orElse(false);
+            return Optional.ofNullable(refCounter.get()).map(AbstractRefCounted::hasReferences).orElse(false);
         }
 
         /**
@@ -210,7 +219,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         private final KeywordEsField unmappedEsField;
 
         DefaultShardContextForUnmappedField(DefaultShardContext ctx, PotentiallyUnmappedKeywordEsField unmappedEsField) {
-            super(ctx.index, ctx.ctx, ctx.aliasFilter);
+            super(ctx.index, ctx.releasable, ctx.ctx, ctx.aliasFilter);
             this.unmappedEsField = unmappedEsField;
         }
 
@@ -375,16 +384,18 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
 
     public static class DefaultShardContext extends ShardContext {
         private final int index;
+        private final Releasable releasable;
         private final SearchExecutionContext ctx;
         private final AliasFilter aliasFilter;
         private final String shardIdentifier;
 
-        public DefaultShardContext(int index, SearchExecutionContext ctx, AliasFilter aliasFilter) {
+        public DefaultShardContext(int index, Releasable releasable, SearchExecutionContext ctx, AliasFilter aliasFilter) {
             this.index = index;
+            this.releasable = releasable;
             this.ctx = ctx;
             this.aliasFilter = aliasFilter;
             // Build the shardIdentifier once up front so we can reuse references to it in many places.
-            this.shardIdentifier = ctx.getFullyQualifiedIndex().getName() + ":" + ctx.getShardId();
+            this.shardIdentifier = this.ctx.getFullyQualifiedIndex().getName() + ":" + this.ctx.getShardId();
         }
 
         @Override
@@ -496,6 +507,11 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         @Override
         public double storedFieldsSequentialProportion() {
             return EsqlPlugin.STORED_FIELDS_SEQUENTIAL_PROPORTION.get(ctx.getIndexSettings().getSettings());
+        }
+
+        @Override
+        public void close() {
+            releasable.close();
         }
     }
 

@@ -10,11 +10,12 @@ package org.elasticsearch.compute.data;
 import org.apache.lucene.util.IntroSorter;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.common.unit.ByteSizeValue;
-import org.elasticsearch.core.Nullable;
+import org.elasticsearch.compute.lucene.ShardContext;
 import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.ReleasableIterator;
 import org.elasticsearch.core.Releasables;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -51,16 +52,49 @@ public final class DocVector extends AbstractVector implements Vector {
     private int[] shardSegmentDocMapBackwards;
 
     // FIXME(gal, NOCOMMIT) Use a freaking getter
-    public final @Nullable RefCounted shardRefCounter;
+    public final ShardRefCounters shardRefCounters;
+
+    public void decRefHack() {
+        forEach(DecOrInc.DEC);
+    }
+
+    public void incRefHack() {
+        forEach(DecOrInc.INC);
+    }
+
+    public sealed interface ShardRefCounters {
+        RefCounted get(int shardId);
+    }
+
+    public record ShardRefCountedList(List<? extends RefCounted> refCounters) implements ShardRefCounters {
+        @Override
+        public RefCounted get(int shardId) {
+            return refCounters.get(shardId);
+        }
+
+        // FIXME(gal, NOCOMMIT) For debugging
+        @Override
+        public String toString() {
+            return refCounters.stream().map(e -> ((ShardContext) e).refCount()).toList().toString();
+        }
+    }
+
+    public record SingleShardCounter(RefCounted refCounter) implements ShardRefCounters {
+        @Override
+        public RefCounted get(int shardId) {
+            return refCounter;
+        }
+    }
 
     public DocVector(
-        @Nullable RefCounted shardRefCounter,
+        ShardRefCounters shardRefCounters,
         IntVector shards,
         IntVector segments,
         IntVector docs,
         Boolean singleSegmentNonDecreasing
     ) {
         super(shards.getPositionCount(), shards.blockFactory());
+        this.shardRefCounters = shardRefCounters;
         this.shards = shards;
         this.segments = segments;
         this.docs = docs;
@@ -76,21 +110,19 @@ public final class DocVector extends AbstractVector implements Vector {
             );
         }
         blockFactory().adjustBreaker(BASE_RAM_BYTES_USED);
-        if (shardRefCounter != null) {
-            shardRefCounter.incRef();
-        }
-        this.shardRefCounter = shardRefCounter;
+
+        forEach(DecOrInc.INC);
     }
 
     public DocVector(
-        RefCounted shardRefCounter,
+        ShardRefCounters shardRefCounters,
         IntVector shards,
         IntVector segments,
         IntVector docs,
         int[] docMapForwards,
         int[] docMapBackwards
     ) {
-        this(shardRefCounter, shards, segments, docs, null);
+        this(shardRefCounters, shards, segments, docs, null);
         this.shardSegmentDocMapForwards = docMapForwards;
         this.shardSegmentDocMapBackwards = docMapBackwards;
     }
@@ -267,7 +299,7 @@ public final class DocVector extends AbstractVector implements Vector {
             filteredShards = shards.filter(positions);
             filteredSegments = segments.filter(positions);
             filteredDocs = docs.filter(positions);
-            result = new DocVector(shardRefCounter, filteredShards, filteredSegments, filteredDocs, null);
+            result = new DocVector(shardRefCounters, filteredShards, filteredSegments, filteredDocs, null);
             return result;
         } finally {
             if (result == null) {
@@ -346,8 +378,32 @@ public final class DocVector extends AbstractVector implements Vector {
             segments,
             docs
         );
-        if (shardRefCounter != null) {
-            shardRefCounter.decRef();
+        forEach(DecOrInc.DEC);
+    }
+
+    enum DecOrInc {
+        DEC,
+        INC;
+
+        void apply(ShardRefCounters counters, int shardId) {
+            switch (this) {
+                case DEC -> counters.get(shardId).decRef();
+                case INC -> counters.get(shardId).incRef();
+            }
+        }
+    }
+
+    private void forEach(DecOrInc mode) {
+        switch (shards) {
+            case ConstantIntVector constantIntVector -> mode.apply(shardRefCounters, constantIntVector.getInt(0));
+            case ConstantNullVector ignored -> {
+                // Noop
+            }
+            default -> {
+                for (int i = 0; i < shards.getPositionCount(); i++) {
+                    mode.apply(shardRefCounters, shards.getInt(i));
+                }
+            }
         }
     }
 }

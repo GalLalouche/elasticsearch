@@ -545,7 +545,12 @@ public class ComputeService {
                 }
             };
             contexts.add(
-                new EsPhysicalOperationProviders.DefaultShardContext(i, searchExecutionContext, searchContext.request().getAliasFilter())
+                new EsPhysicalOperationProviders.DefaultShardContext(
+                    i,
+                    searchContext,
+                    searchExecutionContext,
+                    searchContext.request().getAliasFilter()
+                )
             );
         }
         EsPhysicalOperationProviders physicalOperationProviders = new EsPhysicalOperationProviders(
