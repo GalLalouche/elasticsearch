@@ -104,8 +104,6 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
             if (maybeCreate() == false) {
                 refCounter.get().incRef();
             }
-            System.out.println(refCounter);
-            System.out.println(refCounter.get().refCount());
         }
 
         @Override

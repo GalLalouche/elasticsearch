@@ -12,7 +12,10 @@ import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.BlockFactory;
 import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.data.IntVector;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasables;
+
+import java.util.List;
 
 class ResultBuilderForDoc implements ResultBuilder {
     private final BlockFactory blockFactory;
@@ -20,7 +23,7 @@ class ResultBuilderForDoc implements ResultBuilder {
     private final int[] segments;
     private final int[] docs;
     private int position;
-    private DocVector docVector;
+    private RefCounted[] shardCounters;
 
     ResultBuilderForDoc(BlockFactory blockFactory, int positions) {
         // TODO use fixed length builders
@@ -28,6 +31,7 @@ class ResultBuilderForDoc implements ResultBuilder {
         this.shards = new int[positions];
         this.segments = new int[positions];
         this.docs = new int[positions];
+        this.shardCounters = new RefCounted[positions];
     }
 
     @Override
@@ -42,11 +46,10 @@ class ResultBuilderForDoc implements ResultBuilder {
 
     // FIXME(gal, NOCOMMIT) More yuckness
     public void decodeValue(BytesRef values, DocVector docVector) {
-        // assert position == 0;
         shards[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         segments[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         docs[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
-        this.docVector = docVector;
+        shardCounters[position] = docVector.shardRefCounters.get(shards[position]);
         position++;
     }
 
@@ -59,8 +62,22 @@ class ResultBuilderForDoc implements ResultBuilder {
             shardsVector = blockFactory.newIntArrayVector(shards, position);
             segmentsVector = blockFactory.newIntArrayVector(segments, position);
             var docsVector = blockFactory.newIntArrayVector(docs, position);
-            assert docVector != null;
-            var docsBlock = new DocVector(docVector.shardRefCounters, shardsVector, segmentsVector, docsVector, null).asBlock();
+            var hasSingleUniqueCounter = true;
+            for (int i = 0; i < position; i++) {
+                if (shardCounters[i] != shardCounters[0]) {
+                    hasSingleUniqueCounter = false;
+                    break;
+                }
+            }
+            var docsBlock = new DocVector(
+                hasSingleUniqueCounter
+                    ? new DocVector.SingleShardCounter(shardCounters[0])
+                    : new DocVector.ShardRefCountedList(List.of(shardCounters)),
+                shardsVector,
+                segmentsVector,
+                docsVector,
+                null
+            ).asBlock();
             success = true;
             return docsBlock;
         } finally {

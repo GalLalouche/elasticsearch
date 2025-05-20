@@ -140,7 +140,11 @@ public abstract class LuceneOperator extends SourceOperator {
     protected abstract Page getCheckedOutput() throws IOException;
 
     @Override
-    public void close() {}
+    public void close() {
+        if (currentScorer != null) {
+            currentScorer.shardContext().decRef();
+        }
+    }
 
     LuceneScorer getCurrentOrLoadNextScorer() {
         while (currentScorer == null || currentScorer.isDone()) {
