@@ -247,6 +247,7 @@ public class LookupFromIndexOperatorTests extends OperatorTestCase {
             SearchExecutionContext executionCtx = mapperHelper.createSearchExecutionContext(mapperService, newSearcher(reader));
             EsPhysicalOperationProviders.DefaultShardContext ctx = new EsPhysicalOperationProviders.DefaultShardContext(
                 0,
+                () -> {},
                 executionCtx,
                 AliasFilter.EMPTY
             );

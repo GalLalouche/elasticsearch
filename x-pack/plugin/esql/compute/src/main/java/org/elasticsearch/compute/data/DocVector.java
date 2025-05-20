@@ -86,6 +86,15 @@ public final class DocVector extends AbstractVector implements Vector {
         }
     }
 
+    public enum NullShardRefCounter implements ShardRefCounters {
+        INSTANCE;
+
+        @Override
+        public RefCounted get(int shardId) {
+            return RefCounted.ALWAYS_REFERENCED;
+        }
+    }
+
     public DocVector(
         ShardRefCounters shardRefCounters,
         IntVector shards,

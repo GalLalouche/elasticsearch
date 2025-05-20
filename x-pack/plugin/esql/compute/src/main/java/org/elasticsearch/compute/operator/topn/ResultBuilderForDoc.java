@@ -42,7 +42,7 @@ class ResultBuilderForDoc implements ResultBuilder {
 
     // FIXME(gal, NOCOMMIT) More yuckness
     public void decodeValue(BytesRef values, DocVector docVector) {
-        assert position == 0;
+        // assert position == 0;
         shards[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         segments[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         docs[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);

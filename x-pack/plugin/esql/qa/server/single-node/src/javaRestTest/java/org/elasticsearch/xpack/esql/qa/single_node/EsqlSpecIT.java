@@ -7,27 +7,29 @@
 
 package org.elasticsearch.xpack.esql.qa.single_node;
 
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
+
 import org.elasticsearch.test.TestClustersThreadFilter;
 import org.elasticsearch.test.cluster.ElasticsearchCluster;
 import org.elasticsearch.xpack.esql.CsvSpecReader.CsvTestCase;
 import org.elasticsearch.xpack.esql.qa.rest.EsqlSpecTestCase;
 import org.junit.ClassRule;
 
-@k-s>ThreadLeakFilters(filters = TestClustersThreadFilter.class)
+@ThreadLeakFilters(filters = TestClustersThreadFilter.class)
 public class EsqlSpecIT extends EsqlSpecTestCase {
-@ClassRule
-public static ElasticsearchCluster cluster = Clusters.testCluster(spec -> spec.plugin("inference-service-test"));
+    @ClassRule
+    public static ElasticsearchCluster cluster = Clusters.testCluster(spec -> spec.plugin("inference-service-test"));
 
-@Override
-protected String getTestRestCluster() {
-    return cluster.getHttpAddresses();
-}
+    @Override
+    protected String getTestRestCluster() {
+        return cluster.getHttpAddresses();
+    }
 
-public EsqlSpecIT(
-    String fileName,
-    String groupName,
-    String testName,
-    Integer lineNumber,
+    public EsqlSpecIT(
+        String fileName,
+        String groupName,
+        String testName,
+        Integer lineNumber,
         CsvTestCase testCase,
         String instructions,
         Mode mode
