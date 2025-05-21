@@ -397,7 +397,7 @@ public final class DocVector extends AbstractVector implements Vector {
         void apply(ShardRefCounters counters, int shardId) {
             switch (this) {
                 case DEC -> counters.get(shardId).decRef();
-                case INC -> counters.get(shardId).incRef();
+                case INC -> counters.get(shardId).mustIncRef();
             }
         }
     }

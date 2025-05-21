@@ -58,6 +58,7 @@ public final class EnrichQuerySourceOperator extends SourceOperator {
         this.maxPageSize = maxPageSize;
         this.queryList = queryList;
         this.shardContext = shardContext;
+        this.shardContext.incRef();
         this.searcher = shardContext.searcher();
         this.indexReader = searcher.getIndexReader();
         this.warnings = warnings;
@@ -191,6 +192,6 @@ public final class EnrichQuerySourceOperator extends SourceOperator {
 
     @Override
     public void close() {
-
+        this.shardContext.decRef();
     }
 }
