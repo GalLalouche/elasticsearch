@@ -191,6 +191,7 @@ public abstract class LuceneQueryEvaluatorTests<T extends Vector, U extends Vect
         BlockFactory blockFactory = driverContext.blockFactory();
         return withReader(values, reader -> {
             IndexSearcher searcher = new IndexSearcher(reader);
+            var shardContext = new LuceneSourceOperatorTests.MockShardContext(reader, 0);
             LuceneQueryEvaluator.ShardConfig shard = new LuceneQueryEvaluator.ShardConfig(searcher.rewrite(query), searcher);
             List<Operator> operators = new ArrayList<>();
             if (shuffleDocs) {
@@ -206,7 +207,7 @@ public abstract class LuceneQueryEvaluatorTests<T extends Vector, U extends Vect
                             unused -> new BlockDocValuesReader.BytesRefsFromOrdsBlockLoader(FIELD)
                         )
                     ),
-                    List.of(new ValuesSourceReaderOperator.ShardContext(reader, () -> {
+                    List.of(new ValuesSourceReaderOperator.ShardContext(shardContext, () -> {
                         throw new UnsupportedOperationException();
                     }, 0.2)),
                     0

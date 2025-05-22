@@ -1447,6 +1447,44 @@ public class TopNOperatorTests extends OperatorTestCase {
         }
     }
 
+    public void testShardContextManagement() {
+        /*
+        List<Tuple<Long, Long>> values = Arrays.asList(tuple(1L, 1L), tuple(1L, 2L), tuple(null, null), tuple(null, 1L), tuple(1L, null));
+        assertThat(
+            topNTwoColumns(
+                driverContext(),
+                values,
+                5,
+                List.of(LONG, LONG),
+                List.of(TopNEncoder.DEFAULT_SORTABLE, TopNEncoder.DEFAULT_SORTABLE),
+                List.of(new TopNOperator.SortOrder(0, true, false), new TopNOperator.SortOrder(1, true, false))
+            ),
+            equalTo(List.of(tuple(1L, 1L), tuple(1L, 2L), tuple(1L, null), tuple(null, 1L), tuple(null, null)))
+        );
+        assertThat(
+            topNTwoColumns(
+                driverContext(),
+                values,
+                5,
+                List.of(LONG, LONG),
+                List.of(TopNEncoder.DEFAULT_SORTABLE, TopNEncoder.DEFAULT_SORTABLE),
+                List.of(new TopNOperator.SortOrder(0, true, true), new TopNOperator.SortOrder(1, true, false))
+            ),
+            equalTo(List.of(tuple(null, 1L), tuple(null, null), tuple(1L, 1L), tuple(1L, 2L), tuple(1L, null)))
+        );
+        assertThat(
+            topNTwoColumns(
+                driverContext(),
+                values,
+                5,
+                List.of(LONG, LONG),
+                List.of(TopNEncoder.DEFAULT_SORTABLE, TopNEncoder.DEFAULT_SORTABLE),
+                List.of(new TopNOperator.SortOrder(0, true, false), new TopNOperator.SortOrder(1, true, true))
+            ),
+            equalTo(List.of(tuple(1L, null), tuple(1L, 1L), tuple(1L, 2L), tuple(null, null), tuple(null, 1L)))
+        );*/
+    }
+
     @SuppressWarnings({ "unchecked", "rawtypes" })
     private static void readAsRows(List<List<List<Object>>> values, Page page) {
         if (page.getBlockCount() == 0) {

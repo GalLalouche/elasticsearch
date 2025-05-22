@@ -1394,7 +1394,12 @@ public class BasicBlockTests extends ESTestCase {
 
     public void testRefCountingDocBlock() {
         int positionCount = randomIntBetween(0, 100);
-        DocBlock block = new DocVector(intVector(positionCount), intVector(positionCount), intVector(positionCount), true).asBlock();
+        DocBlock block = DocVector.withoutShardRefCounter(
+            intVector(positionCount),
+            intVector(positionCount),
+            intVector(positionCount),
+            true
+        ).asBlock();
         assertThat(breaker.getUsed(), greaterThan(0L));
         assertRefCountingBehavior(block);
         assertThat(breaker.getUsed(), is(0L));
@@ -1430,7 +1435,12 @@ public class BasicBlockTests extends ESTestCase {
 
     public void testRefCountingDocVector() {
         int positionCount = randomIntBetween(0, 100);
-        DocVector vector = new DocVector(intVector(positionCount), intVector(positionCount), intVector(positionCount), true);
+        DocVector vector = DocVector.withoutShardRefCounter(
+            intVector(positionCount),
+            intVector(positionCount),
+            intVector(positionCount),
+            true
+        );
         assertThat(breaker.getUsed(), greaterThan(0L));
         assertRefCountingBehavior(vector);
         assertThat(breaker.getUsed(), is(0L));

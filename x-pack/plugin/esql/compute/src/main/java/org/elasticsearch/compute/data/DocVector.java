@@ -10,7 +10,6 @@ package org.elasticsearch.compute.data;
 import org.apache.lucene.util.IntroSorter;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.common.unit.ByteSizeValue;
-import org.elasticsearch.compute.lucene.ShardContext;
 import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.ReleasableIterator;
 import org.elasticsearch.core.Releasables;
@@ -71,12 +70,6 @@ public final class DocVector extends AbstractVector implements Vector {
         public RefCounted get(int shardId) {
             return refCounters.get(shardId);
         }
-
-        // FIXME(gal, NOCOMMIT) For debugging
-        @Override
-        public String toString() {
-            return refCounters.stream().map(e -> ((ShardContext) e).refCount()).toList().toString();
-        }
     }
 
     public record SingleShardCounter(RefCounted refCounter) implements ShardRefCounters {
@@ -86,7 +79,7 @@ public final class DocVector extends AbstractVector implements Vector {
         }
     }
 
-    public enum NullShardRefCounter implements ShardRefCounters {
+    private enum NoopShardRefCounter implements ShardRefCounters {
         INSTANCE;
 
         @Override
@@ -136,11 +129,19 @@ public final class DocVector extends AbstractVector implements Vector {
         this.shardSegmentDocMapBackwards = docMapBackwards;
     }
 
-    /**
-     * Usable by tests. This does not DocVector does not decrement the shard context counter on close.
-     */
+    /** Usable by tests. */
     public static DocVector withoutShardRefCounter(IntVector shards, IntVector segments, IntVector docs) {
-        return new DocVector(null, shards, segments, docs, null);
+        return new DocVector(NoopShardRefCounter.INSTANCE, shards, segments, docs, null);
+    }
+
+    /** Usable by tests. */
+    public static DocVector withoutShardRefCounter(
+        IntVector shards,
+        IntVector segments,
+        IntVector docs,
+        boolean singleSegmentNonDecreasing
+    ) {
+        return new DocVector(NoopShardRefCounter.INSTANCE, shards, segments, docs, singleSegmentNonDecreasing);
     }
 
     public IntVector shards() {

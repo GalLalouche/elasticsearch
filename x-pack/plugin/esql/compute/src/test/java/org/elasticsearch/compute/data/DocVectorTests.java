@@ -28,38 +28,42 @@ import static org.hamcrest.Matchers.is;
 public class DocVectorTests extends ComputeTestCase {
     public void testNonDecreasingSetTrue() {
         int length = between(1, 100);
-        DocVector docs = new DocVector(intRange(0, length), intRange(0, length), intRange(0, length), true);
+        DocVector docs = DocVector.withoutShardRefCounter(intRange(0, length), intRange(0, length), intRange(0, length), true);
         assertTrue(docs.singleSegmentNonDecreasing());
     }
 
     public void testNonDecreasingSetFalse() {
         BlockFactory blockFactory = blockFactory();
-        DocVector docs = new DocVector(intRange(0, 2), intRange(0, 2), blockFactory.newIntArrayVector(new int[] { 1, 0 }, 2), false);
+        DocVector docs = DocVector.withoutShardRefCounter(
+            intRange(0, 2),
+            intRange(0, 2),
+            blockFactory.newIntArrayVector(new int[] { 1, 0 }, 2),
+            false
+        );
         assertFalse(docs.singleSegmentNonDecreasing());
         docs.close();
     }
 
     public void testNonDecreasingNonConstantShard() {
         BlockFactory blockFactory = blockFactory();
-        DocVector docs = new DocVector(intRange(0, 2), blockFactory.newConstantIntVector(0, 2), intRange(0, 2), null);
+        DocVector docs = DocVector.withoutShardRefCounter(intRange(0, 2), blockFactory.newConstantIntVector(0, 2), intRange(0, 2));
         assertFalse(docs.singleSegmentNonDecreasing());
         docs.close();
     }
 
     public void testNonDecreasingNonConstantSegment() {
         BlockFactory blockFactory = blockFactory();
-        DocVector docs = new DocVector(blockFactory.newConstantIntVector(0, 2), intRange(0, 2), intRange(0, 2), null);
+        DocVector docs = DocVector.withoutShardRefCounter(blockFactory.newConstantIntVector(0, 2), intRange(0, 2), intRange(0, 2));
         assertFalse(docs.singleSegmentNonDecreasing());
         docs.close();
     }
 
     public void testNonDecreasingDescendingDocs() {
         BlockFactory blockFactory = blockFactory();
-        DocVector docs = new DocVector(
+        DocVector docs = DocVector.withoutShardRefCounter(
             blockFactory.newConstantIntVector(0, 2),
             blockFactory.newConstantIntVector(0, 2),
-            blockFactory.newIntArrayVector(new int[] { 1, 0 }, 2),
-            null
+            blockFactory.newIntArrayVector(new int[] { 1, 0 }, 2)
         );
         assertFalse(docs.singleSegmentNonDecreasing());
         docs.close();
@@ -209,7 +213,8 @@ public class DocVectorTests extends ComputeTestCase {
 
     public void testCannotDoubleRelease() {
         BlockFactory blockFactory = blockFactory();
-        var block = new DocVector(intRange(0, 2), blockFactory.newConstantIntBlockWith(0, 2).asVector(), intRange(0, 2), null).asBlock();
+        var block = DocVector.withoutShardRefCounter(intRange(0, 2), blockFactory.newConstantIntBlockWith(0, 2).asVector(), intRange(0, 2))
+            .asBlock();
         assertThat(block.isReleased(), is(false));
         Page page = new Page(block);
 
@@ -228,7 +233,7 @@ public class DocVectorTests extends ComputeTestCase {
 
     public void testRamBytesUsedWithout() {
         BlockFactory blockFactory = blockFactory();
-        DocVector docs = new DocVector(
+        DocVector docs = DocVector.withoutShardRefCounter(
             blockFactory.newConstantIntBlockWith(0, 1).asVector(),
             blockFactory.newConstantIntBlockWith(0, 1).asVector(),
             blockFactory.newConstantIntBlockWith(0, 1).asVector(),
@@ -242,14 +247,14 @@ public class DocVectorTests extends ComputeTestCase {
     public void testFilter() {
         BlockFactory factory = blockFactory();
         try (
-            DocVector docs = new DocVector(
+            DocVector docs = DocVector.withoutShardRefCounter(
                 factory.newConstantIntVector(0, 10),
                 factory.newConstantIntVector(0, 10),
                 factory.newIntArrayVector(new int[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }, 10),
                 false
             );
             DocVector filtered = docs.filter(1, 2, 3);
-            DocVector expected = new DocVector(
+            DocVector expected = DocVector.withoutShardRefCounter(
                 factory.newConstantIntVector(0, 3),
                 factory.newConstantIntVector(0, 3),
                 factory.newIntArrayVector(new int[] { 1, 2, 3 }, 3),
@@ -270,7 +275,7 @@ public class DocVectorTests extends ComputeTestCase {
                 shards = factory.newConstantIntVector(0, 10);
                 segments = factory.newConstantIntVector(0, 10);
                 docs = factory.newConstantIntVector(0, 10);
-                result = new DocVector(shards, segments, docs, false);
+                result = DocVector.withoutShardRefCounter(shards, segments, docs, false);
                 return result;
             } finally {
                 if (result == null) {

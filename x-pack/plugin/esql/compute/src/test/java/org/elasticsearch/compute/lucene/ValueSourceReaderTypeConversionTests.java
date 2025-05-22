@@ -200,7 +200,13 @@ public class ValueSourceReaderTypeConversionTests extends AnyOperatorTestCase {
     private List<ValuesSourceReaderOperator.ShardContext> initShardContexts() {
         return INDICES.keySet()
             .stream()
-            .map(index -> new ValuesSourceReaderOperator.ShardContext(reader(index), () -> SourceLoader.FROM_STORED_SOURCE, 0.2))
+            .map(
+                index -> new ValuesSourceReaderOperator.ShardContext(
+                    new LuceneSourceOperatorTests.MockShardContext(reader(index)),
+                    () -> SourceLoader.FROM_STORED_SOURCE,
+                    0.2
+                )
+            )
             .toList();
     }
 
@@ -1297,7 +1303,11 @@ public class ValueSourceReaderTypeConversionTests extends AnyOperatorTestCase {
             LuceneOperator.NO_LIMIT,
             false // no scoring
         );
-        var vsShardContext = new ValuesSourceReaderOperator.ShardContext(reader(indexKey), () -> SourceLoader.FROM_STORED_SOURCE, 0.2);
+        var vsShardContext = new ValuesSourceReaderOperator.ShardContext(
+            new LuceneSourceOperatorTests.MockShardContext(reader(indexKey)),
+            () -> SourceLoader.FROM_STORED_SOURCE,
+            0.2
+        );
         try (
             Driver driver = TestDriverFactory.create(
                 driverContext,
@@ -1415,7 +1425,13 @@ public class ValueSourceReaderTypeConversionTests extends AnyOperatorTestCase {
 
         ValuesSourceReaderOperator.Factory factory = new ValuesSourceReaderOperator.Factory(
             cases.stream().map(c -> c.info).toList(),
-            List.of(new ValuesSourceReaderOperator.ShardContext(reader(indexKey), () -> SourceLoader.FROM_STORED_SOURCE, 0.2)),
+            List.of(
+                new ValuesSourceReaderOperator.ShardContext(
+                    new LuceneSourceOperatorTests.MockShardContext(reader(indexKey)),
+                    () -> SourceLoader.FROM_STORED_SOURCE,
+                    0.2
+                )
+            ),
             0
         );
         assertThat(factory.describe(), equalTo("ValuesSourceReaderOperator[fields = [" + cases.size() + " fields]]"));
@@ -1442,10 +1458,9 @@ public class ValueSourceReaderTypeConversionTests extends AnyOperatorTestCase {
             List<ShardContext> contexts = new ArrayList<>();
             List<ValuesSourceReaderOperator.ShardContext> readerShardContexts = new ArrayList<>();
             for (int s = 0; s < shardCount; s++) {
-                contexts.add(new LuceneSourceOperatorTests.MockShardContext(readers[s], s));
-                readerShardContexts.add(
-                    new ValuesSourceReaderOperator.ShardContext(readers[s], () -> SourceLoader.FROM_STORED_SOURCE, 0.2)
-                );
+                var ctx = new LuceneSourceOperatorTests.MockShardContext(readers[s], s);
+                contexts.add(ctx);
+                readerShardContexts.add(new ValuesSourceReaderOperator.ShardContext(ctx, () -> SourceLoader.FROM_STORED_SOURCE, 0.2));
             }
             var luceneFactory = new LuceneSourceOperator.Factory(
                 contexts,

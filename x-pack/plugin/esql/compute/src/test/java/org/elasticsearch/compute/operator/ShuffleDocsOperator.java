@@ -60,7 +60,7 @@ public class ShuffleDocsOperator extends AbstractPageMappingOperator {
             }
         }
         Block[] blocks = new Block[page.getBlockCount()];
-        blocks[0] = new DocVector(shards, segments, docs, false).asBlock();
+        blocks[0] = DocVector.withoutShardRefCounter(shards, segments, docs, false).asBlock();
         for (int i = 1; i < blocks.length; i++) {
             blocks[i] = page.getBlock(i);
         }

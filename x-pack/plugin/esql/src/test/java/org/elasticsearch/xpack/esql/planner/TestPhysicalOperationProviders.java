@@ -188,7 +188,7 @@ public class TestPhysicalOperationProviders extends AbstractPhysicalOperationPro
             var page = pageIndex.page;
             BlockFactory blockFactory = driverContext.blockFactory();
             DocVector docVector = new DocVector(
-                DocVector.NullShardRefCounter.INSTANCE,
+                DocVector.NoopShardRefCounter.INSTANCE,
                 // The shard ID is used to encode the index ID.
                 blockFactory.newConstantIntVector(index, page.getPositionCount()),
                 blockFactory.newConstantIntVector(0, page.getPositionCount()),

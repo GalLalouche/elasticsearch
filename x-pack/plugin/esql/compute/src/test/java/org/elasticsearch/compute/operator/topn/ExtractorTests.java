@@ -93,7 +93,7 @@ public class ExtractorTests extends ESTestCase {
                             "doc",
                             e,
                             TopNEncoder.DEFAULT_UNSORTABLE,
-                            () -> new DocVector(
+                            () -> DocVector.withoutShardRefCounter(
                                 blockFactory.newConstantIntBlockWith(randomInt(), 1).asVector(),
                                 blockFactory.newConstantIntBlockWith(randomInt(), 1).asVector(),
                                 blockFactory.newConstantIntBlockWith(randomInt(), 1).asVector(),
