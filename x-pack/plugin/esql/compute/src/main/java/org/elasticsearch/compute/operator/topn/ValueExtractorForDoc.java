@@ -11,11 +11,15 @@ import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.operator.BreakingBytesRefBuilder;
 
 class ValueExtractorForDoc implements ValueExtractor {
-    final DocVector vector;
+    private final DocVector vector;
 
     ValueExtractorForDoc(TopNEncoder encoder, DocVector vector) {
         assert encoder == TopNEncoder.DEFAULT_UNSORTABLE;
         this.vector = vector;
+    }
+
+    DocVector vector() {
+        return vector;
     }
 
     @Override

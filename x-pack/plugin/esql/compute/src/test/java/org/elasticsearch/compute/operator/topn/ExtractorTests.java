@@ -172,6 +172,9 @@ public class ExtractorTests extends ESTestCase {
             1
         );
         BytesRef values = valuesBuilder.bytesRefView();
+        if (result instanceof ResultBuilderForDoc fd) {
+            fd.setShardRefCounters(DocVector.NoopShardRefCounter.INSTANCE);
+        }
         result.decodeValue(values);
         assertThat(values.length, equalTo(0));
 

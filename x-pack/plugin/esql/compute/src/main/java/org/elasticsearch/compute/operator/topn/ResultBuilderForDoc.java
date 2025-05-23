@@ -18,12 +18,13 @@ import org.elasticsearch.core.Releasables;
 import java.util.List;
 
 class ResultBuilderForDoc implements ResultBuilder {
+    private DocVector.ShardRefCounters shardRefCounters;
     private final BlockFactory blockFactory;
     private final int[] shards;
     private final int[] segments;
     private final int[] docs;
     private int position;
-    private RefCounted[] shardCounters;
+    private RefCounted[] refCounted;
 
     ResultBuilderForDoc(BlockFactory blockFactory, int positions) {
         // TODO use fixed length builders
@@ -31,7 +32,7 @@ class ResultBuilderForDoc implements ResultBuilder {
         this.shards = new int[positions];
         this.segments = new int[positions];
         this.docs = new int[positions];
-        this.shardCounters = new RefCounted[positions];
+        this.refCounted = new RefCounted[positions];
     }
 
     @Override
@@ -39,17 +40,17 @@ class ResultBuilderForDoc implements ResultBuilder {
         throw new AssertionError("_doc can't be a key");
     }
 
-    @Override
-    public void decodeValue(BytesRef values) {
-        throw new AssertionError("TODO(gal) NOCOMMIT");
+    public void setShardRefCounters(DocVector.ShardRefCounters shardRefCounters) {
+        this.shardRefCounters = shardRefCounters;
     }
 
-    // FIXME(gal, NOCOMMIT) More yuckness
-    public void decodeValue(BytesRef values, DocVector docVector) {
+    @Override
+    public void decodeValue(BytesRef values) {
+        assert shardRefCounters != null : "setShardRefCounters must be set before decodeValue";
         shards[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         segments[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         docs[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
-        shardCounters[position] = docVector.shardRefCounters.get(shards[position]);
+        refCounted[position] = shardRefCounters.get(shards[position]);
         position++;
     }
 
@@ -64,15 +65,15 @@ class ResultBuilderForDoc implements ResultBuilder {
             var docsVector = blockFactory.newIntArrayVector(docs, position);
             var hasSingleUniqueCounter = true;
             for (int i = 0; i < position; i++) {
-                if (shardCounters[i] != shardCounters[0]) {
+                if (refCounted[i] != refCounted[0]) {
                     hasSingleUniqueCounter = false;
                     break;
                 }
             }
             var docsBlock = new DocVector(
                 hasSingleUniqueCounter
-                    ? new DocVector.SingleShardCounter(shardCounters[0])
-                    : new DocVector.ShardRefCountedList(List.of(shardCounters)),
+                    ? new DocVector.SingleShardCounter(refCounted[0])
+                    : new DocVector.ShardRefCountedList(List.of(refCounted)),
                 shardsVector,
                 segmentsVector,
                 docsVector,

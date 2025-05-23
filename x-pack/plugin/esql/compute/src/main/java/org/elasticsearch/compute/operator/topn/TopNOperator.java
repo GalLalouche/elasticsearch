@@ -30,6 +30,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * An operator that sorts "rows" of values by encoding the values to sort on, as bytes (using BytesRef). Each data type is encoded
@@ -78,9 +79,9 @@ public class TopNOperator implements Operator, Accountable {
         DocVector docVector;
 
         void setDocVector(DocVector docVector) {
-            assert this.docVector == null;
+            assert this.docVector == null : "docVector already set";
+            docVector.incAllShardContextCount();
             this.docVector = docVector;
-            this.docVector.incRefHack();
         }
 
         Row(CircuitBreaker breaker, List<SortOrder> sortOrders, int preAllocatedKeysSize, int preAllocatedValueSize) {
@@ -99,7 +100,10 @@ public class TopNOperator implements Operator, Accountable {
 
         @Override
         public long ramBytesUsed() {
-            return SHALLOW_SIZE + keys.ramBytesUsed() + bytesOrder.ramBytesUsed() + values.ramBytesUsed();
+            assert docVector == null;
+            return SHALLOW_SIZE + keys.ramBytesUsed() + bytesOrder.ramBytesUsed() + values.ramBytesUsed() + Optional.ofNullable(docVector)
+                .map(Accountable::ramBytesUsed)
+                .orElse(0L);
         }
 
         @Override
@@ -110,7 +114,7 @@ public class TopNOperator implements Operator, Accountable {
 
         public void clearRefCounters() {
             if (docVector != null) {
-                docVector.decRefHack();
+                docVector.decAllShardContextCount();
             }
             docVector = null;
         }
@@ -210,8 +214,7 @@ public class TopNOperator implements Operator, Accountable {
         private void writeValues(int position, Row destination) {
             for (ValueExtractor e : valueExtractors) {
                 if (e instanceof ValueExtractorForDoc fd) {
-                    // FIXME(gal, NOCOMMIT) Use a proper getter.
-                    destination.setDocVector(fd.vector);
+                    destination.setDocVector(fd.vector());
                 }
                 e.writeValue(destination.values, position);
             }
@@ -485,7 +488,8 @@ public class TopNOperator implements Operator, Accountable {
                 for (ResultBuilder builder : builders) {
                     // FIXME(gal, NOCOMMIT) yuck
                     if (builder instanceof ResultBuilderForDoc fd) {
-                        fd.decodeValue(values, row.docVector);
+                        fd.setShardRefCounters(row.docVector.shardRefCounters());
+                        fd.decodeValue(values);
                     } else {
                         builder.decodeValue(values);
                     }

@@ -50,15 +50,18 @@ public final class DocVector extends AbstractVector implements Vector {
      */
     private int[] shardSegmentDocMapBackwards;
 
-    // FIXME(gal, NOCOMMIT) Use a freaking getter
-    public final ShardRefCounters shardRefCounters;
+    private final ShardRefCounters shardRefCounters;
 
-    public void decRefHack() {
-        forEach(DecOrInc.DEC);
+    public ShardRefCounters shardRefCounters() {
+        return shardRefCounters;
     }
 
-    public void incRefHack() {
-        forEach(DecOrInc.INC);
+    public void decAllShardContextCount() {
+        forEachShardRefCounter(DecOrInc.DEC);
+    }
+
+    public void incAllShardContextCount() {
+        forEachShardRefCounter(DecOrInc.INC);
     }
 
     public sealed interface ShardRefCounters {
@@ -79,7 +82,7 @@ public final class DocVector extends AbstractVector implements Vector {
         }
     }
 
-    private enum NoopShardRefCounter implements ShardRefCounters {
+    public enum NoopShardRefCounter implements ShardRefCounters {
         INSTANCE;
 
         @Override
@@ -113,7 +116,7 @@ public final class DocVector extends AbstractVector implements Vector {
         }
         blockFactory().adjustBreaker(BASE_RAM_BYTES_USED);
 
-        forEach(DecOrInc.INC);
+        incAllShardContextCount();
     }
 
     public DocVector(
@@ -388,7 +391,7 @@ public final class DocVector extends AbstractVector implements Vector {
             segments,
             docs
         );
-        forEach(DecOrInc.DEC);
+        decAllShardContextCount();
     }
 
     enum DecOrInc {
@@ -403,7 +406,7 @@ public final class DocVector extends AbstractVector implements Vector {
         }
     }
 
-    private void forEach(DecOrInc mode) {
+    private void forEachShardRefCounter(DecOrInc mode) {
         switch (shards) {
             case ConstantIntVector constantIntVector -> mode.apply(shardRefCounters, constantIntVector.getInt(0));
             case ConstantNullVector ignored -> {
