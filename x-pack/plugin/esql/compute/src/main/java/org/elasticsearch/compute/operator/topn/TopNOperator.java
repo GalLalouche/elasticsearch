@@ -22,6 +22,7 @@ import org.elasticsearch.compute.operator.BreakingBytesRefBuilder;
 import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.compute.operator.Operator;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.Releasables;
 
@@ -30,7 +31,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * An operator that sorts "rows" of values by encoding the values to sort on, as bytes (using BytesRef). Each data type is encoded
@@ -74,14 +74,18 @@ public class TopNOperator implements Operator, Accountable {
          */
         final BreakingBytesRefBuilder values;
 
-        // FIXME(gal, NOCOMMIT) Is this assumption correct? That every row has at most one doc vector? Might break for joins.
+        /**
+         * Reference counter for the shard this row belongs to, used for rows containing a {@link DocVector} to ensure that the shard
+         * context before we build the final result.
+         */
         @Nullable
-        DocVector docVector;
+        RefCounted shardRefCounter;
 
-        void setDocVector(DocVector docVector) {
-            assert this.docVector == null : "docVector already set";
-            docVector.incAllShardContextCount();
-            this.docVector = docVector;
+        void setShardRefCountersAndShard(RefCounted shardRefCounter) {
+            // FIXME(gal, NOCOMMIT) Is this assumption correct (That every row has at most shard ID)? Might break for joins.
+            assert this.shardRefCounter == null : "shardRefCounters already set";
+            this.shardRefCounter = shardRefCounter;
+            this.shardRefCounter.mustIncRef();
         }
 
         Row(CircuitBreaker breaker, List<SortOrder> sortOrders, int preAllocatedKeysSize, int preAllocatedValueSize) {
@@ -100,10 +104,7 @@ public class TopNOperator implements Operator, Accountable {
 
         @Override
         public long ramBytesUsed() {
-            assert docVector == null;
-            return SHALLOW_SIZE + keys.ramBytesUsed() + bytesOrder.ramBytesUsed() + values.ramBytesUsed() + Optional.ofNullable(docVector)
-                .map(Accountable::ramBytesUsed)
-                .orElse(0L);
+            return SHALLOW_SIZE + keys.ramBytesUsed() + bytesOrder.ramBytesUsed() + values.ramBytesUsed();
         }
 
         @Override
@@ -113,10 +114,10 @@ public class TopNOperator implements Operator, Accountable {
         }
 
         public void clearRefCounters() {
-            if (docVector != null) {
-                docVector.decAllShardContextCount();
+            if (shardRefCounter != null) {
+                shardRefCounter.decRef();
             }
-            docVector = null;
+            shardRefCounter = null;
         }
     }
 
@@ -214,7 +215,7 @@ public class TopNOperator implements Operator, Accountable {
         private void writeValues(int position, Row destination) {
             for (ValueExtractor e : valueExtractors) {
                 if (e instanceof ValueExtractorForDoc fd) {
-                    destination.setDocVector(fd.vector());
+                    destination.setShardRefCountersAndShard(fd.vector().shardRefCounters().get(fd.vector().shards().getInt(position)));
                 }
                 e.writeValue(destination.values, position);
             }
@@ -403,6 +404,7 @@ public class TopNOperator implements Operator, Accountable {
                 } else {
                     spare.keys.clear();
                     spare.values.clear();
+                    spare.clearRefCounters();
                 }
                 rowFiller.row(i, spare);
 
@@ -413,9 +415,6 @@ public class TopNOperator implements Operator, Accountable {
                 spareValuesPreAllocSize = Math.max(spare.values.length(), spareValuesPreAllocSize / 2);
 
                 spare = inputQueue.insertWithOverflow(spare);
-                if (spare != null) {
-                    spare.clearRefCounters();
-                }
             }
         } finally {
             page.releaseBlocks();
@@ -486,13 +485,11 @@ public class TopNOperator implements Operator, Accountable {
 
                 BytesRef values = row.values.bytesRefView();
                 for (ResultBuilder builder : builders) {
-                    // FIXME(gal, NOCOMMIT) yuck
                     if (builder instanceof ResultBuilderForDoc fd) {
-                        fd.setShardRefCounters(row.docVector.shardRefCounters());
-                        fd.decodeValue(values);
-                    } else {
-                        builder.decodeValue(values);
+                        assert row.shardRefCounter != null : "shardRefCounter must be set for ResultBuilderForDoc";
+                        fd.setNextRefCounted(row.shardRefCounter);
                     }
+                    builder.decodeValue(values);
                 }
                 if (values.length != 0) {
                     throw new IllegalArgumentException("didn't read all values");
@@ -516,7 +513,7 @@ public class TopNOperator implements Operator, Accountable {
                     Releasables.closeExpectNoException(builders);
                     builders = null;
                 }
-                // It's important to close the row after we build the new block, so we don't pre-release any shard counter.
+                // It's important to close the row only after we build the new block, so we don't pre-release any shard counter.
                 row.close();
             }
             assert builders == null;

@@ -127,12 +127,6 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
         }
 
         @Override
-        public Integer refCount() {
-            AbstractRefCounted value = refCounter.get();
-            return value != null ? value.refCount() : null;
-        }
-
-        @Override
         public boolean hasReferences() {
             return Optional.ofNullable(refCounter.get()).map(AbstractRefCounted::hasReferences).orElse(false);
         }

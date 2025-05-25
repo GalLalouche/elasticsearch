@@ -56,14 +56,6 @@ public final class DocVector extends AbstractVector implements Vector {
         return shardRefCounters;
     }
 
-    public void decAllShardContextCount() {
-        forEachShardRefCounter(DecOrInc.DEC);
-    }
-
-    public void incAllShardContextCount() {
-        forEachShardRefCounter(DecOrInc.INC);
-    }
-
     public sealed interface ShardRefCounters {
         RefCounted get(int shardId);
     }
@@ -82,14 +74,8 @@ public final class DocVector extends AbstractVector implements Vector {
         }
     }
 
-    public enum NoopShardRefCounter implements ShardRefCounters {
-        INSTANCE;
-
-        @Override
-        public RefCounted get(int shardId) {
-            return RefCounted.ALWAYS_REFERENCED;
-        }
-    }
+    /** Used by tests. */
+    public static ShardRefCounters NOOP_SHARD_REF_COUNTERS = new SingleShardCounter(RefCounted.ALWAYS_REFERENCED);
 
     public DocVector(
         ShardRefCounters shardRefCounters,
@@ -116,7 +102,7 @@ public final class DocVector extends AbstractVector implements Vector {
         }
         blockFactory().adjustBreaker(BASE_RAM_BYTES_USED);
 
-        incAllShardContextCount();
+        forEachShardRefCounter(DecOrInc.INC);
     }
 
     public DocVector(
@@ -134,7 +120,7 @@ public final class DocVector extends AbstractVector implements Vector {
 
     /** Usable by tests. */
     public static DocVector withoutShardRefCounter(IntVector shards, IntVector segments, IntVector docs) {
-        return new DocVector(NoopShardRefCounter.INSTANCE, shards, segments, docs, null);
+        return new DocVector(NOOP_SHARD_REF_COUNTERS, shards, segments, docs, null);
     }
 
     /** Usable by tests. */
@@ -144,7 +130,7 @@ public final class DocVector extends AbstractVector implements Vector {
         IntVector docs,
         boolean singleSegmentNonDecreasing
     ) {
-        return new DocVector(NoopShardRefCounter.INSTANCE, shards, segments, docs, singleSegmentNonDecreasing);
+        return new DocVector(NOOP_SHARD_REF_COUNTERS, shards, segments, docs, singleSegmentNonDecreasing);
     }
 
     public IntVector shards() {
@@ -391,7 +377,7 @@ public final class DocVector extends AbstractVector implements Vector {
             segments,
             docs
         );
-        decAllShardContextCount();
+        forEachShardRefCounter(DecOrInc.DEC);
     }
 
     enum DecOrInc {

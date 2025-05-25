@@ -21,6 +21,7 @@ import org.elasticsearch.compute.data.ElementType;
 import org.elasticsearch.compute.operator.BreakingBytesRefBuilder;
 import org.elasticsearch.compute.test.BlockTestUtils;
 import org.elasticsearch.compute.test.TestBlockFactory;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.test.ESTestCase;
 
 import java.util.ArrayList;
@@ -173,7 +174,7 @@ public class ExtractorTests extends ESTestCase {
         );
         BytesRef values = valuesBuilder.bytesRefView();
         if (result instanceof ResultBuilderForDoc fd) {
-            fd.setShardRefCounters(DocVector.NoopShardRefCounter.INSTANCE);
+            fd.setNextRefCounted(RefCounted.ALWAYS_REFERENCED);
         }
         result.decodeValue(values);
         assertThat(values.length, equalTo(0));
