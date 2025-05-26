@@ -27,7 +27,8 @@ import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.compute.operator.Operator;
 import org.elasticsearch.compute.operator.PageConsumerOperator;
 import org.elasticsearch.compute.operator.SourceOperator;
-import org.elasticsearch.compute.operator.TupleBlockSourceOperator;
+import org.elasticsearch.compute.operator.TupleAbstractBlockSourceOperator;
+import org.elasticsearch.compute.operator.TupleLongLongBlockSourceOperator;
 import org.elasticsearch.compute.test.CannedSourceOperator;
 import org.elasticsearch.compute.test.OperatorTestCase;
 import org.elasticsearch.compute.test.SequenceLongBlockSourceOperator;
@@ -53,6 +54,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -289,14 +291,17 @@ public class TopNOperatorTests extends OperatorTestCase {
         boolean ascendingOrder,
         boolean nullsFirst
     ) {
-        return topNTwoColumns(
+        return topNTwoLongColumns(
             driverContext,
             inputValues.stream().map(v -> tuple(v, 0L)).toList(),
             limit,
-            List.of(LONG, LONG),
             List.of(DEFAULT_UNSORTABLE, DEFAULT_UNSORTABLE),
             List.of(new TopNOperator.SortOrder(0, ascendingOrder, nullsFirst))
         ).stream().map(Tuple::v1).toList();
+    }
+
+    private static TupleLongLongBlockSourceOperator longLongSourceOperator(DriverContext driverContext, List<Tuple<Long, Long>> values) {
+        return new TupleLongLongBlockSourceOperator(driverContext.blockFactory(), values, randomIntBetween(1, 1000));
     }
 
     private List<Long> topNLong(List<Long> inputValues, int limit, boolean ascendingOrder, boolean nullsFirst) {
@@ -465,33 +470,30 @@ public class TopNOperatorTests extends OperatorTestCase {
     public void testTopNTwoColumns() {
         List<Tuple<Long, Long>> values = Arrays.asList(tuple(1L, 1L), tuple(1L, 2L), tuple(null, null), tuple(null, 1L), tuple(1L, null));
         assertThat(
-            topNTwoColumns(
+            topNTwoLongColumns(
                 driverContext(),
                 values,
                 5,
-                List.of(LONG, LONG),
                 List.of(TopNEncoder.DEFAULT_SORTABLE, TopNEncoder.DEFAULT_SORTABLE),
                 List.of(new TopNOperator.SortOrder(0, true, false), new TopNOperator.SortOrder(1, true, false))
             ),
             equalTo(List.of(tuple(1L, 1L), tuple(1L, 2L), tuple(1L, null), tuple(null, 1L), tuple(null, null)))
         );
         assertThat(
-            topNTwoColumns(
+            topNTwoLongColumns(
                 driverContext(),
                 values,
                 5,
-                List.of(LONG, LONG),
                 List.of(TopNEncoder.DEFAULT_SORTABLE, TopNEncoder.DEFAULT_SORTABLE),
                 List.of(new TopNOperator.SortOrder(0, true, true), new TopNOperator.SortOrder(1, true, false))
             ),
             equalTo(List.of(tuple(null, 1L), tuple(null, null), tuple(1L, 1L), tuple(1L, 2L), tuple(1L, null)))
         );
         assertThat(
-            topNTwoColumns(
+            topNTwoLongColumns(
                 driverContext(),
                 values,
                 5,
-                List.of(LONG, LONG),
                 List.of(TopNEncoder.DEFAULT_SORTABLE, TopNEncoder.DEFAULT_SORTABLE),
                 List.of(new TopNOperator.SortOrder(0, true, false), new TopNOperator.SortOrder(1, true, true))
             ),
@@ -657,35 +659,59 @@ public class TopNOperatorTests extends OperatorTestCase {
         assertDriverContext(driverContext);
     }
 
-    private List<Tuple<Long, Long>> topNTwoColumns(
+    private List<Tuple<Long, Long>> topNTwoLongColumns(
         DriverContext driverContext,
-        List<Tuple<Long, Long>> inputValues,
+        List<Tuple<Long, Long>> values,
         int limit,
-        List<ElementType> elementTypes,
         List<TopNEncoder> encoder,
         List<TopNOperator.SortOrder> sortOrders
     ) {
-        List<Tuple<Long, Long>> outputValues = new ArrayList<>();
+        return topNTwoColumns(
+            driverContext,
+            new TupleLongLongBlockSourceOperator(driverContext.blockFactory(), values, randomIntBetween(1, 1000)),
+            (block, i) -> block.isNull(i) ? null : ((LongBlock) block).getLong(i),
+            (block, i) -> block.isNull(i) ? null : ((LongBlock) block).getLong(i),
+            limit,
+            encoder,
+            sortOrders
+        );
+    }
+
+    private <T, S> List<Tuple<T, S>> topNTwoColumns(
+        DriverContext driverContext,
+        TupleAbstractBlockSourceOperator<T, S> sourceOperator,
+        BiFunction<Block, Integer, T> getFirstBlockValue,
+        BiFunction<Block, Integer, S> getSecondBlockValue,
+        int limit,
+        List<TopNEncoder> encoder,
+        List<TopNOperator.SortOrder> sortOrders
+    ) {
+        List<Tuple<T, S>> outputValues = new ArrayList<>();
         try (
             Driver driver = TestDriverFactory.create(
                 driverContext,
-                new TupleBlockSourceOperator(driverContext.blockFactory(), inputValues, randomIntBetween(1, 1000)),
+                sourceOperator,
                 List.of(
                     new TopNOperator(
                         driverContext.blockFactory(),
                         nonBreakingBigArrays().breakerService().getBreaker("request"),
                         limit,
-                        elementTypes,
+                        sourceOperator.elementTypes(),
                         encoder,
                         sortOrders,
                         randomPageSize()
                     )
                 ),
                 new PageConsumerOperator(page -> {
-                    LongBlock block1 = page.getBlock(0);
-                    LongBlock block2 = page.getBlock(1);
+                    var block1 = page.getBlock(0);
+                    var block2 = page.getBlock(1);
                     for (int i = 0; i < block1.getPositionCount(); i++) {
-                        outputValues.add(tuple(block1.isNull(i) ? null : block1.getLong(i), block2.isNull(i) ? null : block2.getLong(i)));
+                        outputValues.add(
+                            tuple(
+                                block1.isNull(i) ? null : getFirstBlockValue.apply(block1, i),
+                                block2.isNull(i) ? null : getSecondBlockValue.apply(block2, i)
+                            )
+                        );
                     }
                     page.releaseBlocks();
                 })
@@ -693,7 +719,7 @@ public class TopNOperatorTests extends OperatorTestCase {
         ) {
             runDriver(driver);
         }
-        assertThat(outputValues, hasSize(Math.min(limit, inputValues.size())));
+        assertThat(outputValues, hasSize(Math.min(limit, sourceOperator.values().size())));
         assertDriverContext(driverContext);
         return outputValues;
     }
@@ -1448,19 +1474,18 @@ public class TopNOperatorTests extends OperatorTestCase {
     }
 
     public void testShardContextManagement() {
-        /*
         List<Tuple<Long, Long>> values = Arrays.asList(tuple(1L, 1L), tuple(1L, 2L), tuple(null, null), tuple(null, 1L), tuple(1L, null));
         assertThat(
-            topNTwoColumns(
+            topNTwoLongColumns(
                 driverContext(),
                 values,
                 5,
-                List.of(LONG, LONG),
                 List.of(TopNEncoder.DEFAULT_SORTABLE, TopNEncoder.DEFAULT_SORTABLE),
                 List.of(new TopNOperator.SortOrder(0, true, false), new TopNOperator.SortOrder(1, true, false))
             ),
             equalTo(List.of(tuple(1L, 1L), tuple(1L, 2L), tuple(1L, null), tuple(null, 1L), tuple(null, null)))
         );
+        /*
         assertThat(
             topNTwoColumns(
                 driverContext(),
