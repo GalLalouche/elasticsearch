@@ -207,7 +207,7 @@ public abstract class LuceneQueryEvaluatorTests<T extends Vector, U extends Vect
                             unused -> new BlockDocValuesReader.BytesRefsFromOrdsBlockLoader(FIELD)
                         )
                     ),
-                    List.of(new ValuesSourceReaderOperator.ShardContext(shardContext, () -> {
+                    List.of(new ValuesSourceReaderOperator.ShardContext(reader, () -> {
                         throw new UnsupportedOperationException();
                     }, 0.2)),
                     0

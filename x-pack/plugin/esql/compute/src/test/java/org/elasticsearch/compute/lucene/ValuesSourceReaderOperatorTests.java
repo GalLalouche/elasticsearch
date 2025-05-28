@@ -152,7 +152,7 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
         })),
             List.of(
                 new ValuesSourceReaderOperator.ShardContext(
-                    new LuceneSourceOperatorTests.MockShardContext(reader),
+                    reader,
                     () -> SourceLoader.FROM_STORED_SOURCE,
                     STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                 )
@@ -456,7 +456,7 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
                 List.of(testCase.info, fieldInfo(mapperService.fieldType("key"), ElementType.INT)),
                 List.of(
                     new ValuesSourceReaderOperator.ShardContext(
-                        new LuceneSourceOperatorTests.MockShardContext(reader),
+                        reader,
                         () -> SourceLoader.FROM_STORED_SOURCE,
                         STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                     )
@@ -568,7 +568,7 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
                 List.of(fieldInfo(mapperService.fieldType("key"), ElementType.INT)),
                 List.of(
                     new ValuesSourceReaderOperator.ShardContext(
-                        new LuceneSourceOperatorTests.MockShardContext(reader),
+                        reader,
                         () -> SourceLoader.FROM_STORED_SOURCE,
                         STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                     )
@@ -586,7 +586,7 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
                     b.stream().map(i -> i.info).toList(),
                     List.of(
                         new ValuesSourceReaderOperator.ShardContext(
-                            new LuceneSourceOperatorTests.MockShardContext(reader),
+                            reader,
                             () -> SourceLoader.FROM_STORED_SOURCE,
                             STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                         )
@@ -682,7 +682,7 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
                     List.of(i.info),
                     List.of(
                         new ValuesSourceReaderOperator.ShardContext(
-                            new LuceneSourceOperatorTests.MockShardContext(reader),
+                            reader,
                             () -> SourceLoader.FROM_STORED_SOURCE,
                             STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                         )
@@ -1454,7 +1454,7 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
                         ),
                         List.of(
                             new ValuesSourceReaderOperator.ShardContext(
-                                new LuceneSourceOperatorTests.MockShardContext(reader),
+                                reader,
                                 () -> SourceLoader.FROM_STORED_SOURCE,
                                 STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                             )
@@ -1505,7 +1505,7 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
             ),
             List.of(
                 new ValuesSourceReaderOperator.ShardContext(
-                    new LuceneSourceOperatorTests.MockShardContext(reader),
+                    reader,
                     () -> SourceLoader.FROM_STORED_SOURCE,
                     STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                 )
@@ -1539,7 +1539,7 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
             cases.stream().map(c -> c.info).toList(),
             List.of(
                 new ValuesSourceReaderOperator.ShardContext(
-                    new LuceneSourceOperatorTests.MockShardContext(reader),
+                    reader,
                     () -> SourceLoader.FROM_STORED_SOURCE,
                     STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                 )
@@ -1569,11 +1569,10 @@ public class ValuesSourceReaderOperatorTests extends OperatorTestCase {
             List<ShardContext> contexts = new ArrayList<>();
             List<ValuesSourceReaderOperator.ShardContext> readerShardContexts = new ArrayList<>();
             for (int s = 0; s < shardCount; s++) {
-                var ctx = new LuceneSourceOperatorTests.MockShardContext(readers[s], s);
-                contexts.add(ctx);
+                contexts.add(new LuceneSourceOperatorTests.MockShardContext(readers[s], s));
                 readerShardContexts.add(
                     new ValuesSourceReaderOperator.ShardContext(
-                        ctx,
+                        readers[s],
                         () -> SourceLoader.FROM_STORED_SOURCE,
                         STORED_FIELDS_SEQUENTIAL_PROPORTIONS
                     )

@@ -82,8 +82,9 @@ public class TopNOperator implements Operator, Accountable {
         RefCounted shardRefCounter;
 
         void setShardRefCountersAndShard(RefCounted shardRefCounter) {
-            // FIXME(gal, NOCOMMIT) Is this assumption correct (That every row has at most shard ID)? Might break for joins.
-            assert this.shardRefCounter == null : "shardRefCounters already set";
+            if (this.shardRefCounter != null) {
+                this.shardRefCounter.decRef();
+            }
             this.shardRefCounter = shardRefCounter;
             this.shardRefCounter.mustIncRef();
         }
