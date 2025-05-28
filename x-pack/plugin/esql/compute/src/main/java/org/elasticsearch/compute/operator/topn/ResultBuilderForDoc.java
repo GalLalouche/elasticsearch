@@ -16,7 +16,8 @@ import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasables;
 
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 class ResultBuilderForDoc implements ResultBuilder {
     private final BlockFactory blockFactory;
@@ -25,7 +26,7 @@ class ResultBuilderForDoc implements ResultBuilder {
     private final int[] docs;
     private int position;
     private @Nullable RefCounted nextRefCounted;
-    private final RefCounted[] refCounted;
+    private final Map<Integer, RefCounted> refCounted = new HashMap<>();
 
     ResultBuilderForDoc(BlockFactory blockFactory, int positions) {
         // TODO use fixed length builders
@@ -33,7 +34,6 @@ class ResultBuilderForDoc implements ResultBuilder {
         this.shards = new int[positions];
         this.segments = new int[positions];
         this.docs = new int[positions];
-        this.refCounted = new RefCounted[positions];
     }
 
     @Override
@@ -53,7 +53,7 @@ class ResultBuilderForDoc implements ResultBuilder {
         shards[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         segments[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         docs[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
-        refCounted[position] = nextRefCounted;
+        refCounted.putIfAbsent(shards[position], nextRefCounted);
         position++;
         nextRefCounted = null;
     }
@@ -67,33 +67,24 @@ class ResultBuilderForDoc implements ResultBuilder {
             shardsVector = blockFactory.newIntArrayVector(shards, position);
             segmentsVector = blockFactory.newIntArrayVector(segments, position);
             var docsVector = blockFactory.newIntArrayVector(docs, position);
-            var docsBlock = new DocVector(getShardRefCounters(), shardsVector, segmentsVector, docsVector, null).asBlock();
+            var docsBlock = new DocVector(new ShardRefCountedMap(refCounted), shardsVector, segmentsVector, docsVector, null).asBlock();
             success = true;
             return docsBlock;
         } finally {
             // The DocVector constructor already incremented the relevant RefCounted, so we can now decrement them since we incremented them
             // in setNextRefCounted.
-            for (int i = 0; i < position; i++) {
-                refCounted[i].decRef();
-            }
+            refCounted.values().forEach(RefCounted::decRef);
             if (success == false) {
                 Releasables.closeExpectNoException(shardsVector, segmentsVector);
             }
         }
     }
 
-    private DocVector.ShardRefCounters getShardRefCounters() {
-        var hasSingleUniqueCounter = true;
-        for (int i = 1; i < position; i++) {
-            if (refCounted[i] != refCounted[0]) {
-                hasSingleUniqueCounter = false;
-                break;
-            }
+    private record ShardRefCountedMap(Map<Integer, RefCounted> refCounters) implements DocVector.ShardRefCounters {
+        @Override
+        public RefCounted get(int shardId) {
+            return refCounters.get(shardId);
         }
-
-        return hasSingleUniqueCounter
-            ? new DocVector.SingleShardCounter(refCounted[0])
-            : new DocVector.ShardRefCountedList(List.of(refCounted));
     }
 
     @Override

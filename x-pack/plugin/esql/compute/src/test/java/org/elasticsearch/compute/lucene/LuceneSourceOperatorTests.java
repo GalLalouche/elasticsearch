@@ -464,11 +464,6 @@ public class LuceneSourceOperatorTests extends AnyOperatorTestCase {
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public Integer refCount() {
-            return 0;
-        }
-
         public void incRef() {}
 
         @Override

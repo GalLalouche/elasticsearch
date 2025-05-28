@@ -56,7 +56,7 @@ public final class DocVector extends AbstractVector implements Vector {
         return shardRefCounters;
     }
 
-    public sealed interface ShardRefCounters {
+    public interface ShardRefCounters {
         RefCounted get(int shardId);
     }
 

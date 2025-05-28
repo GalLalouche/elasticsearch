@@ -97,6 +97,12 @@ public class DocBlock extends AbstractVectorBlock implements Block, RefCounted {
         private final IntVector.Builder shards;
         private final IntVector.Builder segments;
         private final IntVector.Builder docs;
+        private DocVector.ShardRefCounters shardRefCounters = DocVector.NOOP_SHARD_REF_COUNTERS;
+
+        public Builder setShardRefCounters(DocVector.ShardRefCounters shardRefCounters) {
+            this.shardRefCounters = shardRefCounters;
+            return this;
+        }
 
         private Builder(BlockFactory blockFactory, int estimatedSize) {
             IntVector.Builder shards = null;
@@ -184,7 +190,7 @@ public class DocBlock extends AbstractVectorBlock implements Block, RefCounted {
                 shards = this.shards.build();
                 segments = this.segments.build();
                 docs = this.docs.build();
-                result = DocVector.withoutShardRefCounter(shards, segments, docs);
+                result = new DocVector(shardRefCounters, shards, segments, docs, null);
                 return result.asBlock();
             } finally {
                 if (result == null) {

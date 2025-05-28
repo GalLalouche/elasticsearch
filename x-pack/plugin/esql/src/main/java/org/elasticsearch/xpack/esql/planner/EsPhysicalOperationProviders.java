@@ -13,7 +13,6 @@ import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.util.SetOnce;
 import org.elasticsearch.common.logging.HeaderWarning;
 import org.elasticsearch.compute.aggregation.AggregatorMode;
 import org.elasticsearch.compute.aggregation.GroupingAggregator;
@@ -32,7 +31,6 @@ import org.elasticsearch.compute.operator.Operator;
 import org.elasticsearch.compute.operator.OrdinalsGroupingOperator;
 import org.elasticsearch.compute.operator.SourceOperator;
 import org.elasticsearch.compute.operator.TimeSeriesAggregationOperator;
-import org.elasticsearch.core.AbstractRefCounted;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.index.IndexMode;
@@ -55,6 +53,7 @@ import org.elasticsearch.search.internal.AliasFilter;
 import org.elasticsearch.search.lookup.SearchLookup;
 import org.elasticsearch.search.sort.SortAndFormats;
 import org.elasticsearch.search.sort.SortBuilder;
+import org.elasticsearch.xpack.esql.common.LazyAbstractRefCounted;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
@@ -97,38 +96,31 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
      */
     public abstract static class ShardContext implements org.elasticsearch.compute.lucene.ShardContext, Releasable {
         // FIXME(gal, NOCOMMIT) There is probably a smarter way to do this using AbstractRefCounted
-        private final SetOnce<AbstractRefCounted> refCounter = new SetOnce<>();
+        private final LazyAbstractRefCounted refCounter = new LazyAbstractRefCounted() {
+            @Override
+            protected void closeInternal() {
+                ShardContext.this.close();
+            }
+        };
 
         @Override
         public void incRef() {
-            if (maybeCreate() == false) {
-                refCounter.get().incRef();
-            }
+            refCounter.incRef();
         }
 
         @Override
         public boolean tryIncRef() {
-            return maybeCreate() || refCounter.get().tryIncRef();
-        }
-
-        private boolean maybeCreate() {
-            return refCounter.trySet(new AbstractRefCounted() {
-                @Override
-                protected void closeInternal() {
-                    ShardContext.this.close();
-                }
-            });
+            return refCounter.tryIncRef();
         }
 
         @Override
         public boolean decRef() {
-            assert refCounter.get() != null;
-            return refCounter.get().decRef();
+            return refCounter.decRef();
         }
 
         @Override
         public boolean hasReferences() {
-            return Optional.ofNullable(refCounter.get()).map(AbstractRefCounted::hasReferences).orElse(false);
+            return refCounter.hasReferences();
         }
 
         /**

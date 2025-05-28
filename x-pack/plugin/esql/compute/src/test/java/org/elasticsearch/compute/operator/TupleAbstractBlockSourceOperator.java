@@ -33,7 +33,7 @@ public abstract class TupleAbstractBlockSourceOperator<T, S> extends AbstractBlo
         ElementType firstElementType,
         ElementType secondElementType
     ) {
-        this(blockFactory, values, DEFAULT_MAX_PAGE_POSITIONS, secondElementType, firstElementType);
+        this(blockFactory, values, DEFAULT_MAX_PAGE_POSITIONS, firstElementType, secondElementType);
     }
 
     public TupleAbstractBlockSourceOperator(
@@ -51,10 +51,7 @@ public abstract class TupleAbstractBlockSourceOperator<T, S> extends AbstractBlo
 
     @Override
     protected Page createPage(int positionOffset, int length) {
-        try (
-            var blockBuilder1 = firstElementType.newBlockBuilder(length, blockFactory);
-            var blockBuilder2 = secondElementType.newBlockBuilder(length, blockFactory);
-        ) {
+        try (var blockBuilder1 = firstElementBlockBuilder(length); var blockBuilder2 = secondElementBlockBuilder(length)) {
             for (int i = 0; i < length; i++) {
                 Tuple<T, S> item = values.get(positionOffset + i);
                 if (item.v1() == null) {
@@ -74,6 +71,14 @@ public abstract class TupleAbstractBlockSourceOperator<T, S> extends AbstractBlo
     }
 
     protected abstract void consumeFirstElement(T t, Block.Builder blockBuilder1);
+
+    protected Block.Builder firstElementBlockBuilder(int length) {
+        return firstElementType.newBlockBuilder(length, blockFactory);
+    }
+
+    protected Block.Builder secondElementBlockBuilder(int length) {
+        return secondElementType.newBlockBuilder(length, blockFactory);
+    }
 
     protected abstract void consumeSecondElement(S t, Block.Builder blockBuilder1);
 
