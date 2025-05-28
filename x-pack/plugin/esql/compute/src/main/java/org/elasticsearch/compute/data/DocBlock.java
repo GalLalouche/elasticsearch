@@ -7,13 +7,17 @@
 
 package org.elasticsearch.compute.data;
 
+import org.apache.lucene.util.SetOnce;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.unit.ByteSizeValue;
+import org.elasticsearch.core.AbstractRefCounted;
 import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.ReleasableIterator;
 import org.elasticsearch.core.Releasables;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Wrapper around {@link DocVector} to make a valid {@link Block}.
@@ -97,7 +101,70 @@ public class DocBlock extends AbstractVectorBlock implements Block, RefCounted {
         private final IntVector.Builder shards;
         private final IntVector.Builder segments;
         private final IntVector.Builder docs;
-        private DocVector.ShardRefCounters shardRefCounters = DocVector.NOOP_SHARD_REF_COUNTERS;
+        private DocVector.ShardRefCounters shardRefCounters = new DynamicShardRefCounters();
+
+        // FIXME(gal, NOCOMMIT) Copy pasting this for now until I figure out where to place it
+        private static class DynamicShardRefCounters implements DocVector.ShardRefCounters {
+            private Map<Integer, LazyAbstractRefCounted> counters = new HashMap<>();
+
+            @Override
+            public LazyAbstractRefCounted get(int shardId) {
+                return counters.computeIfAbsent(shardId, unused -> new LazyAbstractRefCounted() {
+                    @Override
+                    protected void closeInternal() {}
+                });
+            }
+
+            public Iterable<LazyAbstractRefCounted> values() {
+                return counters.values();
+            }
+
+            // FIXME(gal, NOCOMMIT) Copy pasting this for now until I figure out where to place it
+            public abstract class LazyAbstractRefCounted implements RefCounted {
+                private final SetOnce<AbstractRefCounted> refCounter = new SetOnce<>();
+                private boolean isClosed = false;
+
+                @Override
+                public void incRef() {
+                    if (maybeCreate() == false) {
+                        refCounter.get().incRef();
+                    }
+                }
+
+                @Override
+                public boolean tryIncRef() {
+                    return maybeCreate() || refCounter.get().tryIncRef();
+                }
+
+                private boolean maybeCreate() {
+                    return refCounter.trySet(new AbstractRefCounted() {
+                        @Override
+                        protected void closeInternal() {
+                            LazyAbstractRefCounted.this.isClosed = true;
+                            LazyAbstractRefCounted.this.closeInternal();
+                        }
+                    });
+                }
+
+                @Override
+                public boolean decRef() {
+                    assert refCounter.get() != null;
+                    return refCounter.get().decRef();
+                }
+
+                @Override
+                public boolean hasReferences() {
+                    AbstractRefCounted rc = refCounter.get();
+                    return rc != null && rc.hasReferences();
+                }
+
+                protected abstract void closeInternal();
+
+                public boolean isClosed() {
+                    return isClosed;
+                }
+            }
+        }
 
         public Builder setShardRefCounters(DocVector.ShardRefCounters shardRefCounters) {
             this.shardRefCounters = shardRefCounters;

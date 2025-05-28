@@ -31,6 +31,7 @@ import org.elasticsearch.core.Releasables;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.cache.query.TrivialQueryCachingPolicy;
 import org.elasticsearch.index.mapper.MapperServiceTestCase;
+import org.elasticsearch.index.query.SearchExecutionContext;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.plugins.ExtensiblePlugin;
 import org.elasticsearch.plugins.Plugin;
@@ -296,13 +297,14 @@ public class LocalExecutionPlannerTests extends MapperServiceTestCase {
             true
         );
         for (int i = 0; i < numShards; i++) {
+            SearchExecutionContext searchExecutionContext = createSearchExecutionContext(createMapperService(mapping(b -> {
+                b.startObject("point").field("type", "geo_point").endObject();
+            })), searcher);
             shardContexts.add(
                 new EsPhysicalOperationProviders.DefaultShardContext(
                     i,
-                    () -> {},
-                    createSearchExecutionContext(createMapperService(mapping(b -> {
-                        b.startObject("point").field("type", "geo_point").endObject();
-                    })), searcher),
+                    () -> {}, // No-op releasable
+                    searchExecutionContext,
                     AliasFilter.EMPTY
                 )
             );

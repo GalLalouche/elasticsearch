@@ -1496,6 +1496,7 @@ public class TopNOperatorTests extends OperatorTestCase {
             tuple(new BlockUtils.Doc(3, 30, 300), null),
             tuple(new BlockUtils.Doc(4, 40, 400), -3L)
         );
+        // FIXME(gal, NOCOMMIT) Figure out a better way of getting access to the doc builder used.
         var refCountedByShard = new DynamicShardRefCounters();
         var page = topNTwoColumns(driverContext(), new TupleDocLongBlockSourceOperator(driverContext().blockFactory(), values) {
             @Override
@@ -1508,8 +1509,11 @@ public class TopNOperatorTests extends OperatorTestCase {
             List.of(new TopNOperator.SortOrder(1, true, false))
 
         );
-        assertThat(refCountedByShard.get(1).isClosed(), is(false));
-        assertThat(refCountedByShard.get(1).hasReferences(), is(true));
+
+        for (var refCounted : refCountedByShard.values()) {
+            assertThat(refCounted.isClosed(), is(false));
+            assertThat(refCounted.hasReferences(), is(true));
+        }
 
         assertThat(
             pageToTupless((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), page),
