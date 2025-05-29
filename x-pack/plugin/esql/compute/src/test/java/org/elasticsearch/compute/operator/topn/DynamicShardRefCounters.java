@@ -30,10 +30,9 @@ class DynamicShardRefCounters implements DocVector.ShardRefCounters {
         return counters.values();
     }
 
-    // FIXME(gal, NOCOMMIT) Copy pasting this for now until I figure out where to place it
-    public abstract class LazyAbstractRefCounted implements RefCounted {
+    abstract class LazyAbstractRefCounted implements RefCounted {
         private final SetOnce<AbstractRefCounted> refCounter = new SetOnce<>();
-        private boolean isClosed = false;
+        private boolean closed = false;
 
         @Override
         public void incRef() {
@@ -51,7 +50,7 @@ class DynamicShardRefCounters implements DocVector.ShardRefCounters {
             return refCounter.trySet(new AbstractRefCounted() {
                 @Override
                 protected void closeInternal() {
-                    LazyAbstractRefCounted.this.isClosed = true;
+                    closed = true;
                     LazyAbstractRefCounted.this.closeInternal();
                 }
             });
@@ -72,7 +71,7 @@ class DynamicShardRefCounters implements DocVector.ShardRefCounters {
         protected abstract void closeInternal();
 
         public boolean isClosed() {
-            return isClosed;
+            return closed;
         }
     }
 }

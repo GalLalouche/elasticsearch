@@ -31,6 +31,7 @@ import org.elasticsearch.compute.operator.Operator;
 import org.elasticsearch.compute.operator.OrdinalsGroupingOperator;
 import org.elasticsearch.compute.operator.SourceOperator;
 import org.elasticsearch.compute.operator.TimeSeriesAggregationOperator;
+import org.elasticsearch.core.AbstractRefCounted;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.index.IndexMode;
@@ -53,7 +54,6 @@ import org.elasticsearch.search.internal.AliasFilter;
 import org.elasticsearch.search.lookup.SearchLookup;
 import org.elasticsearch.search.sort.SortAndFormats;
 import org.elasticsearch.search.sort.SortBuilder;
-import org.elasticsearch.xpack.esql.common.LazyAbstractRefCounted;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
@@ -95,8 +95,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
      * Context of each shard we're operating against.
      */
     public abstract static class ShardContext implements org.elasticsearch.compute.lucene.ShardContext, Releasable {
-        // FIXME(gal, NOCOMMIT) There is probably a smarter way to do this using AbstractRefCounted
-        private final LazyAbstractRefCounted refCounter = new LazyAbstractRefCounted() {
+        private final AbstractRefCounted refCounted = new AbstractRefCounted() {
             @Override
             protected void closeInternal() {
                 ShardContext.this.close();
@@ -105,22 +104,22 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
 
         @Override
         public void incRef() {
-            refCounter.incRef();
+            refCounted.incRef();
         }
 
         @Override
         public boolean tryIncRef() {
-            return refCounter.tryIncRef();
+            return refCounted.tryIncRef();
         }
 
         @Override
         public boolean decRef() {
-            return refCounter.decRef();
+            return refCounted.decRef();
         }
 
         @Override
         public boolean hasReferences() {
-            return refCounter.hasReferences();
+            return refCounted.hasReferences();
         }
 
         /**
@@ -150,6 +149,7 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
     ) {
         super(foldContext, analysisRegistry);
         this.shardContexts = shardContexts;
+        this.shardContexts.forEach(ShardContext::mustIncRef);
         this.defaultDataPartitioning = defaultDataPartitioning;
     }
 

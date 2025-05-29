@@ -89,7 +89,6 @@ public abstract class LuceneOperator extends SourceOperator {
         protected final int limit;
         protected final boolean needsScore;
         protected final LuceneSliceQueue sliceQueue;
-        protected final List<? extends ShardContext> contexts;
 
         /**
          * Build the factory.
@@ -106,7 +105,6 @@ public abstract class LuceneOperator extends SourceOperator {
             boolean needsScore,
             ScoreMode scoreMode
         ) {
-            this.contexts = contexts;
             this.limit = limit;
             this.dataPartitioning = dataPartitioning;
             this.sliceQueue = LuceneSliceQueue.create(contexts, queryFunction, dataPartitioning, autoStrategy, taskConcurrency, scoreMode);

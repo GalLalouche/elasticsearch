@@ -28,6 +28,7 @@ import org.elasticsearch.compute.lucene.LuceneSliceQueue.PartitioningStrategy;
 import org.elasticsearch.compute.operator.DriverContext;
 import org.elasticsearch.compute.operator.Limiter;
 import org.elasticsearch.compute.operator.SourceOperator;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.logging.LogManager;
 import org.elasticsearch.logging.Logger;
@@ -48,7 +49,7 @@ import static org.elasticsearch.compute.lucene.LuceneSliceQueue.PartitioningStra
  */
 public class LuceneSourceOperator extends LuceneOperator {
     private static final Logger log = LogManager.getLogger(LuceneSourceOperator.class);
-    private final List<? extends ShardContext> contexts;
+    private final List<? extends RefCounted> shardContextCounters;
 
     private int currentPagePos = 0;
     private int remainingDocs;
@@ -60,7 +61,7 @@ public class LuceneSourceOperator extends LuceneOperator {
     private final int minPageSize;
 
     public static class Factory extends LuceneOperator.Factory {
-
+        private final List<? extends RefCounted> contexts;
         private final int maxPageSize;
         private final Limiter limiter;
 
@@ -83,6 +84,8 @@ public class LuceneSourceOperator extends LuceneOperator {
                 needsScore,
                 needsScore ? COMPLETE : COMPLETE_NO_SCORES
             );
+            this.contexts = contexts;
+            this.contexts.forEach(RefCounted::mustIncRef);
             this.maxPageSize = maxPageSize;
             // TODO: use a single limiter for multiple stage execution
             this.limiter = limit == NO_LIMIT ? Limiter.NO_LIMIT : new Limiter(limit);
@@ -217,7 +220,7 @@ public class LuceneSourceOperator extends LuceneOperator {
 
     @SuppressWarnings("this-escape")
     public LuceneSourceOperator(
-        List<? extends ShardContext> contexts,
+        List<? extends RefCounted> shardContextCounters,
         BlockFactory blockFactory,
         int maxPageSize,
         LuceneSliceQueue sliceQueue,
@@ -226,7 +229,8 @@ public class LuceneSourceOperator extends LuceneOperator {
         boolean needsScore
     ) {
         super(blockFactory, maxPageSize, sliceQueue);
-        this.contexts = contexts;
+        this.shardContextCounters = shardContextCounters;
+        shardContextCounters.forEach(RefCounted::mustIncRef);
         this.minPageSize = Math.max(1, maxPageSize / 2);
         this.remainingDocs = limit;
         this.limiter = limiter;
@@ -332,7 +336,7 @@ public class LuceneSourceOperator extends LuceneOperator {
                     docs = buildDocsVector(currentPagePos);
                     docsBuilder = blockFactory.newIntVectorBuilder(Math.min(remainingDocs, maxPageSize));
                     int b = 0;
-                    blocks[b++] = new DocVector(new DocVector.ShardRefCountedList(contexts), shard, leaf, docs, true).asBlock();
+                    blocks[b++] = new DocVector(new DocVector.ShardRefCountedList(shardContextCounters), shard, leaf, docs, true).asBlock();
                     shard = null;
                     leaf = null;
                     docs = null;
@@ -391,7 +395,11 @@ public class LuceneSourceOperator extends LuceneOperator {
 
     @Override
     public void close() {
-        Releasables.close(docsBuilder, scoreBuilder);
+        Releasables.close(
+            docsBuilder,
+            scoreBuilder,
+            Releasables.wrap(shardContextCounters.stream().map(Releasables::fromRefCounted).toList())
+        );
     }
 
     @Override

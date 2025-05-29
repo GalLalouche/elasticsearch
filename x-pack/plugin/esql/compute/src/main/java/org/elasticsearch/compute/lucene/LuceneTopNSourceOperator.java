@@ -53,6 +53,7 @@ import static org.apache.lucene.search.ScoreMode.TOP_DOCS_WITH_SCORES;
 public final class LuceneTopNSourceOperator extends LuceneOperator {
 
     public static class Factory extends LuceneOperator.Factory {
+        private final List<? extends ShardContext> contexts;
         private final int maxPageSize;
         private final List<SortBuilder<?>> sorts;
 
@@ -76,6 +77,7 @@ public final class LuceneTopNSourceOperator extends LuceneOperator {
                 needsScore,
                 needsScore ? TOP_DOCS_WITH_SCORES : TOP_DOCS
             );
+            this.contexts = contexts;
             this.maxPageSize = maxPageSize;
             this.sorts = sorts;
         }
