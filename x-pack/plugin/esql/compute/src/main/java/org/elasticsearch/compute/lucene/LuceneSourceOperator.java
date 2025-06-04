@@ -85,7 +85,6 @@ public class LuceneSourceOperator extends LuceneOperator {
                 needsScore ? COMPLETE : COMPLETE_NO_SCORES
             );
             this.contexts = contexts;
-            this.contexts.forEach(RefCounted::mustIncRef);
             this.maxPageSize = maxPageSize;
             // TODO: use a single limiter for multiple stage execution
             this.limiter = limit == NO_LIMIT ? Limiter.NO_LIMIT : new Limiter(limit);
@@ -292,6 +291,7 @@ public class LuceneSourceOperator extends LuceneOperator {
     @Override
     public void finish() {
         doneCollecting = true;
+        shardContextCounters.forEach(RefCounted::decRef);
     }
 
     @Override

@@ -12,12 +12,17 @@ import org.elasticsearch.action.support.WriteRequest;
 import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.index.engine.SegmentsStats;
 import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.search.MockSearchService;
+import org.elasticsearch.search.SearchService;
+import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.json.JsonXContent;
 import org.junit.Before;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -36,9 +41,11 @@ public abstract class AbstractPausableIntegTestCase extends AbstractEsqlIntegTes
 
     protected int numberOfDocs = -1;
 
+    static List<SearchContext> searchContexts = new ArrayList<>();
+
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return CollectionUtils.appendToCopy(super.nodePlugins(), PausableFieldPlugin.class);
+        return CollectionUtils.concatLists(List.of(PausableFieldPlugin.class, MockSearchService.TestPlugin.class), super.nodePlugins());
     }
 
     protected int pageSize() {
@@ -70,7 +77,6 @@ public abstract class AbstractPausableIntegTestCase extends AbstractEsqlIntegTes
             mapping.endObject();
         }
         mapping.endObject();
-        // FIXME(gal, NOCOMMIT) Temp hack, move this configuration to a method template
         client().admin().indices().prepareCreate("test").setSettings(indexSettings(10, 0)).setMapping(mapping.endObject()).get();
 
         BulkRequestBuilder bulk = client().prepareBulk().setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
@@ -83,7 +89,7 @@ public abstract class AbstractPausableIntegTestCase extends AbstractEsqlIntegTes
          * segments that finish super quickly and cause us to report strange
          * statuses when we expect "starting".
          */
-        client().admin().indices().prepareForceMerge("test").setMaxNumSegments(1).get();
+        // client().admin().indices().prepareForceMerge("test").setMaxNumSegments(1).get();
         /*
          * Double super extra paranoid check that force merge worked. It's
          * failed to reduce the index to a single segment and caused this test
@@ -95,6 +101,15 @@ public abstract class AbstractPausableIntegTestCase extends AbstractEsqlIntegTes
         // if (stats.getCount() != 1L) {
         // fail(Strings.toString(stats));
         // }
+        for (SearchService service : internalCluster().getInstances(SearchService.class)) {
+            var mockSearchService = (MockSearchService) service;
+            mockSearchService.setOnPutContext(ctx -> System.out.println("Putting search context: " + ctx.id()));
+            mockSearchService.setOnCreateSearchContext(ctx -> {
+                System.out.println("Creating search context: " + ctx.id());
+                searchContexts.add(ctx);
+            });
+            mockSearchService.setOnRemoveContext(ctx -> System.out.println("Removing search context: " + ctx.id()));
+        }
     }
 
     public static class PausableFieldPlugin extends AbstractPauseFieldPlugin {

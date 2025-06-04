@@ -149,7 +149,6 @@ public class EsPhysicalOperationProviders extends AbstractPhysicalOperationProvi
     ) {
         super(foldContext, analysisRegistry);
         this.shardContexts = shardContexts;
-        this.shardContexts.forEach(ShardContext::mustIncRef);
         this.defaultDataPartitioning = defaultDataPartitioning;
     }
 

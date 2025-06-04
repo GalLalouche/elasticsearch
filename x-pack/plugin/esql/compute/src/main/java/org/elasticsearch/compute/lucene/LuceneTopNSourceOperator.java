@@ -133,8 +133,8 @@ public final class LuceneTopNSourceOperator extends LuceneOperator {
         boolean needsScore
     ) {
         super(blockFactory, maxPageSize, sliceQueue);
-        contexts.forEach(ShardContext::mustIncRef);
         this.contexts = contexts;
+        contexts.forEach(ShardContext::mustIncRef);
         this.sorts = sorts;
         this.limit = limit;
         this.needsScore = needsScore;
