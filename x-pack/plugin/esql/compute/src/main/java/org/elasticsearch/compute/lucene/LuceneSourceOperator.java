@@ -291,7 +291,6 @@ public class LuceneSourceOperator extends LuceneOperator {
     @Override
     public void finish() {
         doneCollecting = true;
-        shardContextCounters.forEach(RefCounted::decRef);
     }
 
     @Override

@@ -310,7 +310,7 @@ public class Driver implements Releasable, Describable {
         for (int index = maxIndex; index >= minIndex; index--) {
             if (activeOperators.get(index).isFinished()) {
                 /*
-                 * Remove (and possibly close) this operator and all source operators in the
+                 * Remove this operator and all unclosed source operators in the
                  * most paranoid possible way. Closing operators shouldn't throw,
                  * but if it does, this will make sure we don't try to close any
                  * that succeed twice.
@@ -324,7 +324,7 @@ public class Driver implements Releasable, Describable {
                 }
 
                 // Finish the next operator.
-                if (index + 1 <= activeOperators.size() - 1) {
+                if (index + 1 < activeOperators.size()) {
                     Operator newRootOperator = activeOperators.get(index + 1);
                     newRootOperator.finish();
                 }

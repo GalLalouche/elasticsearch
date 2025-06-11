@@ -30,6 +30,7 @@ import org.elasticsearch.compute.data.LongVector;
 import org.elasticsearch.compute.data.OrdinalBytesRefVector;
 import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.operator.Operator;
+import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.xcontent.XContentBuilder;
@@ -64,6 +65,7 @@ public final class TimeSeriesSourceOperator extends LuceneOperator {
         int limit
     ) {
         super(blockFactory, maxPageSize, sliceQueue);
+        contexts.forEach(RefCounted::mustIncRef);
         this.contexts = contexts;
         this.maxPageSize = maxPageSize;
         this.blockFactory = blockFactory;
@@ -140,7 +142,12 @@ public final class TimeSeriesSourceOperator extends LuceneOperator {
 
     @Override
     public void close() {
-        Releasables.closeExpectNoException(timestampsBuilder, tsHashesBuilder, docCollector);
+        Releasables.closeExpectNoException(
+            timestampsBuilder,
+            tsHashesBuilder,
+            docCollector,
+            Releasables.wrap(contexts.stream().map(Releasables::fromRefCounted).toList())
+        );
     }
 
     class SegmentsIterator {
