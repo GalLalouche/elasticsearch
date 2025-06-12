@@ -21,9 +21,8 @@ module org.elasticsearch.compute {
     requires org.elasticsearch.geo;
     requires org.elasticsearch.xcore;
     requires hppc;
-  requires java.sql;
 
-  exports org.elasticsearch.compute;
+    exports org.elasticsearch.compute;
     exports org.elasticsearch.compute.aggregation;
     exports org.elasticsearch.compute.data;
     exports org.elasticsearch.compute.lucene;

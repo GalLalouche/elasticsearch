@@ -1500,7 +1500,8 @@ public class TopNOperatorTests extends OperatorTestCase {
             tuple(new BlockUtils.Doc(2, 30, 300), null),
             tuple(new BlockUtils.Doc(3, 40, 400), -3L)
         );
-        var refCountedByShard = new ShardRefCounted.ShardRefCountedList(Stream.generate(() -> new SimpleRefCounted()).limit(4).toList());
+        List<SimpleRefCounted> list = Stream.generate(() -> new SimpleRefCounted()).limit(4).toList();
+        var refCountedByShard = new ShardRefCounted.ShardRefCountedList(list);
         var page = topNTwoColumns(driverContext(), new TupleDocLongBlockSourceOperator(driverContext().blockFactory(), values) {
             @Override
             protected Block.Builder firstElementBlockBuilder(int length) {
