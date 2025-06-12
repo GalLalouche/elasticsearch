@@ -343,7 +343,7 @@ public final class DocVector extends AbstractVector implements Vector {
         forEachShardRefCounter(DecOrInc.DEC);
     }
 
-    enum DecOrInc {
+    private enum DecOrInc {
         DEC,
         INC;
 

@@ -50,7 +50,9 @@ class ResultBuilderForDoc implements ResultBuilder {
 
     @Override
     public void decodeValue(BytesRef values) {
-        assert nextRefCounted != null : "setNextRefCounted must be set before decodeValue";
+        if (nextRefCounted == null) {
+            throw new IllegalStateException("setNextRefCounted must be set before each decodeValue call");
+        }
         shards[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         segments[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);
         docs[position] = TopNEncoder.DEFAULT_UNSORTABLE.decodeInt(values);

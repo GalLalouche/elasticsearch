@@ -11,28 +11,25 @@ import org.elasticsearch.core.RefCounted;
 
 import java.util.List;
 
+/** Manages reference counting for {@link ShardContext}. */
 public interface ShardRefCounted {
     RefCounted get(int shardId);
 
-    record ShardRefCountedList(List<? extends RefCounted> refCounters) implements ShardRefCounted {
-        @Override
-        public RefCounted get(int shardId) {
-            return refCounters.get(shardId);
-        }
+    static ShardRefCounted fromList(List<? extends RefCounted> refCounters) {
+        return shardId -> refCounters.get(shardId);
     }
 
-    record SingleShardRefCounted(int index, RefCounted refCounted) implements ShardRefCounted {
-        @Override
-        public RefCounted get(int shardId) {
+    static ShardRefCounted fromShardContext(ShardContext shardContext) {
+        return single(shardContext.index(), shardContext);
+    }
+
+    static ShardRefCounted single(int index, RefCounted refCounted) {
+        return shardId -> {
             if (shardId != index) {
                 throw new IllegalArgumentException("Invalid shardId: " + shardId + ", expected: " + index);
             }
             return refCounted;
-        }
-    }
-
-    static ShardRefCounted fromShardContext(ShardContext shardContext) {
-        return new SingleShardRefCounted(shardContext.index(), shardContext);
+        };
     }
 
     ShardRefCounted ALWAYS_REFERENCED = shardId -> RefCounted.ALWAYS_REFERENCED;

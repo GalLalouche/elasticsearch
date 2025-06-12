@@ -680,7 +680,7 @@ public class TopNOperatorTests extends OperatorTestCase {
             encoder,
             sortOrders
         );
-        var result = pageToTupless(
+        var result = pageToTuples(
             (block, i) -> block.isNull(i) ? null : ((LongBlock) block).getLong(i),
             (block, i) -> block.isNull(i) ? null : ((LongBlock) block).getLong(i),
             page
@@ -721,7 +721,7 @@ public class TopNOperatorTests extends OperatorTestCase {
         return pages;
     }
 
-    private static <T, S> List<Tuple<T, S>> pageToTupless(
+    private static <T, S> List<Tuple<T, S>> pageToTuples(
         BiFunction<Block, Integer, T> getFirstBlockValue,
         BiFunction<Block, Integer, S> getSecondBlockValue,
         List<Page> pages
@@ -1494,75 +1494,80 @@ public class TopNOperatorTests extends OperatorTestCase {
     }
 
     public void testShardContextManagement_limitEqualToCount_noShardContextIsReleased() {
-        List<Tuple<BlockUtils.Doc, Long>> values = Arrays.asList(
-            tuple(new BlockUtils.Doc(0, 10, 100), 1L),
-            tuple(new BlockUtils.Doc(1, 20, 200), 2L),
-            tuple(new BlockUtils.Doc(2, 30, 300), null),
-            tuple(new BlockUtils.Doc(3, 40, 400), -3L)
-        );
-        List<SimpleRefCounted> list = Stream.generate(() -> new SimpleRefCounted()).limit(4).toList();
-        var refCountedByShard = new ShardRefCounted.ShardRefCountedList(list);
-        var page = topNTwoColumns(driverContext(), new TupleDocLongBlockSourceOperator(driverContext().blockFactory(), values) {
-            @Override
-            protected Block.Builder firstElementBlockBuilder(int length) {
-                return DocBlock.newBlockBuilder(blockFactory, length).setShardRefCounted(refCountedByShard);
-            }
-        },
-            4,
-            List.of(TopNEncoder.DEFAULT_UNSORTABLE, TopNEncoder.DEFAULT_SORTABLE),
-            List.of(new TopNOperator.SortOrder(1, true, false))
+        var result = aux(4);
 
-        );
-        refCountedByShard.refCounters().forEach(RefCounted::decRef);
-
-        for (var refCounted : refCountedByShard.refCounters()) {
+        for (var refCounted : result.refCountedList) {
             assertTrue(refCounted.hasReferences());
         }
 
         assertThat(
-            pageToTupless((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), page),
-            equalTo(values.stream().sorted(Comparator.comparingLong(t -> t.v2() == null ? (Long.MAX_VALUE) : t.v2())).toList())
+            pageToTuples((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), result.pages),
+            equalTo(result.values.stream().sorted(Comparator.comparingLong(t -> t.v2() == null ? (Long.MAX_VALUE) : t.v2())).toList())
         );
 
-        for (var refCounted : refCountedByShard.refCounters()) {
+        for (var refCounted : result.refCountedList) {
             assertFalse(refCounted.hasReferences());
         }
     }
 
     public void testShardContextManagement_notAllShardsPassTopN_shardsAreReleased() {
+        var result = aux(2);
+
+        assertTrue(result.refCountedList.get(0).hasReferences());
+        assertFalse(result.refCountedList.get(1).hasReferences());
+        assertFalse(result.refCountedList.get(2).hasReferences());
+        assertTrue(result.refCountedList.get(3).hasReferences());
+
+        var expectedValues = List.of(result.values.get(3), result.values.get(0));
+        assertThat(
+            pageToTuples((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), result.pages),
+            equalTo(expectedValues)
+        );
+
+        for (var rc : result.refCountedList) {
+            assertFalse(rc.hasReferences());
+        }
+    }
+
+    private void aux(int limit, List<Boolean> expectedOpenAfterTopN) {
         List<Tuple<BlockUtils.Doc, Long>> values = Arrays.asList(
             tuple(new BlockUtils.Doc(0, 10, 100), 1L),
             tuple(new BlockUtils.Doc(1, 20, 200), 2L),
             tuple(new BlockUtils.Doc(2, 30, 300), null),
             tuple(new BlockUtils.Doc(3, 40, 400), -3L)
         );
-        var refCountedByShard = new ShardRefCounted.ShardRefCountedList(Stream.generate(() -> new SimpleRefCounted()).limit(4).toList());
+        List<RefCounted> refCountedList = Stream.<RefCounted>generate(() -> new SimpleRefCounted()).limit(4).toList();
+        var shardRefCounted = ShardRefCounted.fromList(refCountedList);
 
-        var page = topNTwoColumns(driverContext(), new TupleDocLongBlockSourceOperator(driverContext().blockFactory(), values) {
+        var pages = topNTwoColumns(driverContext(), new TupleDocLongBlockSourceOperator(driverContext().blockFactory(), values) {
             @Override
             protected Block.Builder firstElementBlockBuilder(int length) {
-                return DocBlock.newBlockBuilder(blockFactory, length).setShardRefCounted(refCountedByShard);
+                return DocBlock.newBlockBuilder(blockFactory, length).setShardRefCounted(shardRefCounted);
             }
         },
-            2,
+            limit,
             List.of(TopNEncoder.DEFAULT_UNSORTABLE, TopNEncoder.DEFAULT_SORTABLE),
             List.of(new TopNOperator.SortOrder(1, true, false))
 
         );
-        refCountedByShard.refCounters().forEach(RefCounted::decRef);
+        refCountedList.forEach(RefCounted::decRef);
 
-        assertTrue(refCountedByShard.get(0).hasReferences());
-        assertFalse(refCountedByShard.get(1).hasReferences());
-        assertFalse(refCountedByShard.get(2).hasReferences());
-        assertTrue(refCountedByShard.get(3).hasReferences());
+        assertTrue(refCountedList.get(0).hasReferences());
+        assertFalse(refCountedList.get(1).hasReferences());
+        assertFalse(refCountedList.get(2).hasReferences());
+        assertTrue(refCountedList.get(3).hasReferences());
 
+        var expectedValues = values.stream()
+            .sorted(Comparator.comparingLong(t -> t.v2() == null ? Long.MAX_VALUE : t.v2()))
+            .limit(limit)
+            .toList();
         assertThat(
-            pageToTupless((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), page),
-            equalTo(List.of(tuple(new BlockUtils.Doc(3, 40, 400), -3L), tuple(new BlockUtils.Doc(0, 10, 100), 1L)))
+            pageToTuples((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), pages),
+            equalTo(expectedValues)
         );
 
-        for (var refCounted : refCountedByShard.refCounters()) {
-            assertFalse(refCounted.hasReferences());
+        for (var rc : refCountedList) {
+            assertFalse(rc.hasReferences());
         }
     }
 
