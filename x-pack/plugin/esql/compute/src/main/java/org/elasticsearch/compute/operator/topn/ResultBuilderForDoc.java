@@ -12,6 +12,7 @@ import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.BlockFactory;
 import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.data.IntVector;
+import org.elasticsearch.compute.lucene.ShardRefCounted;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.RefCounted;
 import org.elasticsearch.core.Releasables;
@@ -80,7 +81,7 @@ class ResultBuilderForDoc implements ResultBuilder {
         }
     }
 
-    private record ShardRefCountedMap(Map<Integer, RefCounted> refCounters) implements DocVector.ShardRefCounters {
+    private record ShardRefCountedMap(Map<Integer, RefCounted> refCounters) implements ShardRefCounted {
         @Override
         public RefCounted get(int shardId) {
             return refCounters.get(shardId);

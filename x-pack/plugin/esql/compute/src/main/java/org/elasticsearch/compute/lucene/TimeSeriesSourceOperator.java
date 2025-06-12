@@ -399,7 +399,7 @@ public final class TimeSeriesSourceOperator extends LuceneOperator {
                 segments = segmentsBuilder.build();
                 segmentsBuilder = null;
                 shards = blockFactory.newConstantIntVector(shardContext.index(), docs.getPositionCount());
-                docVector = new DocVector(new DocVector.SingleShardCounter(shardContext), shards, segments, docs, segments.isConstant());
+                docVector = new DocVector(ShardRefCounted.fromShardContext(shardContext), shards, segments, docs, segments.isConstant());
                 return docVector;
             } finally {
                 if (docVector == null) {

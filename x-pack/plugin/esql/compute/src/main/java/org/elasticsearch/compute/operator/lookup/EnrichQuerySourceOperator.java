@@ -22,6 +22,7 @@ import org.elasticsearch.compute.data.IntBlock;
 import org.elasticsearch.compute.data.IntVector;
 import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.lucene.ShardContext;
+import org.elasticsearch.compute.lucene.ShardRefCounted;
 import org.elasticsearch.compute.operator.SourceOperator;
 import org.elasticsearch.compute.operator.Warnings;
 import org.elasticsearch.core.Releasables;
@@ -147,7 +148,7 @@ public final class EnrichQuerySourceOperator extends SourceOperator {
             }
             docsVector = docsBuilder.build();
             page = new Page(
-                new DocVector(new DocVector.SingleShardCounter(shardContext), shardsVector, segmentsVector, docsVector, null).asBlock(),
+                new DocVector(ShardRefCounted.fromShardContext(shardContext), shardsVector, segmentsVector, docsVector, null).asBlock(),
                 positionsVector.asBlock()
             );
         } finally {

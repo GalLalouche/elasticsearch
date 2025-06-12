@@ -10,11 +10,10 @@ package org.elasticsearch.compute.data;
 import org.apache.lucene.util.IntroSorter;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.common.unit.ByteSizeValue;
-import org.elasticsearch.core.RefCounted;
+import org.elasticsearch.compute.lucene.ShardRefCounted;
 import org.elasticsearch.core.ReleasableIterator;
 import org.elasticsearch.core.Releasables;
 
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -50,35 +49,14 @@ public final class DocVector extends AbstractVector implements Vector {
      */
     private int[] shardSegmentDocMapBackwards;
 
-    private final ShardRefCounters shardRefCounters;
+    private final ShardRefCounted shardRefCounters;
 
-    public ShardRefCounters shardRefCounters() {
+    public ShardRefCounted shardRefCounters() {
         return shardRefCounters;
     }
 
-    public interface ShardRefCounters {
-        RefCounted get(int shardId);
-    }
-
-    public record ShardRefCountedList(List<? extends RefCounted> refCounters) implements ShardRefCounters {
-        @Override
-        public RefCounted get(int shardId) {
-            return refCounters.get(shardId);
-        }
-    }
-
-    public record SingleShardCounter(RefCounted refCounter) implements ShardRefCounters {
-        @Override
-        public RefCounted get(int shardId) {
-            return refCounter;
-        }
-    }
-
-    /** Used by tests. */
-    public static ShardRefCounters NOOP_SHARD_REF_COUNTERS = new SingleShardCounter(RefCounted.ALWAYS_REFERENCED);
-
     public DocVector(
-        ShardRefCounters shardRefCounters,
+        ShardRefCounted shardRefCounters,
         IntVector shards,
         IntVector segments,
         IntVector docs,
@@ -106,7 +84,7 @@ public final class DocVector extends AbstractVector implements Vector {
     }
 
     public DocVector(
-        ShardRefCounters shardRefCounters,
+        ShardRefCounted shardRefCounters,
         IntVector shards,
         IntVector segments,
         IntVector docs,
@@ -116,21 +94,6 @@ public final class DocVector extends AbstractVector implements Vector {
         this(shardRefCounters, shards, segments, docs, null);
         this.shardSegmentDocMapForwards = docMapForwards;
         this.shardSegmentDocMapBackwards = docMapBackwards;
-    }
-
-    /** Usable by tests. */
-    public static DocVector withoutShardRefCounter(IntVector shards, IntVector segments, IntVector docs) {
-        return new DocVector(NOOP_SHARD_REF_COUNTERS, shards, segments, docs, null);
-    }
-
-    /** Usable by tests. */
-    public static DocVector withoutShardRefCounter(
-        IntVector shards,
-        IntVector segments,
-        IntVector docs,
-        boolean singleSegmentNonDecreasing
-    ) {
-        return new DocVector(NOOP_SHARD_REF_COUNTERS, shards, segments, docs, singleSegmentNonDecreasing);
     }
 
     public IntVector shards() {
@@ -384,7 +347,7 @@ public final class DocVector extends AbstractVector implements Vector {
         DEC,
         INC;
 
-        void apply(ShardRefCounters counters, int shardId) {
+        void apply(ShardRefCounted counters, int shardId) {
             switch (this) {
                 case DEC -> counters.get(shardId).decRef();
                 case INC -> counters.get(shardId).mustIncRef();

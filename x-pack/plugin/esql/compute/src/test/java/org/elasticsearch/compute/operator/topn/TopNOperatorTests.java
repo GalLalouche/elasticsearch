@@ -23,6 +23,7 @@ import org.elasticsearch.compute.data.ElementType;
 import org.elasticsearch.compute.data.IntBlock;
 import org.elasticsearch.compute.data.LongBlock;
 import org.elasticsearch.compute.data.Page;
+import org.elasticsearch.compute.lucene.ShardRefCounted;
 import org.elasticsearch.compute.operator.CountingCircuitBreaker;
 import org.elasticsearch.compute.operator.Driver;
 import org.elasticsearch.compute.operator.DriverContext;
@@ -38,6 +39,8 @@ import org.elasticsearch.compute.test.SequenceLongBlockSourceOperator;
 import org.elasticsearch.compute.test.TestBlockBuilder;
 import org.elasticsearch.compute.test.TestBlockFactory;
 import org.elasticsearch.compute.test.TestDriverFactory;
+import org.elasticsearch.core.RefCounted;
+import org.elasticsearch.core.SimpleRefCounted;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.indices.CrankyCircuitBreakerService;
 import org.elasticsearch.test.ESTestCase;
@@ -62,6 +65,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
+import java.util.stream.Stream;
 
 import static java.util.Comparator.naturalOrder;
 import static java.util.Comparator.reverseOrder;
@@ -1491,17 +1495,16 @@ public class TopNOperatorTests extends OperatorTestCase {
 
     public void testShardContextManagement_limitEqualToCount_noShardContextIsReleased() {
         List<Tuple<BlockUtils.Doc, Long>> values = Arrays.asList(
-            tuple(new BlockUtils.Doc(1, 10, 100), 1L),
-            tuple(new BlockUtils.Doc(2, 20, 200), 2L),
-            tuple(new BlockUtils.Doc(3, 30, 300), null),
-            tuple(new BlockUtils.Doc(4, 40, 400), -3L)
+            tuple(new BlockUtils.Doc(0, 10, 100), 1L),
+            tuple(new BlockUtils.Doc(1, 20, 200), 2L),
+            tuple(new BlockUtils.Doc(2, 30, 300), null),
+            tuple(new BlockUtils.Doc(3, 40, 400), -3L)
         );
-        // FIXME(gal, NOCOMMIT) Figure out a better way of getting access to the doc builder used.
-        var refCountedByShard = new DynamicShardRefCounters();
+        var refCountedByShard = new ShardRefCounted.ShardRefCountedList(Stream.generate(() -> new SimpleRefCounted()).limit(4).toList());
         var page = topNTwoColumns(driverContext(), new TupleDocLongBlockSourceOperator(driverContext().blockFactory(), values) {
             @Override
             protected Block.Builder firstElementBlockBuilder(int length) {
-                return DocBlock.newBlockBuilder(blockFactory, length).setShardRefCounters(refCountedByShard);
+                return DocBlock.newBlockBuilder(blockFactory, length).setShardRefCounted(refCountedByShard);
             }
         },
             4,
@@ -1509,10 +1512,10 @@ public class TopNOperatorTests extends OperatorTestCase {
             List.of(new TopNOperator.SortOrder(1, true, false))
 
         );
+        refCountedByShard.refCounters().forEach(RefCounted::decRef);
 
-        for (var refCounted : refCountedByShard.values()) {
-            assertThat(refCounted.isClosed(), is(false));
-            assertThat(refCounted.hasReferences(), is(true));
+        for (var refCounted : refCountedByShard.refCounters()) {
+            assertTrue(refCounted.hasReferences());
         }
 
         assertThat(
@@ -1520,23 +1523,24 @@ public class TopNOperatorTests extends OperatorTestCase {
             equalTo(values.stream().sorted(Comparator.comparingLong(t -> t.v2() == null ? (Long.MAX_VALUE) : t.v2())).toList())
         );
 
-        for (var refCounted : refCountedByShard.values()) {
-            assertThat(refCounted.isClosed(), is(true));
+        for (var refCounted : refCountedByShard.refCounters()) {
+            assertFalse(refCounted.hasReferences());
         }
     }
 
     public void testShardContextManagement_notAllShardsPassTopN_shardsAreReleased() {
         List<Tuple<BlockUtils.Doc, Long>> values = Arrays.asList(
-            tuple(new BlockUtils.Doc(1, 10, 100), 1L),
-            tuple(new BlockUtils.Doc(2, 20, 200), 2L),
-            tuple(new BlockUtils.Doc(3, 30, 300), null),
-            tuple(new BlockUtils.Doc(4, 40, 400), -3L)
+            tuple(new BlockUtils.Doc(0, 10, 100), 1L),
+            tuple(new BlockUtils.Doc(1, 20, 200), 2L),
+            tuple(new BlockUtils.Doc(2, 30, 300), null),
+            tuple(new BlockUtils.Doc(3, 40, 400), -3L)
         );
-        var refCountedByShard = new DynamicShardRefCounters();
+        var refCountedByShard = new ShardRefCounted.ShardRefCountedList(Stream.generate(() -> new SimpleRefCounted()).limit(4).toList());
+
         var page = topNTwoColumns(driverContext(), new TupleDocLongBlockSourceOperator(driverContext().blockFactory(), values) {
             @Override
             protected Block.Builder firstElementBlockBuilder(int length) {
-                return DocBlock.newBlockBuilder(blockFactory, length).setShardRefCounters(refCountedByShard);
+                return DocBlock.newBlockBuilder(blockFactory, length).setShardRefCounted(refCountedByShard);
             }
         },
             2,
@@ -1544,19 +1548,20 @@ public class TopNOperatorTests extends OperatorTestCase {
             List.of(new TopNOperator.SortOrder(1, true, false))
 
         );
-        System.out.println("refCountedByShard: " + refCountedByShard);
-        assertThat(refCountedByShard.get(1).isClosed(), is(false));
-        assertThat(refCountedByShard.get(2).isClosed(), is(true));
-        assertThat(refCountedByShard.get(3).isClosed(), is(true));
-        assertThat(refCountedByShard.get(4).isClosed(), is(false));
+        refCountedByShard.refCounters().forEach(RefCounted::decRef);
+
+        assertTrue(refCountedByShard.get(0).hasReferences());
+        assertFalse(refCountedByShard.get(1).hasReferences());
+        assertFalse(refCountedByShard.get(2).hasReferences());
+        assertTrue(refCountedByShard.get(3).hasReferences());
 
         assertThat(
             pageToTupless((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), page),
-            equalTo(List.of(tuple(new BlockUtils.Doc(4, 40, 400), -3L), tuple(new BlockUtils.Doc(1, 10, 100), 1L)))
+            equalTo(List.of(tuple(new BlockUtils.Doc(3, 40, 400), -3L), tuple(new BlockUtils.Doc(0, 10, 100), 1L)))
         );
 
-        for (var refCounted : refCountedByShard.values()) {
-            assertThat(refCounted.isClosed(), is(true));
+        for (var refCounted : refCountedByShard.refCounters()) {
+            assertFalse(refCounted.hasReferences());
         }
     }
 

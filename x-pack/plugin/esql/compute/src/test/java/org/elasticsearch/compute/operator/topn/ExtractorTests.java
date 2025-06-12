@@ -18,6 +18,7 @@ import org.elasticsearch.compute.data.BlockFactory;
 import org.elasticsearch.compute.data.BlockUtils;
 import org.elasticsearch.compute.data.DocVector;
 import org.elasticsearch.compute.data.ElementType;
+import org.elasticsearch.compute.lucene.ShardRefCounted;
 import org.elasticsearch.compute.operator.BreakingBytesRefBuilder;
 import org.elasticsearch.compute.test.BlockTestUtils;
 import org.elasticsearch.compute.test.TestBlockFactory;
@@ -94,7 +95,8 @@ public class ExtractorTests extends ESTestCase {
                             "doc",
                             e,
                             TopNEncoder.DEFAULT_UNSORTABLE,
-                            () -> DocVector.withoutShardRefCounter(
+                            () -> new DocVector(
+                                ShardRefCounted.ALWAYS_REFERENCED,
                                 blockFactory.newConstantIntBlockWith(randomInt(), 1).asVector(),
                                 blockFactory.newConstantIntBlockWith(randomInt(), 1).asVector(),
                                 blockFactory.newConstantIntBlockWith(randomInt(), 1).asVector(),
