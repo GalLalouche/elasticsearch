@@ -1494,42 +1494,14 @@ public class TopNOperatorTests extends OperatorTestCase {
     }
 
     public void testShardContextManagement_limitEqualToCount_noShardContextIsReleased() {
-        var result = aux(4);
-
-        for (var refCounted : result.refCountedList) {
-            assertTrue(refCounted.hasReferences());
-        }
-
-        assertThat(
-            pageToTuples((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), result.pages),
-            equalTo(result.values.stream().sorted(Comparator.comparingLong(t -> t.v2() == null ? (Long.MAX_VALUE) : t.v2())).toList())
-        );
-
-        for (var refCounted : result.refCountedList) {
-            assertFalse(refCounted.hasReferences());
-        }
+        topNShardContextManagementAux(4, Stream.generate(() -> true).limit(4).toList());
     }
 
     public void testShardContextManagement_notAllShardsPassTopN_shardsAreReleased() {
-        var result = aux(2);
-
-        assertTrue(result.refCountedList.get(0).hasReferences());
-        assertFalse(result.refCountedList.get(1).hasReferences());
-        assertFalse(result.refCountedList.get(2).hasReferences());
-        assertTrue(result.refCountedList.get(3).hasReferences());
-
-        var expectedValues = List.of(result.values.get(3), result.values.get(0));
-        assertThat(
-            pageToTuples((b, i) -> (BlockUtils.Doc) BlockUtils.toJavaObject(b, i), (b, i) -> ((LongBlock) b).getLong(i), result.pages),
-            equalTo(expectedValues)
-        );
-
-        for (var rc : result.refCountedList) {
-            assertFalse(rc.hasReferences());
-        }
+        topNShardContextManagementAux(2, List.of(true, false, false, true));
     }
 
-    private void aux(int limit, List<Boolean> expectedOpenAfterTopN) {
+    private void topNShardContextManagementAux(int limit, List<Boolean> expectedOpenAfterTopN) {
         List<Tuple<BlockUtils.Doc, Long>> values = Arrays.asList(
             tuple(new BlockUtils.Doc(0, 10, 100), 1L),
             tuple(new BlockUtils.Doc(1, 20, 200), 2L),
@@ -1552,10 +1524,7 @@ public class TopNOperatorTests extends OperatorTestCase {
         );
         refCountedList.forEach(RefCounted::decRef);
 
-        assertTrue(refCountedList.get(0).hasReferences());
-        assertFalse(refCountedList.get(1).hasReferences());
-        assertFalse(refCountedList.get(2).hasReferences());
-        assertTrue(refCountedList.get(3).hasReferences());
+        assertThat(refCountedList.stream().map(RefCounted::hasReferences).toList(), equalTo(expectedOpenAfterTopN));
 
         var expectedValues = values.stream()
             .sorted(Comparator.comparingLong(t -> t.v2() == null ? Long.MAX_VALUE : t.v2()))
