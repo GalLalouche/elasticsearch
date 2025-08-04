@@ -484,7 +484,7 @@ public final class CsvTestUtils {
      *
      * Commas can be escaped with \ (backslash) character.
      */
-    static String[] multiValuesAwareCsvToStringArray(String csvLine, int lineNumber) {
+    public static String[] multiValuesAwareCsvToStringArray(String csvLine, int lineNumber) {
         var mvCompressedEntries = new ArrayList<String>();
         String previousMvValue = null; // just helping out with error messaging
         StringBuilder mvValue = null;
@@ -843,7 +843,7 @@ public final class CsvTestUtils {
             };
         }
 
-        Object convert(String value) {
+        public Object convert(String value) {
             if (value == null) {
                 return null;
             }
