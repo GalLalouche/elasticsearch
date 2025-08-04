@@ -144,7 +144,7 @@ import static org.mockito.Mockito.mock;
  * {@link CsvTestsDataLoader} creates an index using the mapping in mapping-default.json. The same mapping file is also used to create the
  * IndexResolver that helps validate the correctness of the query and the supported field data types.
  * The created index and this class uses the data from employees.csv file as data. This class is creating one Page with Blocks in it using
- * this file and the type of blocks matches the type of the schema specified on the first line of the csv file. These being said, the
+ * this file and the type of blocks matches the type of the columns specified on the first line of the csv file. These being said, the
  * mapping in mapping-default.csv and employees.csv should be more or less in sync. An exception to this rule:
  * <p>
  * languages:integer,languages.long:long. The mapping has "long" as a sub-field of "languages". ES knows what to do with sub-field, but
@@ -153,7 +153,7 @@ import static org.mockito.Mockito.mock;
  * ATM the first line from employees.csv file is not synchronized with the mapping itself.
  * <p>
  * When we add support for more field types, CsvTests should change to support the new Block types. Same goes for employees.csv file
- * (the schema needs adjustment) and the mapping-default.json file (to add or change an existing field).
+ * (the columns needs adjustment) and the mapping-default.json file (to add or change an existing field).
  * When we add more operators, optimization rules to the logical or physical plan optimizers, there may be the need to change the operators
  * in TestPhysicalOperationProviders or adjust TestPhysicalPlanOptimizer. For example, the TestPhysicalPlanOptimizer is skipping any
  * rules that push operations to ES itself (a Limit for example). The TestPhysicalOperationProviders is a bit more complicated than that:
