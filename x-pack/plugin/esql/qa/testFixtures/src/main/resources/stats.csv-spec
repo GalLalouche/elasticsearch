@@ -850,7 +850,7 @@ c:l | d:datetime
 4      | 1994-01-01T00:00:00.000Z
 ;
 
-countStarGroupedTruncWithFilter
+countStarGroupedTruncWithFilterInsideStats
 from employees | stats c = count(*) where hire_date > "1990-01-01" by d=date_trunc(1 year, hire_date) | sort d | limit 10;
 c:l | d:datetime
 0      | 1985-01-01T00:00:00.000Z
@@ -863,6 +863,20 @@ c:l | d:datetime
 8      | 1992-01-01T00:00:00.000Z
 3      | 1993-01-01T00:00:00.000Z
 4      | 1994-01-01T00:00:00.000Z
+;
+
+countStarGroupedTruncWithFilterOutsideStats
+from employees | where hire_date > "1990-01-01" | stats c = count(*) by d=date_trunc(1 year, hire_date) | sort d | limit 10;
+c:l | d:datetime
+12     | 1990-01-01T00:00:00.000Z
+6      | 1991-01-01T00:00:00.000Z
+8      | 1992-01-01T00:00:00.000Z
+3      | 1993-01-01T00:00:00.000Z
+4      | 1994-01-01T00:00:00.000Z
+5      | 1995-01-01T00:00:00.000Z
+1      | 1996-01-01T00:00:00.000Z
+1      | 1997-01-01T00:00:00.000Z
+1      | 1999-01-01T00:00:00.000Z
 ;
 
 countAllAndOtherStatGrouped
