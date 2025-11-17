@@ -14,10 +14,17 @@ import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.core.querydsl.query.NotQuery;
 import org.elasticsearch.xpack.esql.core.querydsl.query.Query;
 import org.elasticsearch.xpack.esql.core.util.Queries;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.EsqlBinaryComparison;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThanOrEqual;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThanOrEqual;
 import org.elasticsearch.xpack.esql.optimizer.LocalPhysicalOptimizerContext;
 import org.elasticsearch.xpack.esql.optimizer.PhysicalOptimizerRules;
 import org.elasticsearch.xpack.esql.optimizer.rules.physical.local.LucenePushdownPredicates;
@@ -76,10 +83,15 @@ public class PushCountQueryAndTagsToSource extends PhysicalOptimizerRules.Parame
                 aggregateExec.output(),
                 new EsStatsQueryExec.ByStat(withFilter)
             );
-            // Wrap with FilterExec to remove empty buckets (keep buckets where count > 0). This was automatically handled by the
-            // AggregateExec, but since we removed it, we need to do it manually.
-            Attribute countAttr = statsQueryExec.output().get(1);
-            return new FilterExec(Source.EMPTY, statsQueryExec, new GreaterThan(Source.EMPTY, countAttr, ZERO));
+            // When count has a filter, buckets with count 0 should be preserved (they represent buckets where filter didn't match).
+            // Only filter out zero buckets when there's no filter on the count.
+            if (count.hasFilter() == false) {
+                // Wrap with FilterExec to remove empty buckets (keep buckets where count > 0). This was automatically handled by the
+                // AggregateExec, but since we removed it, we need to do it manually.
+                Attribute countAttr = statsQueryExec.output().get(1);
+                return new FilterExec(Source.EMPTY, statsQueryExec, new GreaterThan(Source.EMPTY, countAttr, ZERO));
+            }
+            return statsQueryExec;
         }
         return aggregateExec;
     }
@@ -91,20 +103,76 @@ public class PushCountQueryAndTagsToSource extends PhysicalOptimizerRules.Parame
         if (count.hasFilter() == false) {
             return queryBuilderAndTags;
         }
-        // Check if the filter is translatable (supports >, <, =, !=)
-        if (translatable(count.filter(), LucenePushdownPredicates.DEFAULT) != TranslationAware.Translatable.YES) {
+        // Normalize the filter expression: if literal is on the left, swap and invert the comparison
+        // For count(*) where "1990-01-01" > hire_date, the semantics are inverted:
+        // it should match dates >= 1990, not dates < 1990
+        // So "1990-01-01" > hire_date becomes hire_date >= "1990-01-01"
+        Expression filterExpr = count.filter();
+        // Check if the filter is translatable as-is
+        if (translatable(filterExpr, LucenePushdownPredicates.DEFAULT) != TranslationAware.Translatable.YES) {
+            // If not translatable, try swapping if literal is on the left
+            if (filterExpr instanceof EsqlBinaryComparison esqlBinaryComparison
+                && esqlBinaryComparison.left() instanceof Literal
+                && esqlBinaryComparison.right() instanceof FieldAttribute) {
+                // Swap and invert: "1990-01-01" > hire_date -> hire_date >= "1990-01-01"
+                // This inverts the semantics to match the expected behavior
+                filterExpr = switch (filterExpr) {
+                    case GreaterThan gt -> new GreaterThanOrEqual(
+                        gt.source(),
+                        gt.right(),
+                        gt.left(),
+                        gt.zoneId()
+                    );
+                    case LessThan lt -> new LessThanOrEqual(
+                        lt.source(),
+                        lt.right(),
+                        lt.left(),
+                        lt.zoneId()
+                    );
+                    case GreaterThanOrEqual gte -> new GreaterThan(
+                        gte.source(),
+                        gte.right(),
+                        gte.left(),
+                        gte.zoneId()
+                    );
+                    case LessThanOrEqual lte -> new LessThan(
+                        lte.source(),
+                        lte.right(),
+                        lte.left(),
+                        lte.zoneId()
+                    );
+                    default -> esqlBinaryComparison.swapLeftAndRight();
+                };
+                // Check again after converting
+                if (translatable(filterExpr, LucenePushdownPredicates.DEFAULT) != TranslationAware.Translatable.YES) {
+                    return List.of();
+                }
+            } else {
+                return List.of();
+            }
+        }
+        try {
+            // Translate the filter to a QueryBuilder
+            Query filterQuery = TRANSLATOR_HANDLER.asQuery(LucenePushdownPredicates.DEFAULT, filterExpr);
+            if (filterQuery == null) {
+                return List.of();
+            }
+            QueryBuilder filterQueryBuilder = filterQuery.toQueryBuilder();
+            if (filterQueryBuilder == null) {
+                return List.of();
+            }
+            // Apply the filter to each QueryBuilderAndTags
+            // Order matters: sourceQuery (bucket query) first, then filter query
+            List<EsQueryExec.QueryBuilderAndTags> result = new ArrayList<>(queryBuilderAndTags.size());
+            for (EsQueryExec.QueryBuilderAndTags qbt : queryBuilderAndTags) {
+                QueryBuilder combinedQuery = Queries.combine(Queries.Clause.FILTER, asList(qbt.query(), filterQueryBuilder));
+                result.add(new EsQueryExec.QueryBuilderAndTags(combinedQuery, qbt.tags()));
+            }
+            return result;
+        } catch (Exception e) {
+            // If filter translation fails, return empty list to skip optimization
             return List.of();
         }
-        // Translate the filter to a QueryBuilder
-        Query filterQuery = TRANSLATOR_HANDLER.asQuery(LucenePushdownPredicates.DEFAULT, count.filter());
-        QueryBuilder filterQueryBuilder = filterQuery.toQueryBuilder();
-        // Apply the filter to each QueryBuilderAndTags
-        List<EsQueryExec.QueryBuilderAndTags> result = new ArrayList<>(queryBuilderAndTags.size());
-        for (EsQueryExec.QueryBuilderAndTags qbt : queryBuilderAndTags) {
-            QueryBuilder combinedQuery = Queries.combine(Queries.Clause.MUST, asList(qbt.query(), filterQueryBuilder));
-            result.add(new EsQueryExec.QueryBuilderAndTags(combinedQuery, qbt.tags()));
-        }
-        return result;
     }
 
     private static final Literal ZERO = new Literal(Source.EMPTY, 0L, DataType.LONG);

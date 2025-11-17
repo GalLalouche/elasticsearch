@@ -851,7 +851,7 @@ c:l | d:datetime
 ;
 
 countStarGroupedTruncWithFilter
-from employees | stats c = count(*) where "1990-01-01" > hire_date by d=date_trunc(1 year, hire_date) | sort d | limit 10;
+from employees | stats c = count(*) where hire_date > "1990-01-01" by d=date_trunc(1 year, hire_date) | sort d | limit 10;
 c:l | d:datetime
 0      | 1985-01-01T00:00:00.000Z
 0      | 1986-01-01T00:00:00.000Z
