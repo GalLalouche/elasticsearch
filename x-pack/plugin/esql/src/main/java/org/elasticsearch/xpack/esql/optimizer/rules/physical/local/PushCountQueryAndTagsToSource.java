@@ -23,6 +23,8 @@ import org.elasticsearch.xpack.esql.plan.physical.EvalExec;
 import org.elasticsearch.xpack.esql.plan.physical.FilterExec;
 import org.elasticsearch.xpack.esql.plan.physical.PhysicalPlan;
 
+import java.util.List;
+
 /**
  * Pushes count aggregations on top of query and tags to source.
  * Will transform:
@@ -49,19 +51,20 @@ public class PushCountQueryAndTagsToSource extends PhysicalOptimizerRules.Parame
         aggregateExec.aggregates().size() == 2
             && aggregateExec.aggregates().getFirst() instanceof Alias alias
             && alias.child() instanceof Count count
-            && count.hasFilter() == false // TODO We don't support filters at the moment (but we definitely should!).
             && count.field() instanceof Literal // Ensures count(*) or equivalent.
             && aggregateExec.child() instanceof EvalExec evalExec
-            && evalExec.child() instanceof EsQueryExec queryExec
-            && queryExec.queryBuilderAndTags().size() > 1 // Ensures there are query and tags to push down.
-        ) {
+            && evalExec.child() instanceof EsQueryExec queryExec) {
+            var withFilter = foo(queryExec.queryBuilderAndTags(), count);
+            if (withFilter.isEmpty()) {
+                return aggregateExec;
+            }
             EsStatsQueryExec statsQueryExec = new EsStatsQueryExec(
                 queryExec.source(),
                 queryExec.indexPattern(),
                 null, // query
                 queryExec.limit(),
                 aggregateExec.output(),
-                new EsStatsQueryExec.ByStat(queryExec.queryBuilderAndTags())
+                new EsStatsQueryExec.ByStat(withFilter)
             );
             // Wrap with FilterExec to remove empty buckets (keep buckets where count > 0). This was automatically handled by the
             // AggregateExec, but since we removed it, we need to do it manually.
@@ -69,6 +72,16 @@ public class PushCountQueryAndTagsToSource extends PhysicalOptimizerRules.Parame
             return new FilterExec(Source.EMPTY, statsQueryExec, new GreaterThan(Source.EMPTY, countAttr, ZERO));
         }
         return aggregateExec;
+    }
+
+    private List<EsQueryExec.QueryBuilderAndTags> foo(List<EsQueryExec.QueryBuilderAndTags> queryBuilderAndTags, Count count) {
+        if (queryBuilderAndTags.size() <= 1) {
+            return List.of();
+        }
+        if (count.hasFilter() == false) {
+            return queryBuilderAndTags;
+        }
+
     }
 
     private static final Literal ZERO = new Literal(Source.EMPTY, 0L, DataType.LONG);
