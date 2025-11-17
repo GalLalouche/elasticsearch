@@ -7,15 +7,20 @@
 
 package org.elasticsearch.xpack.esql.optimizer.rules.physical.local;
 
+import org.elasticsearch.index.query.QueryBuilder;
+import org.elasticsearch.xpack.esql.capabilities.TranslationAware;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.core.querydsl.query.Query;
+import org.elasticsearch.xpack.esql.core.util.Queries;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.optimizer.LocalPhysicalOptimizerContext;
 import org.elasticsearch.xpack.esql.optimizer.PhysicalOptimizerRules;
+import org.elasticsearch.xpack.esql.optimizer.rules.physical.local.LucenePushdownPredicates;
 import org.elasticsearch.xpack.esql.plan.physical.AggregateExec;
 import org.elasticsearch.xpack.esql.plan.physical.EsQueryExec;
 import org.elasticsearch.xpack.esql.plan.physical.EsStatsQueryExec;
@@ -23,7 +28,12 @@ import org.elasticsearch.xpack.esql.plan.physical.EvalExec;
 import org.elasticsearch.xpack.esql.plan.physical.FilterExec;
 import org.elasticsearch.xpack.esql.plan.physical.PhysicalPlan;
 
+import java.util.ArrayList;
 import java.util.List;
+
+import static java.util.Arrays.asList;
+import static org.elasticsearch.xpack.esql.capabilities.TranslationAware.translatable;
+import static org.elasticsearch.xpack.esql.planner.TranslatorHandler.TRANSLATOR_HANDLER;
 
 /**
  * Pushes count aggregations on top of query and tags to source.
@@ -81,7 +91,20 @@ public class PushCountQueryAndTagsToSource extends PhysicalOptimizerRules.Parame
         if (count.hasFilter() == false) {
             return queryBuilderAndTags;
         }
-
+        // Check if the filter is translatable (supports >, <, =, !=)
+        if (translatable(count.filter(), LucenePushdownPredicates.DEFAULT) != TranslationAware.Translatable.YES) {
+            return List.of();
+        }
+        // Translate the filter to a QueryBuilder
+        Query filterQuery = TRANSLATOR_HANDLER.asQuery(LucenePushdownPredicates.DEFAULT, count.filter());
+        QueryBuilder filterQueryBuilder = filterQuery.toQueryBuilder();
+        // Apply the filter to each QueryBuilderAndTags
+        List<EsQueryExec.QueryBuilderAndTags> result = new ArrayList<>(queryBuilderAndTags.size());
+        for (EsQueryExec.QueryBuilderAndTags qbt : queryBuilderAndTags) {
+            QueryBuilder combinedQuery = Queries.combine(Queries.Clause.MUST, asList(qbt.query(), filterQueryBuilder));
+            result.add(new EsQueryExec.QueryBuilderAndTags(combinedQuery, qbt.tags()));
+        }
+        return result;
     }
 
     private static final Literal ZERO = new Literal(Source.EMPTY, 0L, DataType.LONG);
