@@ -736,16 +736,19 @@ required_capability: unmapped_fields
 required_capability: optional_fields
 
 SET unmapped_fields="load"\;
-FROM sample_data, no_mapping_sample_data METADATA _index
+FROM partial_mapping_sample_data, no_mapping_sample_data METADATA _index
 | KEEP _index, message
 | WHERE message == "Connection error?"
 | SORT _index
 ;
 
-_index:keyword         | message:keyword
-no_mapping_sample_data | Connection error?
-no_mapping_sample_data | Connection error?
-no_mapping_sample_data | Connection error?
+_index:keyword              | message:keyword
+no_mapping_sample_data      | Connection error?
+no_mapping_sample_data      | Connection error?
+no_mapping_sample_data      | Connection error?
+partial_mapping_sample_data | Connection error?
+partial_mapping_sample_data | Connection error?
+partial_mapping_sample_data | Connection error?
 ;
 
 sortOnPartiallyUnmappedField
@@ -766,4 +769,120 @@ sample_data            | Connected to 10.1.0.1
 no_mapping_sample_data | Connected to 10.1.0.1!
 sample_data            | Connected to 10.1.0.2
 no_mapping_sample_data | Connected to 10.1.0.2!
+;
+
+filterOnPartiallyMissingField
+required_capability: index_metadata_field
+required_capability: unmapped_fields
+required_capability: optional_fields
+
+SET unmapped_fields="load"\;
+FROM partial_mapping_sample_data, sample_data METADATA _index
+| KEEP _index, unmapped_message
+| WHERE unmapped_message == "Disconnection error"
+| SORT _index
+;
+
+_index:keyword              | unmapped_message:keyword
+partial_mapping_sample_data | Disconnection error
+partial_mapping_sample_data | Disconnection error
+partial_mapping_sample_data | Disconnection error
+;
+
+filterOnMappedInOneMissingInOther
+required_capability: index_metadata_field
+required_capability: unmapped_fields
+required_capability: optional_fields
+
+SET unmapped_fields="load"\;
+FROM sample_data, employees METADATA _index
+| KEEP _index, message
+| WHERE message == "Connection error"
+| SORT _index
+;
+
+_index:keyword | message:keyword
+sample_data    | Connection error
+sample_data    | Connection error
+sample_data    | Connection error
+;
+
+sortOnPartiallyMissingField
+required_capability: index_metadata_field
+required_capability: unmapped_fields
+required_capability: optional_fields
+
+SET unmapped_fields="load"\;
+FROM partial_mapping_sample_data, sample_data METADATA _index
+| KEEP _index, unmapped_message
+| SORT unmapped_message NULLS FIRST, _index
+| LIMIT 5
+;
+
+_index:keyword              | unmapped_message:keyword
+sample_data                 | null
+sample_data                 | null
+sample_data                 | null
+sample_data                 | null
+sample_data                 | null
+;
+
+sortOnPartiallyMissingFieldNullsLast
+required_capability: index_metadata_field
+required_capability: unmapped_fields
+required_capability: optional_fields
+
+SET unmapped_fields="load"\;
+FROM partial_mapping_sample_data, sample_data METADATA _index
+| KEEP _index, unmapped_message
+| SORT unmapped_message NULLS LAST, _index
+| LIMIT 5
+;
+
+_index:keyword              | unmapped_message:keyword
+partial_mapping_sample_data | 43
+partial_mapping_sample_data | Disconnected from 10.1.0.1
+partial_mapping_sample_data | Disconnected from 10.1.0.2
+partial_mapping_sample_data | Disconnected from 10.1.0.3
+partial_mapping_sample_data | Disconnection error
+;
+
+sortOnMappedInOneMissingInOther
+required_capability: index_metadata_field
+required_capability: unmapped_fields
+required_capability: optional_fields
+
+SET unmapped_fields="load"\;
+FROM sample_data, employees METADATA _index
+| KEEP _index, message, first_name
+| SORT message NULLS FIRST, first_name
+| LIMIT 5
+;
+
+_index:keyword | message:keyword | first_name:keyword
+employees      | null            | Alejandro
+employees      | null            | Amabile
+employees      | null            | Anneke
+employees      | null            | Anoosh
+employees      | null            | Arumugam
+;
+
+sortOnMappedInOneMissingInOtherNullsLast
+required_capability: index_metadata_field
+required_capability: unmapped_fields
+required_capability: optional_fields
+
+SET unmapped_fields="load"\;
+FROM sample_data, employees METADATA _index
+| KEEP _index, message, first_name
+| SORT message NULLS LAST
+| LIMIT 5
+;
+
+_index:keyword | message:keyword       | first_name:keyword
+sample_data    | Connected to 10.1.0.1 | null
+sample_data    | Connected to 10.1.0.2 | null
+sample_data    | Connected to 10.1.0.3 | null
+sample_data    | Connection error      | null
+sample_data    | Connection error      | null
 ;
