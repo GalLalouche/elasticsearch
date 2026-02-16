@@ -8,7 +8,11 @@
 package org.elasticsearch.xpack.esql.qa.simulator;
 
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.xpack.esql.core.expression.Alias;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.UnresolvedAttribute;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
@@ -77,7 +81,19 @@ public class LogicalPlanPrinter {
             if (i > 0) {
                 sb.append(", ");
             }
-            sb.append(eval.expressions().get(i).toString());
+            sb.append(printExpression(eval.expressions().get(i)));
         }
+    }
+
+    static String printExpression(Expression expression) {
+        return switch (expression) {
+            case Alias alias -> alias.name() + " = " + printExpression(alias.child());
+            case UnresolvedAttribute ua -> ua.name();
+            case Literal literal -> literal.value().toString();
+            case ArithmeticOperation op -> printExpression(op.left()) + " " + op.symbol() + " " + printExpression(op.right());
+            default -> throw new UnsupportedOperationException(
+                Strings.format("Printing of expression [%s] is not supported yet", expression.getClass())
+            );
+        };
     }
 }

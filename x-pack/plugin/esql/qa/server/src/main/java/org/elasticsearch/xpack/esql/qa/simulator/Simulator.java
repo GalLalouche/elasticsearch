@@ -20,6 +20,8 @@ import org.elasticsearch.xpack.esql.core.expression.UnresolvedAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
@@ -206,6 +208,24 @@ public class Simulator {
                     var values = new ArrayList<>();
                     for (int i = 0; i < leftColumn.values.size(); i++) {
                         values.add(toLong(leftColumn.values.get(i)) + toLong(rightColumn.values.get(i)));
+                    }
+                    return new UnnamedColumn(leftColumn.type, values);
+                }
+                case Sub sub -> {
+                    var leftColumn = evaluate(sub.left());
+                    var rightColumn = evaluate(sub.right());
+                    var values = new ArrayList<>();
+                    for (int i = 0; i < leftColumn.values.size(); i++) {
+                        values.add(toLong(leftColumn.values.get(i)) - toLong(rightColumn.values.get(i)));
+                    }
+                    return new UnnamedColumn(leftColumn.type, values);
+                }
+                case Mul mul -> {
+                    var leftColumn = evaluate(mul.left());
+                    var rightColumn = evaluate(mul.right());
+                    var values = new ArrayList<>();
+                    for (int i = 0; i < leftColumn.values.size(); i++) {
+                        values.add(toLong(leftColumn.values.get(i)) * toLong(rightColumn.values.get(i)));
                     }
                     return new UnnamedColumn(leftColumn.type, values);
                 }
