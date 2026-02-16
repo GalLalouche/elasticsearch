@@ -65,6 +65,7 @@ public class LogicalPlanGenerator {
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
 
         var options = new ArrayList<Arbitrary<LogicalPlan>>();
+        options.add(Arbitraries.just(current)); // identity — allows shrinking layers away
         options.add(wrapKeep(current, available));
         if (available.size() > 1) {
             options.add(wrapDrop(current, available));

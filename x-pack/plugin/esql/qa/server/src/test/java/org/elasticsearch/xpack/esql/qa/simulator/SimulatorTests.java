@@ -214,6 +214,6 @@ public class SimulatorTests extends ESTestCase {
     }
 
     private Simulator.Result simulate(String statement) throws IOException {
-        return simulator.simulate(parser.createStatement(statement));
+        return simulator.simulate(parser.createStatement(statement).plan());
     }
 }

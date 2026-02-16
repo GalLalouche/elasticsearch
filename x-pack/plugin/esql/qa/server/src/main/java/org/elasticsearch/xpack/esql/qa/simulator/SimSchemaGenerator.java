@@ -22,19 +22,10 @@ class SimSchemaGenerator {
 
     static Arbitrary<SimSchema> schemas() {
         var indexName = Arbitraries.strings().alpha().ofMinLength(3).ofMaxLength(6).map(s -> "sim_" + s.toLowerCase());
-        var columnNames = Arbitraries.of(COLUMN_NAME_POOL).set().ofMinSize(1).ofMaxSize(4);
-        var types = Arbitraries.of(TYPE_POOL);
+        Arbitrary<SimSchema.SimColumn> column = Combinators.combine(Arbitraries.of(COLUMN_NAME_POOL), Arbitraries.of(TYPE_POOL))
+            .as(SimSchema.SimColumn::new);
 
-        return Combinators.combine(indexName, columnNames).flatAs((name, names) -> {
-            List<String> nameList = List.copyOf(names);
-            // Generate a type for each column name
-            return Arbitraries.of(TYPE_POOL).list().ofSize(nameList.size()).map(typeList -> {
-                var columns = new java.util.ArrayList<SimSchema.SimColumn>(nameList.size());
-                for (int i = 0; i < nameList.size(); i++) {
-                    columns.add(new SimSchema.SimColumn(nameList.get(i), typeList.get(i)));
-                }
-                return new SimSchema(name, List.copyOf(columns));
-            });
-        });
+        return Combinators.combine(indexName, column.list().ofMinSize(1).ofMaxSize(4).uniqueElements(SimSchema.SimColumn::name))
+            .as((name, cols) -> new SimSchema(name, List.copyOf(cols)));
     }
 }
