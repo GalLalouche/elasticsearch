@@ -12,13 +12,20 @@ import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
+import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.EsqlBinaryComparison;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
+import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
+import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
+import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
+
+import java.util.List;
 
 /**
  * Converts a {@link LogicalPlan} tree back into an ES|QL query string.
@@ -40,6 +47,9 @@ public class LogicalPlanPrinter {
             case Keep keep -> printSpecific(keep, sb);
             case Drop drop -> printSpecific(drop, sb);
             case Eval eval -> printSpecific(eval, sb);
+            case Filter filter -> printSpecific(filter, sb);
+            case Limit limit -> printSpecific(limit, sb);
+            case OrderBy orderBy -> printSpecific(orderBy, sb);
             default -> throw new UnsupportedOperationException(
                 Strings.format("Printing of plan [%s] is not supported yet", plan.getClass())
             );
@@ -89,12 +99,39 @@ public class LogicalPlanPrinter {
         }
     }
 
+    private static void printSpecific(Filter filter, StringBuilder sb) {
+        printCommon(filter.child(), sb);
+        sb.append(" | WHERE ").append(printExpression(filter.condition()));
+    }
+
+    private static void printSpecific(Limit limit, StringBuilder sb) {
+        printCommon(limit.child(), sb);
+        sb.append(" | LIMIT ").append(((Literal) limit.limit()).value());
+    }
+
+    private static void printSpecific(OrderBy orderBy, StringBuilder sb) {
+        printCommon(orderBy.child(), sb);
+        sb.append(" | SORT ");
+        List<Order> orders = orderBy.order();
+        for (int i = 0; i < orders.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(printExpression(orders.get(i).child()))
+                .append(orders.get(i).direction() == Order.OrderDirection.ASC ? " ASC" : " DESC");
+        }
+    }
+
     static String printExpression(Expression expression) {
         return switch (expression) {
             case Alias alias -> Strings.format("%s = %s", alias.name(), printExpression(alias.child()));
             case Attribute attr -> attr.name();
             case Literal literal -> literal.value() instanceof String s ? Strings.format("\"%s\"", s) : literal.value().toString();
             case ArithmeticOperation op -> Strings.format("%s %s %s", printExpression(op.left()), op.symbol(), printExpression(op.right()));
+            case EsqlBinaryComparison comp -> Strings.format(
+                "%s %s %s",
+                printExpression(comp.left()),
+                comp.getFunctionType().symbol(),
+                printExpression(comp.right())
+            );
             default -> throw new UnsupportedOperationException(
                 Strings.format("Printing of expression [%s] is not supported yet", expression.getClass())
             );

@@ -21,13 +21,19 @@ import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
+import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
+import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
+import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
+import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -77,7 +83,10 @@ public class LogicalPlanGenerator {
         }
         if (integerAttrs.isEmpty() == false) {
             options.add(wrapEval(current, available, integerAttrs));
+            options.add(wrapFilter(current, integerAttrs));
         }
+        options.add(wrapLimit(current));
+        options.add(wrapSort(current, available));
         return Arbitraries.oneOf(options);
     }
 
@@ -103,6 +112,33 @@ public class LogicalPlanGenerator {
         }
         return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs))
             .as((name, expr) -> new Eval(Source.EMPTY, current, List.of(new Alias(Source.EMPTY, name, expr))));
+    }
+
+    private static Arbitrary<LogicalPlan> wrapFilter(LogicalPlan current, List<Attribute> integerAttrs) {
+        return Combinators.combine(Arbitraries.of(integerAttrs), Arbitraries.integers().between(1, 10), Arbitraries.of(true, false))
+            .as((attr, threshold, useGt) -> {
+                var literal = new Literal(Source.EMPTY, threshold, DataType.INTEGER);
+                Expression cond = useGt ? new GreaterThan(Source.EMPTY, attr, literal) : new LessThan(Source.EMPTY, attr, literal);
+                return new Filter(Source.EMPTY, current, cond);
+            });
+    }
+
+    private static Arbitrary<LogicalPlan> wrapLimit(LogicalPlan current) {
+        return Arbitraries.integers()
+            .between(1, 10)
+            .map(n -> new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), current));
+    }
+
+    private static Arbitrary<LogicalPlan> wrapSort(LogicalPlan current, List<Attribute> available) {
+        return Combinators.combine(
+            Arbitraries.of(available),
+            Arbitraries.of(Order.OrderDirection.values()),
+            Arbitraries.integers().between(1, 10)
+        ).as((attr, dir, n) -> {
+            var order = new Order(Source.EMPTY, attr, dir, Order.NullsPosition.ANY);
+            var orderBy = new OrderBy(Source.EMPTY, current, List.of(order));
+            return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), orderBy);
+        });
     }
 
     private static <T> Arbitrary<List<T>> arbitraryNonEmptySubset(List<T> pool) {

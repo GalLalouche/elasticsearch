@@ -274,6 +274,99 @@ public class SimulatorTests extends ESTestCase {
         );
     }
 
+    public void testLimit() throws Exception {
+        assertThat(
+            simulate("ROW x=1, y=2 | LIMIT 1"),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("x", DataType.INTEGER, List.of(1)),
+                        new Simulator.Column("y", DataType.INTEGER, List.of(2))
+                    )
+                )
+            )
+        );
+    }
+
+    public void testSort() throws Exception {
+        assertThat(
+            simulate("FROM sample_data | SORT event_duration ASC | LIMIT 3"),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column(
+                            "@timestamp",
+                            DataType.DATETIME,
+                            List.of(
+                                CsvTestUtils.Type.DATETIME.convert("2023-10-23T13:51:54.732Z"),
+                                CsvTestUtils.Type.DATETIME.convert("2023-10-23T13:33:34.937Z"),
+                                CsvTestUtils.Type.DATETIME.convert("2023-10-23T13:55:01.543Z")
+                            )
+                        ),
+                        new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.0.5", "172.21.3.15")),
+                        new Simulator.Column("event_duration", DataType.LONG, List.of(725448L, 1232382L, 1756467L)),
+                        new Simulator.Column(
+                            "message",
+                            DataType.KEYWORD,
+                            List.of("Connection error", "Disconnected", "Connected to 10.1.0.1")
+                        )
+                    )
+                )
+            )
+        );
+    }
+
+    public void testSortDesc() throws Exception {
+        assertThat(
+            simulate("FROM sample_data | SORT event_duration DESC | LIMIT 2"),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column(
+                            "@timestamp",
+                            DataType.DATETIME,
+                            List.of(
+                                CsvTestUtils.Type.DATETIME.convert("2023-10-23T13:52:55.015Z"),
+                                CsvTestUtils.Type.DATETIME.convert("2023-10-23T13:53:55.832Z")
+                            )
+                        ),
+                        new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.3.15")),
+                        new Simulator.Column("event_duration", DataType.LONG, List.of(8268153L, 5033755L)),
+                        new Simulator.Column("message", DataType.KEYWORD, List.of("Connection error", "Connection error"))
+                    )
+                )
+            )
+        );
+    }
+
+    public void testWhereLessThan() throws Exception {
+        assertThat(
+            simulate("FROM sample_data | WHERE event_duration < 2000000"),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column(
+                            "@timestamp",
+                            DataType.DATETIME,
+                            List.of(
+                                CsvTestUtils.Type.DATETIME.convert("2023-10-23T13:55:01.543Z"),
+                                CsvTestUtils.Type.DATETIME.convert("2023-10-23T13:51:54.732Z"),
+                                CsvTestUtils.Type.DATETIME.convert("2023-10-23T13:33:34.937Z")
+                            )
+                        ),
+                        new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.3.15", "172.21.0.5")),
+                        new Simulator.Column("event_duration", DataType.LONG, List.of(1756467L, 725448L, 1232382L)),
+                        new Simulator.Column(
+                            "message",
+                            DataType.KEYWORD,
+                            List.of("Connected to 10.1.0.1", "Connection error", "Disconnected")
+                        )
+                    )
+                )
+            )
+        );
+    }
+
     private Simulator.Result simulate(String statement) throws IOException {
         return simulator.simulate(parser.createStatement(statement).plan());
     }

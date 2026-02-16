@@ -18,22 +18,27 @@ import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
+import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
+import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +79,8 @@ public class Simulator {
             case Drop drop -> visit(drop);
             case Filter filter -> visit(filter);
             case Eval eval -> visit(eval);
+            case Limit limit -> visit(limit);
+            case OrderBy orderBy -> visit(orderBy);
             default -> throw new UnsupportedOperationException(
                 Strings.format("Simulation not (yet) supported for plan type: %s", plan.getClass())
             );
@@ -221,6 +228,35 @@ public class Simulator {
         return new Result(result);
     }
 
+    private Result visit(Limit limit) throws IOException {
+        var childResult = simulate(limit.child());
+        int n = ((Number) ((Literal) limit.limit()).value()).intValue();
+        int actual = Math.min(n, childResult.columns.getFirst().values.size());
+        return new Result(childResult.columns.stream().map(c -> new Column(c.name, c.type, c.values.subList(0, actual))).toList());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Result visit(OrderBy orderBy) throws IOException {
+        var childResult = simulate(orderBy.child());
+        int numRows = childResult.columns.getFirst().values.size();
+        Integer[] indices = IntStream.range(0, numRows).boxed().toArray(Integer[]::new);
+        // Pre-evaluate order expressions to column values
+        List<Order> orders = orderBy.order();
+        List<List<Object>> orderValues = orders.stream().map(o -> childResult.evaluate(o.child()).values).toList();
+        Arrays.sort(indices, (a, b) -> {
+            for (int i = 0; i < orders.size(); i++) {
+                int cmp = ((Comparable<Object>) orderValues.get(i).get(a)).compareTo(orderValues.get(i).get(b));
+                if (cmp != 0) return orders.get(i).direction() == Order.OrderDirection.ASC ? cmp : -cmp;
+            }
+            return 0;
+        });
+        return new Result(
+            childResult.columns.stream()
+                .map(c -> new Column(c.name, c.type, Arrays.stream(indices).map(i -> c.values.get(i)).toList()))
+                .toList()
+        );
+    }
+
     public record Result(List<Column> columns) {
         public Result append(ArrayList<Column> newColumns) {
             return new Result(CollectionUtils.concatLists(columns, newColumns));
@@ -288,6 +324,15 @@ public class Simulator {
                     var values = new ArrayList<>();
                     for (int i = 0; i < leftColumn.values.size(); i++) {
                         values.add(((Comparable<Object>) leftColumn.values.get(i)).compareTo(toLong(rightColumn.values.get(i))) > 0);
+                    }
+                    return new UnnamedColumn(DataType.BOOLEAN, values);
+                }
+                case LessThan lt -> {
+                    var leftColumn = evaluate(lt.left());
+                    var rightColumn = evaluate(lt.right());
+                    var values = new ArrayList<>();
+                    for (int i = 0; i < leftColumn.values.size(); i++) {
+                        values.add(((Comparable<Object>) leftColumn.values.get(i)).compareTo(toLong(rightColumn.values.get(i))) < 0);
                     }
                     return new UnnamedColumn(DataType.BOOLEAN, values);
                 }
