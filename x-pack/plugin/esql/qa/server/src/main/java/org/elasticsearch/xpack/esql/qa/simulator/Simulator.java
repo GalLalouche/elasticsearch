@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -45,6 +46,18 @@ import static org.elasticsearch.xpack.esql.EsqlTestUtils.reader;
 
 public class Simulator {
     private static final Logger LOGGER = LogManager.getLogger(Simulator.class);
+
+    private final SimSchema schema;
+    private final List<Map<String, Object>> data;
+
+    public Simulator() {
+        this(null, null);
+    }
+
+    public Simulator(SimSchema schema, List<Map<String, Object>> data) {
+        this.schema = schema;
+        this.data = data;
+    }
 
     public Result simulate(LogicalPlan plan) throws IOException {
         return switch (plan) {
@@ -71,6 +84,11 @@ public class Simulator {
     private Result visit(UnresolvedRelation relation) throws IOException {
         String pattern = relation.indexPattern().indexPattern();
         assert pattern.indexOf('*') == -1 : "Index patterns with wildcards are not supported yet in simulation, found: " + pattern;
+
+        // If in-memory data is provided for this index, use it directly
+        if (schema != null && data != null && pattern.equals(schema.indexName())) {
+            return buildResultFromMemory(schema, data);
+        }
 
         var file = Simulator.class.getResource("/data/" + pattern + ".csv");
         assert file != null : "File not found for index pattern: " + pattern;
@@ -111,6 +129,23 @@ public class Simulator {
             }
             return new Result(columns);
         }
+    }
+
+    private static Result buildResultFromMemory(SimSchema schema, List<Map<String, Object>> data) {
+        var columns = new ArrayList<Column>(schema.columns().size());
+        for (var col : schema.columns()) {
+            var values = new ArrayList<>();
+            for (var row : data) {
+                Object value = row.get(col.name());
+                // Normalize: integers from generated data may be Integer, convert to Long for consistency
+                if (value instanceof Integer i) {
+                    value = i.longValue();
+                }
+                values.add(value);
+            }
+            columns.add(new Column(col.name(), col.type(), values));
+        }
+        return new Result(columns);
     }
 
     private Result visit(Keep keep) throws IOException {

@@ -21,7 +21,7 @@ import static org.hamcrest.Matchers.equalTo;
 public class SimulatorTests extends ESTestCase {
     private final Simulator simulator = new Simulator();
 
-    EsqlParser parser = new EsqlParser();
+    EsqlParser parser = EsqlParser.INSTANCE;
 
     public void testRow() throws Exception {
         assertThat(
@@ -214,6 +214,6 @@ public class SimulatorTests extends ESTestCase {
     }
 
     private Simulator.Result simulate(String statement) throws IOException {
-        return simulator.simulate(parser.createStatement(statement, EsqlTestUtils.TEST_CFG));
+        return simulator.simulate(parser.createStatement(statement));
     }
 }

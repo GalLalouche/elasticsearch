@@ -89,7 +89,13 @@ public class LogicalPlanPrinter {
         return switch (expression) {
             case Alias alias -> alias.name() + " = " + printExpression(alias.child());
             case UnresolvedAttribute ua -> ua.name();
-            case Literal literal -> literal.value().toString();
+            case Literal literal -> {
+                Object value = literal.value();
+                if (value instanceof String s) {
+                    yield "\"" + s + "\"";
+                }
+                yield value.toString();
+            }
             case ArithmeticOperation op -> printExpression(op.left()) + " " + op.symbol() + " " + printExpression(op.right());
             default -> throw new UnsupportedOperationException(
                 Strings.format("Printing of expression [%s] is not supported yet", expression.getClass())
