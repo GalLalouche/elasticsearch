@@ -13,20 +13,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 record SimSchema(String indexName, List<SimColumn> columns) {
-
     record SimColumn(String name, DataType type) {
         @Override
         public String toString() {
             return name + ":" + type.typeName();
         }
-    }
-
-    List<SimColumn> integerColumns() {
-        return columns.stream().filter(c -> c.type() == DataType.INTEGER).toList();
-    }
-
-    List<String> columnNames() {
-        return columns.stream().map(SimColumn::name).toList();
     }
 
     @Override

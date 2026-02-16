@@ -13,17 +13,20 @@ import net.jqwik.api.Combinators;
 
 import org.elasticsearch.xpack.esql.core.type.DataType;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
+/**
+ * Generates random row data conforming to a {@link SimSchema}.
+ * Each row is a map from column name to a value matching the column's {@link org.elasticsearch.xpack.esql.core.type.DataType}.
+ */
 class SimDataGenerator {
-
     private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz");
 
     static Arbitrary<List<Map<String, Object>>> rows(SimSchema schema) {
-        Arbitrary<Map<String, Object>> singleRow = arbitraryRow(schema);
-        return singleRow.list().ofMinSize(1).ofMaxSize(5);
+        return arbitraryRow(schema).list().ofMinSize(1).ofMaxSize(5);
     }
 
     private static Arbitrary<Map<String, Object>> arbitraryRow(SimSchema schema) {
@@ -32,17 +35,11 @@ class SimDataGenerator {
             return arbitraryValue(columns.get(0).type()).map(v -> Map.of(columns.get(0).name(), v));
         }
 
-        // Build list of value arbitraries, one per column
         List<Arbitrary<Object>> valueArbitraries = columns.stream().map(col -> arbitraryValue(col.type())).toList();
-
-        // Combine all value arbitraries into a single row
-        return Combinators.combine(valueArbitraries).as(values -> {
-            Map<String, Object> row = new LinkedHashMap<>();
-            for (int i = 0; i < columns.size(); i++) {
-                row.put(columns.get(i).name(), values.get(i));
-            }
-            return row;
-        });
+        return Combinators.combine(valueArbitraries)
+            .as(values -> IntStream.range(0, columns.size())
+                .boxed()
+                .collect(Collectors.toMap(i -> columns.get(i).name(), values::get)));
     }
 
     private static Arbitrary<Object> arbitraryValue(DataType type) {

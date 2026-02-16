@@ -24,7 +24,6 @@ import java.util.stream.Collectors;
  * {@code plan.output()} to discover available columns without manual state tracking.
  */
 class SimDrop extends Drop {
-
     SimDrop(Source source, LogicalPlan child, List<NamedExpression> removals) {
         super(source, child, removals);
     }

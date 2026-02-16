@@ -19,6 +19,7 @@ import org.apache.http.HttpHost;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.logging.LogConfigurator;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.index.IndexSettings;
@@ -34,7 +35,6 @@ import java.util.List;
 import java.util.Map;
 
 public class SimulatorPropertyIT {
-
     static {
         // Initialize ES logging (required outside the ES test framework).
         LogConfigurator.configureESLogging();
@@ -96,7 +96,7 @@ public class SimulatorPropertyIT {
     record TestCase(SimSchema schema, List<Map<String, Object>> data, LogicalPlan plan, String query) {
         @Override
         public String toString() {
-            return query + " [" + schema + ", " + data.size() + " rows]";
+            return Strings.format("%s [%s, %s rows]", query, schema, data.size());
         }
     }
 
@@ -122,16 +122,14 @@ public class SimulatorPropertyIT {
 
             if (simColumns.size() != esCols.size()) {
                 throw new AssertionError(
-                    "Column count mismatch for query ["
-                        + tc.query()
-                        + "]: simulator="
-                        + simColumns.size()
-                        + " es="
-                        + esCols.size()
-                        + "\nSimulator columns: "
-                        + columnNames(simColumns)
-                        + "\nES columns: "
-                        + columnNames(esCols)
+                    Strings.format(
+                        "Column count mismatch for query [%s]: simulator=%s es=%s\nSimulator columns: %s\nES columns: %s",
+                        tc.query(),
+                        simColumns.size(),
+                        esCols.size(),
+                        columnNames(simColumns),
+                        columnNames(esCols)
+                    )
                 );
             }
 
@@ -141,14 +139,13 @@ public class SimulatorPropertyIT {
 
                 if (simCol.name().equals(esCol.name()) == false) {
                     throw new AssertionError(
-                        "Column name mismatch at index "
-                            + c
-                            + " for query ["
-                            + tc.query()
-                            + "]: simulator="
-                            + simCol.name()
-                            + " es="
-                            + esCol.name()
+                        Strings.format(
+                            "Column name mismatch at index %s for query [%s]: simulator=%s es=%s",
+                            c,
+                            tc.query(),
+                            simCol.name(),
+                            esCol.name()
+                        )
                     );
                 }
 
@@ -157,18 +154,15 @@ public class SimulatorPropertyIT {
 
                 if (simValues.equals(esValues) == false) {
                     throw new AssertionError(
-                        "Value mismatch for column ["
-                            + simCol.name()
-                            + "] in query ["
-                            + tc.query()
-                            + "] with "
-                            + tc.schema()
-                            + " and data "
-                            + tc.data()
-                            + ":\nsimulator="
-                            + simValues
-                            + "\nes="
-                            + esValues
+                        Strings.format(
+                            "Value mismatch for column [%s] in query [%s] with %s and data %s:\nsimulator=%s\nes=%s",
+                            simCol.name(),
+                            tc.query(),
+                            tc.schema(),
+                            tc.data(),
+                            simValues,
+                            esValues
+                        )
                     );
                 }
             }
@@ -283,9 +277,7 @@ public class SimulatorPropertyIT {
     }
 
     private static List<Simulator.Column> sortedColumns(List<Simulator.Column> columns) {
-        List<Simulator.Column> sorted = new ArrayList<>(columns);
-        sorted.sort(Comparator.comparing(Simulator.Column::name));
-        return sorted;
+        return columns.stream().sorted(Comparator.comparing(Simulator.Column::name)).toList();
     }
 
     private static List<String> columnNames(List<Simulator.Column> columns) {
@@ -295,16 +287,11 @@ public class SimulatorPropertyIT {
     private static void assertStatusCode(int expected, Response response) {
         int actual = response.getStatusLine().getStatusCode();
         if (actual != expected) {
-            throw new AssertionError("Expected status code " + expected + " but got " + actual);
+            throw new AssertionError(Strings.format("Expected status code %s but got %s", expected, actual));
         }
     }
 
     private static List<Object> normalizeValues(List<Object> values) {
-        return values.stream().map(v -> {
-            if (v instanceof Number n) {
-                return n.longValue();
-            }
-            return v;
-        }).toList();
+        return values.stream().map(v -> v instanceof Number n ? n.longValue() : v).toList();
     }
 }

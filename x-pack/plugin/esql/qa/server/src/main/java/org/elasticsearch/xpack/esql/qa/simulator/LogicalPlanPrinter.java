@@ -20,8 +20,12 @@ import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
 
+/**
+ * Converts a {@link LogicalPlan} tree back into an ES|QL query string.
+ * Used to send generated plans to Elasticsearch for comparison with the simulator.
+ */
 public class LogicalPlanPrinter {
-    private LogicalPlanPrinter() {}
+    private LogicalPlanPrinter() { /* static class */ }
 
     public static String print(LogicalPlan plan) {
         StringBuilder sb = new StringBuilder();
@@ -87,16 +91,10 @@ public class LogicalPlanPrinter {
 
     static String printExpression(Expression expression) {
         return switch (expression) {
-            case Alias alias -> alias.name() + " = " + printExpression(alias.child());
+            case Alias alias -> Strings.format("%s = %s", alias.name(), printExpression(alias.child()));
             case Attribute attr -> attr.name();
-            case Literal literal -> {
-                Object value = literal.value();
-                if (value instanceof String s) {
-                    yield "\"" + s + "\"";
-                }
-                yield value.toString();
-            }
-            case ArithmeticOperation op -> printExpression(op.left()) + " " + op.symbol() + " " + printExpression(op.right());
+            case Literal literal -> literal.value() instanceof String s ? Strings.format("\"%s\"", s) : literal.value().toString();
+            case ArithmeticOperation op -> Strings.format("%s %s %s", printExpression(op.left()), op.symbol(), printExpression(op.right()));
             default -> throw new UnsupportedOperationException(
                 Strings.format("Printing of expression [%s] is not supported yet", expression.getClass())
             );

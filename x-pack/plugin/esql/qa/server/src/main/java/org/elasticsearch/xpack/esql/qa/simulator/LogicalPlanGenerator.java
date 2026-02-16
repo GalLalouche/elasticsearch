@@ -32,10 +32,15 @@ import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
+/**
+ * Generates random {@link LogicalPlan} trees using jqwik's {@link Arbitraries#recursive} combinator.
+ * Plans are built bottom-up: an {@link org.elasticsearch.xpack.esql.plan.logical.EsRelation} base
+ * is wrapped in randomly chosen layers (KEEP, DROP, EVAL) up to a configurable depth.
+ */
 public class LogicalPlanGenerator {
-
-    static final int DEFAULT_PLAN_DEPTH = 5;
+    private static final int DEFAULT_PLAN_DEPTH = 5;
     private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", DEFAULT_PLAN_DEPTH);
 
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
@@ -91,15 +96,13 @@ public class LogicalPlanGenerator {
     }
 
     private static Arbitrary<LogicalPlan> wrapEval(LogicalPlan current, List<Attribute> available, List<Attribute> integerAttrs) {
-        List<String> existingNames = available.stream().map(Attribute::name).toList();
+        var existingNames = available.stream().map(Attribute::name).collect(Collectors.toSet());
         List<String> availableAliases = EVAL_ALIAS_POOL.stream().filter(n -> existingNames.contains(n) == false).toList();
         if (availableAliases.isEmpty()) {
             availableAliases = List.of("_col_0", "_col_1");
         }
-        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs)).as((name, expr) -> {
-            var alias = new Alias(Source.EMPTY, name, expr);
-            return new Eval(Source.EMPTY, current, List.of(alias));
-        });
+        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs))
+            .as((name, expr) -> new Eval(Source.EMPTY, current, List.of(new Alias(Source.EMPTY, name, expr))));
     }
 
     private static <T> Arbitrary<List<T>> arbitraryNonEmptySubset(List<T> pool) {
@@ -126,7 +129,7 @@ public class LogicalPlanGenerator {
     private static Arbitrary<Expression> arbitraryLeaf(List<Attribute> integerAttrs) {
         return Arbitraries.oneOf(
             Arbitraries.of(integerAttrs).map(a -> a),
-            Arbitraries.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).map(i -> new Literal(Source.EMPTY, i, DataType.INTEGER))
+            Arbitraries.integers().between(1, 10).map(i -> new Literal(Source.EMPTY, i, DataType.INTEGER))
         );
     }
 }

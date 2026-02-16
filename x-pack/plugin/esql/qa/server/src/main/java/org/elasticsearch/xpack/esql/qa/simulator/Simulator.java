@@ -10,8 +10,7 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.util.CollectionUtils;
-import org.elasticsearch.logging.LogManager;
-import org.elasticsearch.logging.Logger;
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
@@ -46,17 +45,22 @@ import static org.elasticsearch.common.logging.LoggerMessageFormat.format;
 import static org.elasticsearch.xpack.esql.CsvTestUtils.multiValuesAwareCsvToStringArray;
 import static org.elasticsearch.xpack.esql.EsqlTestUtils.reader;
 
+/**
+ * Evaluates a {@link LogicalPlan} against in-memory or CSV-backed data, producing columnar results.
+ * Acts as a reference implementation for ES|QL semantics: property tests compare its output
+ * against a real Elasticsearch cluster to detect divergences.
+ */
 public class Simulator {
-    private static final Logger LOGGER = LogManager.getLogger(Simulator.class);
-
+    @Nullable
     private final SimSchema schema;
+    @Nullable
     private final List<Map<String, Object>> data;
 
-    public Simulator() {
+    Simulator() {
         this(null, null);
     }
 
-    public Simulator(SimSchema schema, List<Map<String, Object>> data) {
+    Simulator(@Nullable SimSchema schema, @Nullable List<Map<String, Object>> data) {
         this.schema = schema;
         this.data = data;
     }
@@ -70,15 +74,19 @@ public class Simulator {
             case Drop drop -> visit(drop);
             case Filter filter -> visit(filter);
             case Eval eval -> visit(eval);
-            default -> throw new UnsupportedOperationException("Simulation not (yet) supported for plan type: " + plan.getClass());
+            default -> throw new UnsupportedOperationException(
+                Strings.format("Simulation not (yet) supported for plan type: %s", plan.getClass())
+            );
         };
     }
 
     private Result visit(org.elasticsearch.xpack.esql.plan.logical.Row row) {
-        List<Column> columns = row.fields().stream().map(alias -> switch (alias.child()) {
-            case Literal l -> new Column(alias.name(), alias.dataType(), List.of(l.value()));
-            default -> throw new UnsupportedOperationException(
-                "Row field [" + alias.name() + "] is not a literal, but a " + alias.child().getClass()
+        List<Column> columns = row.fields().stream().map(alias -> {
+            if (alias.child() instanceof Literal l) {
+                return new Column(alias.name(), alias.dataType(), List.of(l.value()));
+            }
+            throw new UnsupportedOperationException(
+                Strings.format("Row field [%s] is not a literal, but a %s", alias.name(), alias.child().getClass())
             );
         }).toList();
         return new Result(columns);
@@ -156,7 +164,7 @@ public class Simulator {
         if (schema != null && data != null && pattern.equals(schema.indexName())) {
             return buildResultFromMemory(schema, data);
         }
-        throw new UnsupportedOperationException("EsRelation with index [" + pattern + "] not backed by in-memory data");
+        throw new UnsupportedOperationException(Strings.format("EsRelation with index [%s] not backed by in-memory data", pattern));
     }
 
     private Result visit(Keep keep) throws IOException {
@@ -180,10 +188,11 @@ public class Simulator {
         var childResult = simulate(eval.child());
         var newColumns = new ArrayList<Column>();
         for (var expression : eval.expressions()) {
-            switch (expression) {
-                case Alias alias -> newColumns.add(childResult.evaluate(alias.child()).toNamed(alias.name()));
-                default -> throw new UnsupportedOperationException(
-                    "Eval expression [" + expression + "] is not an alias, but a " + expression.getClass()
+            if (expression instanceof Alias alias) {
+                newColumns.add(childResult.evaluate(alias.child()).toNamed(alias.name()));
+            } else {
+                throw new UnsupportedOperationException(
+                    Strings.format("Eval expression [%s] is not an alias, but a %s", expression, expression.getClass())
                 );
             }
         }

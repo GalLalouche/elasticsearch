@@ -15,8 +15,11 @@ import org.elasticsearch.xpack.esql.core.type.DataType;
 
 import java.util.List;
 
+/**
+ * Generates random {@link SimSchema} instances: an index name plus a variable number of columns
+ * with names and types drawn from fixed pools.
+ */
 class SimSchemaGenerator {
-
     private static final List<String> COLUMN_NAME_POOL = List.of("a", "b", "c", "d", "x", "y");
     private static final List<DataType> TYPE_POOL = List.of(DataType.INTEGER, DataType.KEYWORD);
 
