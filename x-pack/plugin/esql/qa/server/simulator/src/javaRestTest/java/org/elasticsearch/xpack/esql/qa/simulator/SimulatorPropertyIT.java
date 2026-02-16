@@ -127,9 +127,21 @@ public class SimulatorPropertyIT {
         dataIndexed = true;
     }
 
+    /**
+     * A wrapper around {@link LogicalPlan} whose {@link #toString()} returns the ES|QL query string,
+     * so that jqwik's counterexample and shrunk sample reports show readable queries instead of the AST.
+     */
+    record QueryPlan(LogicalPlan plan, String query) {
+        @Override
+        public String toString() {
+            return query;
+        }
+    }
+
     @Property(tries = 10)
-    void simulatorMatchesEs(@ForAll("simDataPlans") LogicalPlan plan) throws Exception {
-        String query = LogicalPlanPrinter.print(plan);
+    void simulatorMatchesEs(@ForAll("simDataPlans") QueryPlan qp) throws Exception {
+        LogicalPlan plan = qp.plan();
+        String query = qp.query();
         Simulator simulator = new Simulator();
 
         // Run through simulator
@@ -189,8 +201,8 @@ public class SimulatorPropertyIT {
     }
 
     @Provide
-    Arbitrary<LogicalPlan> simDataPlans() {
-        return LogicalPlanGenerator.simDataPlans();
+    Arbitrary<QueryPlan> simDataPlans() {
+        return LogicalPlanGenerator.simDataPlans().map(plan -> new QueryPlan(plan, LogicalPlanPrinter.print(plan)));
     }
 
     private Map<String, Object> runEsqlQuery(String query) throws IOException {

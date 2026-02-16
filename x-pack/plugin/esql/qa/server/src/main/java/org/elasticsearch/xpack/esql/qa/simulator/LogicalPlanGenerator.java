@@ -19,6 +19,7 @@ import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.UnresolvedAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
@@ -80,8 +81,8 @@ public class LogicalPlanGenerator {
         var leaf = arbitraryLeaf();
         var pair = Combinators.combine(leaf, leaf).as((left, right) -> new Expression[] { left, right });
         return Arbitraries.oneOf(
-            pair.map(p -> new Add(Source.EMPTY, p[0], p[1])),
-            pair.map(p -> new Sub(Source.EMPTY, p[0], p[1])),
+            pair.map(p -> new Add(Source.EMPTY, p[0], p[1], EsqlTestUtils.TEST_CFG)),
+            pair.map(p -> new Sub(Source.EMPTY, p[0], p[1], EsqlTestUtils.TEST_CFG)),
             pair.map(p -> new Mul(Source.EMPTY, p[0], p[1]))
         );
     }
