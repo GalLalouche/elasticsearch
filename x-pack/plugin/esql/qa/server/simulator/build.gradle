@@ -1,0 +1,28 @@
+apply plugin: 'elasticsearch.internal-java-rest-test'
+
+dependencies {
+  javaRestTestImplementation project(xpackModule('esql:qa:server'))
+  javaRestTestImplementation project(xpackModule('esql'))
+  javaRestTestImplementation('net.jqwik:jqwik-api:1.9.3')
+  javaRestTestRuntimeOnly('net.jqwik:jqwik-engine:1.9.3')
+  javaRestTestRuntimeOnly('org.junit.platform:junit-platform-launcher:1.12.1')
+  javaRestTestRuntimeOnly('org.junit.platform:junit-platform-engine:1.12.1')
+  javaRestTestRuntimeOnly('org.junit.platform:junit-platform-commons:1.12.1')
+  javaRestTestRuntimeOnly('org.opentest4j:opentest4j:1.3.0')
+
+  clusterPlugins project(':plugins:mapper-size')
+  clusterPlugins project(':plugins:mapper-murmur3')
+  clusterPlugins project(':x-pack:plugin:inference:qa:test-service-plugin')
+}
+
+restResources {
+  restApi {
+    include '_common', 'bulk', 'indices', 'esql', 'cluster'
+  }
+}
+
+tasks.named('javaRestTest') {
+  usesDefaultDistribution("to be triaged")
+  useJUnitPlatform()
+  maxParallelForks = 1
+}

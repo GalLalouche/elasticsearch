@@ -7,10 +7,6 @@
 
 package org.elasticsearch.xpack.esql.plan.simulator;
 
-import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
-
 public class ProductionRunner {
-    public Simulator.Result run(LogicalPlan plan) {
-        throw new AssertionError("TODO stub — deleted in later commit");
-    }
+    // Stub — deleted in later commit
 }
