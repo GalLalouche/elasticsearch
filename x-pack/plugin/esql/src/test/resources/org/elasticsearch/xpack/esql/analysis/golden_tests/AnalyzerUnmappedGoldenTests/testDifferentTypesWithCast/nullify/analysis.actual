@@ -1,0 +1,4 @@
+Limit[1000[INTEGER],false,false]
+\_Project[[ts{r}#0, message{f(KeywordEsField)}#1, does_not_exist{r}#2]]
+\_Eval[[$$@timestamp$converted_to$keyword{f(MultiTypeEsField)$}#3 AS ts#0, null[NULL] AS does_not_exist#2]]
+\_EsRelation[sample_data,sample_data_ts_long,employees][!@timestamp, avg_worked_seconds{f}#4, birth_date{f}#5, client_ip{f}#6, emp_no{f}#7, event_duration{f}#8, first_name{f}#9, gender{f}#10, height{f}#11, height.float{f}#12, height.half_float{f}#13, height.scaled_float{f}#14, hire_date{f}#15, is_rehired{f}#16, job_positions{f}#17, languages{f}#18, languages.byte{f}#19, languages.long{f}#20, languages.short{f}#21, last_name{f}#22, message{f}#1, salary{f}#23, salary_change{f}#24, salary_change.int{f}#25, salary_change.keyword{f}#26, salary_change.long{f}#27, still_hired{f}#28, $$@timestamp$converted_to$keyword{f$}#3]

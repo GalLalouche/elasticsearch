@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-package org.elasticsearch.xpack.esql.plan.simulator;
+package org.elasticsearch.xpack.esql.qa.simulator;
 
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.Strings;
