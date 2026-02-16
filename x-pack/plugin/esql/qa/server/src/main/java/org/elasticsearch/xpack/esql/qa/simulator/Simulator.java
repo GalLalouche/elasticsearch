@@ -14,9 +14,10 @@ import org.elasticsearch.logging.LogManager;
 import org.elasticsearch.logging.Logger;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
+import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
-import org.elasticsearch.xpack.esql.core.expression.UnresolvedAttribute;
+import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
@@ -24,6 +25,7 @@ import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
+import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
@@ -63,6 +65,7 @@ public class Simulator {
         return switch (plan) {
             case org.elasticsearch.xpack.esql.plan.logical.Row row -> visit(row);
             case UnresolvedRelation relation -> visit(relation);
+            case EsRelation relation -> visit(relation);
             case Keep keep -> visit(keep);
             case Drop drop -> visit(drop);
             case Filter filter -> visit(filter);
@@ -148,16 +151,19 @@ public class Simulator {
         return new Result(columns);
     }
 
+    private Result visit(EsRelation relation) {
+        String pattern = relation.indexPattern();
+        if (schema != null && data != null && pattern.equals(schema.indexName())) {
+            return buildResultFromMemory(schema, data);
+        }
+        throw new UnsupportedOperationException("EsRelation with index [" + pattern + "] not backed by in-memory data");
+    }
+
     private Result visit(Keep keep) throws IOException {
         var childResult = simulate(keep.child());
         var newColumns = new ArrayList<Column>();
-        for (var expression : keep.expressions()) {
-            switch (expression) {
-                case UnresolvedAttribute ua -> newColumns.add(childResult.getColumn(ua.name()));
-                default -> throw new UnsupportedOperationException(
-                    "Keep expression [" + expression + "] is not an UnresolvedAttribute, but a " + expression.getClass()
-                );
-            }
+        for (var projection : keep.projections()) {
+            newColumns.add(childResult.getColumn(projection.name()));
         }
         return new Result(newColumns);
     }
@@ -165,14 +171,7 @@ public class Simulator {
     private Result visit(Drop drop) throws IOException {
         var childResult = simulate(drop.child());
         var newColumns = new ArrayList<>(childResult.columns);
-        Set<String> names = drop.expressions().stream().map(expression -> {
-            if (expression instanceof UnresolvedAttribute ua) {
-                return ua.name();
-            }
-            throw new UnsupportedOperationException(
-                "Drop expression [" + expression + "] is not an UnresolvedAttribute, but a " + expression.getClass()
-            );
-        }).collect(Collectors.toSet());
+        Set<String> names = drop.removals().stream().map(NamedExpression::name).collect(Collectors.toSet());
         newColumns.removeIf(column -> names.contains(column.name));
         return new Result(newColumns);
     }
@@ -228,8 +227,8 @@ public class Simulator {
         @SuppressWarnings("unchecked")
         public UnnamedColumn evaluate(Expression expression) {
             switch (expression) {
-                case UnresolvedAttribute ua -> {
-                    return new UnnamedColumn(getColumn(ua.name()));
+                case Attribute attr -> {
+                    return new UnnamedColumn(getColumn(attr.name()));
                 }
                 case Literal literal -> {
                     return new UnnamedColumn(

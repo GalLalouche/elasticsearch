@@ -25,4 +25,5 @@ tasks.named('javaRestTest') {
   usesDefaultDistribution("to be triaged")
   useJUnitPlatform()
   maxParallelForks = 1
+  systemProperty 'simulator.planDepth', providers.systemProperty('simulator.planDepth').getOrElse('5')
 }

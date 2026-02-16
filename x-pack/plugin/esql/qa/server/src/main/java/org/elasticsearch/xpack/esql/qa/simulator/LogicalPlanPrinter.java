@@ -9,9 +9,9 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
+import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
-import org.elasticsearch.xpack.esql.core.expression.UnresolvedAttribute;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
@@ -58,7 +58,7 @@ public class LogicalPlanPrinter {
             if (i > 0) {
                 sb.append(", ");
             }
-            sb.append(((UnresolvedAttribute) projections.get(i)).name());
+            sb.append(projections.get(i).name());
         }
     }
 
@@ -70,7 +70,7 @@ public class LogicalPlanPrinter {
             if (i > 0) {
                 sb.append(", ");
             }
-            sb.append(((UnresolvedAttribute) removals.get(i)).name());
+            sb.append(removals.get(i).name());
         }
     }
 
@@ -88,7 +88,7 @@ public class LogicalPlanPrinter {
     static String printExpression(Expression expression) {
         return switch (expression) {
             case Alias alias -> alias.name() + " = " + printExpression(alias.child());
-            case UnresolvedAttribute ua -> ua.name();
+            case Attribute attr -> attr.name();
             case Literal literal -> {
                 Object value = literal.value();
                 if (value instanceof String s) {

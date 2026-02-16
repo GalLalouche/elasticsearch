@@ -13,99 +13,107 @@ import net.jqwik.api.Combinators;
 
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
+import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
-import org.elasticsearch.xpack.esql.core.expression.UnresolvedAttribute;
+import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
-import org.elasticsearch.xpack.esql.plan.IndexPattern;
-import org.elasticsearch.xpack.esql.plan.logical.Drop;
+import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
-import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class LogicalPlanGenerator {
+
+    static final int DEFAULT_PLAN_DEPTH = 5;
+    private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", DEFAULT_PLAN_DEPTH);
 
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
 
     public static Arbitrary<LogicalPlan> plansFor(SimSchema schema) {
-        List<String> allColumns = schema.columnNames();
-        List<String> integerColumns = schema.integerColumns().stream().map(SimSchema.SimColumn::name).toList();
-
-        return Arbitraries.recursive(() -> arbitrarySource(schema), child -> wrap(child, allColumns, integerColumns, schema), 1);
+        return plansFor(schema, PLAN_DEPTH);
     }
 
-    private static Arbitrary<LogicalPlan> arbitrarySource(SimSchema schema) {
-        return Arbitraries.just(
-            new UnresolvedRelation(
-                Source.EMPTY,
-                new IndexPattern(Source.EMPTY, schema.indexName()),
-                false,
-                List.of(),
-                IndexMode.STANDARD,
-                null
-            )
+    public static Arbitrary<LogicalPlan> plansFor(SimSchema schema, int depth) {
+        return Arbitraries.recursive(
+            () -> Arbitraries.just(buildEsRelation(schema)),
+            childArb -> childArb.flatMap(LogicalPlanGenerator::wrapLayer),
+            depth
         );
     }
 
-    private static Arbitrary<LogicalPlan> wrap(
-        Arbitrary<LogicalPlan> child,
-        List<String> allColumns,
-        List<String> integerColumns,
-        SimSchema schema
-    ) {
-        var columns = arbitraryNonEmptySubset(allColumns);
-        if (integerColumns.isEmpty()) {
-            // No integer columns → can't generate EVAL with arithmetic
-            return Arbitraries.oneOf(wrapKeep(child, columns), wrapDrop(child, columns));
+    private static LogicalPlan buildEsRelation(SimSchema schema) {
+        List<Attribute> attrs = schema.columns()
+            .stream()
+            .map(col -> (Attribute) new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
+            .toList();
+        return new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
+    }
+
+    private static Arbitrary<LogicalPlan> wrapLayer(LogicalPlan current) {
+        List<Attribute> available = current.output();
+        List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
+
+        var options = new ArrayList<Arbitrary<LogicalPlan>>();
+        options.add(wrapKeep(current, available));
+        if (available.size() > 1) {
+            options.add(wrapDrop(current, available));
         }
-        return Arbitraries.oneOf(wrapKeep(child, columns), wrapDrop(child, columns), wrapEval(child, integerColumns, schema));
+        if (integerAttrs.isEmpty() == false) {
+            options.add(wrapEval(current, available, integerAttrs));
+        }
+        return Arbitraries.oneOf(options);
     }
 
-    private static Arbitrary<List<String>> arbitraryNonEmptySubset(List<String> pool) {
-        return Arbitraries.of(pool).set().ofMinSize(1).ofMaxSize(pool.size()).map(set -> List.copyOf(set));
-    }
-
-    private static Arbitrary<LogicalPlan> wrapKeep(Arbitrary<LogicalPlan> child, Arbitrary<List<String>> columns) {
-        return Combinators.combine(child, columns).as((plan, cols) -> {
-            var attrs = cols.stream().map(name -> (NamedExpression) new UnresolvedAttribute(Source.EMPTY, name)).toList();
-            return new Keep(Source.EMPTY, plan, attrs);
+    private static Arbitrary<LogicalPlan> wrapKeep(LogicalPlan current, List<Attribute> available) {
+        return arbitraryNonEmptySubset(available).map(kept -> {
+            var projections = kept.stream().map(a -> (NamedExpression) a).toList();
+            return new Keep(Source.EMPTY, current, projections);
         });
     }
 
-    private static Arbitrary<LogicalPlan> wrapDrop(Arbitrary<LogicalPlan> child, Arbitrary<List<String>> columns) {
-        return Combinators.combine(child, columns).as((plan, cols) -> {
-            var attrs = cols.stream().map(name -> (NamedExpression) new UnresolvedAttribute(Source.EMPTY, name)).toList();
-            return new Drop(Source.EMPTY, plan, attrs);
+    private static Arbitrary<LogicalPlan> wrapDrop(LogicalPlan current, List<Attribute> available) {
+        return arbitraryProperSubset(available).map(dropped -> {
+            var removals = dropped.stream().map(a -> (NamedExpression) a).toList();
+            return new SimDrop(Source.EMPTY, current, removals);
         });
     }
 
-    private static Arbitrary<LogicalPlan> wrapEval(Arbitrary<LogicalPlan> child, List<String> integerColumns, SimSchema schema) {
-        return Combinators.combine(child, arbitraryAlias(integerColumns, schema))
-            .as((plan, alias) -> new Eval(Source.EMPTY, plan, List.of(alias)));
-    }
-
-    private static Arbitrary<Alias> arbitraryAlias(List<String> integerColumns, SimSchema schema) {
-        // Pick an alias name that doesn't collide with existing schema columns
-        List<String> existingNames = schema.columnNames();
+    private static Arbitrary<LogicalPlan> wrapEval(LogicalPlan current, List<Attribute> available, List<Attribute> integerAttrs) {
+        List<String> existingNames = available.stream().map(Attribute::name).toList();
         List<String> availableAliases = EVAL_ALIAS_POOL.stream().filter(n -> existingNames.contains(n) == false).toList();
         if (availableAliases.isEmpty()) {
             availableAliases = List.of("_col_0", "_col_1");
         }
-        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerColumns))
-            .as((name, expr) -> new Alias(Source.EMPTY, name, expr));
+        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs)).as((name, expr) -> {
+            var alias = new Alias(Source.EMPTY, name, expr);
+            return new Eval(Source.EMPTY, current, List.of(alias));
+        });
     }
 
-    private static Arbitrary<Expression> arbitraryExpression(List<String> integerColumns) {
-        var leaf = arbitraryLeaf(integerColumns);
+    private static <T> Arbitrary<List<T>> arbitraryNonEmptySubset(List<T> pool) {
+        return Arbitraries.of(pool).set().ofMinSize(1).ofMaxSize(pool.size()).map(set -> List.copyOf(set));
+    }
+
+    /**
+     * A proper subset: at least 1 element, but strictly fewer than all.
+     */
+    private static <T> Arbitrary<List<T>> arbitraryProperSubset(List<T> pool) {
+        return Arbitraries.of(pool).set().ofMinSize(1).ofMaxSize(pool.size() - 1).map(set -> List.copyOf(set));
+    }
+
+    private static Arbitrary<Expression> arbitraryExpression(List<Attribute> integerAttrs) {
+        var leaf = arbitraryLeaf(integerAttrs);
         var pair = Combinators.combine(leaf, leaf).as((left, right) -> new Expression[] { left, right });
         return Arbitraries.oneOf(
             pair.map(p -> new Add(Source.EMPTY, p[0], p[1], EsqlTestUtils.TEST_CFG)),
@@ -114,9 +122,9 @@ public class LogicalPlanGenerator {
         );
     }
 
-    private static Arbitrary<Expression> arbitraryLeaf(List<String> integerColumns) {
+    private static Arbitrary<Expression> arbitraryLeaf(List<Attribute> integerAttrs) {
         return Arbitraries.oneOf(
-            Arbitraries.of(integerColumns).map(name -> new UnresolvedAttribute(Source.EMPTY, name)),
+            Arbitraries.of(integerAttrs).map(a -> a),
             Arbitraries.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).map(i -> new Literal(Source.EMPTY, i, DataType.INTEGER))
         );
     }
