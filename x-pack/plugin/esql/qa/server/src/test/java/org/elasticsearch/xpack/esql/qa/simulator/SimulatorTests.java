@@ -7,14 +7,20 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
+import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
+import org.elasticsearch.xpack.esql.core.expression.Attribute;
+import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
+import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
+import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 import static org.hamcrest.Matchers.equalTo;
 
@@ -207,6 +213,61 @@ public class SimulatorTests extends ESTestCase {
                             DataType.KEYWORD,
                             List.of("Connection error", "Connection error", "Connected to 10.1.0.3")
                         )
+                    )
+                )
+            )
+        );
+    }
+
+    public void testEvalSub() throws Exception {
+        assertThat(
+            simulate("ROW x=10, y=3 | eval z = x - y"),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("x", DataType.INTEGER, List.of(10)),
+                        new Simulator.Column("y", DataType.INTEGER, List.of(3)),
+                        new Simulator.Column("z", DataType.INTEGER, List.of(7L))
+                    )
+                )
+            )
+        );
+    }
+
+    public void testEvalMul() throws Exception {
+        assertThat(
+            simulate("ROW x=3, y=4 | eval z = x * y"),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("x", DataType.INTEGER, List.of(3)),
+                        new Simulator.Column("y", DataType.INTEGER, List.of(4)),
+                        new Simulator.Column("z", DataType.INTEGER, List.of(12L))
+                    )
+                )
+            )
+        );
+    }
+
+    public void testEsRelationInMemory() throws Exception {
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "foo"), Map.of("a", 2, "b", "bar"));
+        List<Attribute> attrs = schema.columns()
+            .stream()
+            .map(col -> (Attribute) new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
+            .toList();
+        var plan = new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
+
+        assertThat(
+            new Simulator(schema, data).simulate(plan),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("a", DataType.INTEGER, List.of(1L, 2L)),
+                        new Simulator.Column("b", DataType.KEYWORD, List.of("foo", "bar"))
                     )
                 )
             )
