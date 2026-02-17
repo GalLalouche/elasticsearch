@@ -304,7 +304,7 @@ public class LogicalPlanGenerator {
         return Arbitraries.of(STATS_ALIAS_POOL).set().ofMinSize(1).ofMaxSize(STATS_ALIAS_POOL.size()).flatMap(aliasNames -> {
             var names = List.copyOf(aliasNames);
             return Combinators.combine(
-                arbitraryAttribute(integerAttrs).list().ofSize(names.size()),
+                arbitraryExpression(integerAttrs).list().ofSize(names.size()),
                 Arbitraries.of("COUNT", "SUM", "MIN", "MAX").list().ofSize(names.size()),
                 groupsArb
             ).as((fields, funcs, groupKeys) -> {
