@@ -65,6 +65,8 @@ public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.E
     private boolean keepOnCompletion;
     private boolean onSnapshotBuild = Build.current().isSnapshot();
     private boolean acceptedPragmaRisks = false;
+    @Nullable
+    private byte[] planBytes;
     private Boolean allowPartialResults = null;
     private String projectRouting;
     private ApproximationSettings approximation;
@@ -124,7 +126,7 @@ public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.E
 
     @Override
     public ActionRequestValidationException validate() {
-        ActionRequestValidationException validationException = validateQuery();
+        ActionRequestValidationException validationException = planBytes == null ? validateQuery() : null;
         if (onSnapshotBuild == false) {
             if (pragmas.isEmpty() == false && acceptedPragmaRisks == false) {
                 validationException = addValidationError(
@@ -135,6 +137,12 @@ public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.E
             if (tables.isEmpty() == false) {
                 validationException = addValidationError(
                     "[" + RequestXContent.TABLES_FIELD + "] only allowed in snapshot builds",
+                    validationException
+                );
+            }
+            if (planBytes != null) {
+                validationException = addValidationError(
+                    "[" + RequestXContent.PLAN_FIELD + "] only allowed in snapshot builds",
                     validationException
                 );
             }
@@ -267,6 +275,15 @@ public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.E
 
     public void params(QueryParams params) {
         this.params = params;
+    }
+
+    @Nullable
+    public byte[] planBytes() {
+        return planBytes;
+    }
+
+    public void planBytes(@Nullable byte[] planBytes) {
+        this.planBytes = planBytes;
     }
 
     public TimeValue waitForCompletionTimeout() {

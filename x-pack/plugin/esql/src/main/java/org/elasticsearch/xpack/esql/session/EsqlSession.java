@@ -17,6 +17,9 @@ import org.elasticsearch.action.support.SubscribableListener;
 import org.elasticsearch.cluster.metadata.ProjectMetadata;
 import org.elasticsearch.common.TriConsumer;
 import org.elasticsearch.common.collect.Iterators;
+import org.elasticsearch.common.io.stream.NamedWriteableAwareStreamInput;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
+import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.BlockFactory;
@@ -59,21 +62,27 @@ import org.elasticsearch.xpack.esql.capabilities.TelemetryAware;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.FoldContext;
+import org.elasticsearch.xpack.esql.core.expression.Literal;
+import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.expression.function.Function;
 import org.elasticsearch.xpack.esql.core.querydsl.QueryDslTimestampBoundsExtractor;
 import org.elasticsearch.xpack.esql.core.querydsl.QueryDslTimestampBoundsExtractor.TimestampBounds;
+import org.elasticsearch.xpack.esql.core.tree.NodeUtils;
 import org.elasticsearch.xpack.esql.core.tree.Source;
+import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.util.Holder;
 import org.elasticsearch.xpack.esql.datasources.ExternalSourceResolution;
 import org.elasticsearch.xpack.esql.datasources.ExternalSourceResolver;
 import org.elasticsearch.xpack.esql.datasources.PartitionFilterHintExtractor;
 import org.elasticsearch.xpack.esql.enrich.EnrichPolicyResolver;
+import org.elasticsearch.xpack.esql.expression.ExpressionWritables;
 import org.elasticsearch.xpack.esql.expression.function.EsqlFunctionRegistry;
 import org.elasticsearch.xpack.esql.expression.function.UnresolvedFunction;
 import org.elasticsearch.xpack.esql.index.EsIndex;
 import org.elasticsearch.xpack.esql.index.IndexResolution;
 import org.elasticsearch.xpack.esql.inference.InferenceResolution;
 import org.elasticsearch.xpack.esql.inference.InferenceService;
+import org.elasticsearch.xpack.esql.io.stream.PlanStreamInput;
 import org.elasticsearch.xpack.esql.optimizer.LogicalOptimizerContext;
 import org.elasticsearch.xpack.esql.optimizer.LogicalPlanOptimizer;
 import org.elasticsearch.xpack.esql.optimizer.LogicalPlanPreOptimizer;
@@ -83,12 +92,14 @@ import org.elasticsearch.xpack.esql.optimizer.PhysicalPlanOptimizer;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
 import org.elasticsearch.xpack.esql.plan.EsqlStatement;
 import org.elasticsearch.xpack.esql.plan.IndexPattern;
+import org.elasticsearch.xpack.esql.plan.PlanWritables;
 import org.elasticsearch.xpack.esql.plan.QuerySetting;
 import org.elasticsearch.xpack.esql.plan.QuerySettings;
 import org.elasticsearch.xpack.esql.plan.SettingsValidationContext;
 import org.elasticsearch.xpack.esql.plan.logical.Explain;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.Insist;
+import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.join.InlineJoin;
 import org.elasticsearch.xpack.esql.plan.logical.local.LocalRelation;
@@ -107,6 +118,7 @@ import org.elasticsearch.xpack.esql.telemetry.Metrics;
 import org.elasticsearch.xpack.esql.telemetry.PlanTelemetry;
 import org.elasticsearch.xpack.esql.view.ViewResolver;
 
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -252,6 +264,40 @@ public class EsqlSession {
         executionInfo.queryProfile().planning().start();
         assert ThreadPool.assertCurrentThreadPool(ThreadPool.Names.SEARCH);
         assert executionInfo != null : "Null EsqlExecutionInfo";
+        if (request.planBytes() != null) {
+            LOGGER.debug("ESQL binary plan ({} bytes)", request.planBytes().length);
+            Configuration binaryPlanConfig = new Configuration(
+                request.timeZone() != null ? request.timeZone() : ZoneId.of("Z"),
+                Instant.now(Clock.tick(Clock.system(ZoneId.of("Z")), Duration.ofNanos(1))),
+                request.locale() != null ? request.locale() : Locale.US,
+                null,
+                clusterName,
+                request.pragmas(),
+                analyzerSettings.resultTruncationMaxSize(),
+                analyzerSettings.resultTruncationDefaultSize(),
+                request.query(),
+                request.profile(),
+                request.tables(),
+                System.nanoTime(),
+                request.allowPartialResults(),
+                analyzerSettings.timeseriesResultTruncationMaxSize(),
+                analyzerSettings.timeseriesResultTruncationDefaultSize(),
+                null,
+                Map.of()
+            );
+            LogicalPlan plan = deserializePlan(request.planBytes(), binaryPlanConfig);
+            // Add implicit limit (normally done by Analyzer.AddImplicitLimit)
+            boolean hasLimit = plan.collectFirstChildren(Limit.class::isInstance).isEmpty() == false;
+            int limit = hasLimit
+                ? analyzerSettings.resultTruncationMaxSize()
+                : analyzerSettings.resultTruncationDefaultSize();
+            plan = new Limit(EMPTY, new Literal(EMPTY, limit, DataType.INTEGER), plan);
+            plan.setAnalyzed();
+            PlanTimeProfile planTimeProfile = request.profile() ? new PlanTimeProfile() : null;
+            FoldContext foldContext = binaryPlanConfig.newFoldContext();
+            executeBinaryPlan(plan, request, binaryPlanConfig, foldContext, planTimeProfile, executionInfo, planRunner, listener);
+            return;
+        }
         LOGGER.debug("ESQL query:\n{}", request.queryDescription());
         TimeSpanMarker parsingProfile = executionInfo.queryProfile().parsing();
         parsingProfile.start();
@@ -406,6 +452,72 @@ public class EsqlSession {
             EsqlLicenseChecker.checkQueryApproximation(verifier.licenseState());
         }
         return settings;
+    }
+
+    private void executeBinaryPlan(
+        LogicalPlan plan,
+        EsqlQueryRequest request,
+        Configuration configuration,
+        FoldContext foldContext,
+        PlanTimeProfile planTimeProfile,
+        EsqlExecutionInfo executionInfo,
+        PlanRunner planRunner,
+        ActionListener<Versioned<Result>> listener
+    ) {
+        // Initialize the local cluster entry required by ComputeService
+        executionInfo.swapCluster(
+            RemoteClusterAware.LOCAL_CLUSTER_GROUP_KEY,
+            (k, v) -> new EsqlExecutionInfo.Cluster(RemoteClusterAware.LOCAL_CLUSTER_GROUP_KEY, "*", "*", false)
+        );
+        var logicalPlanPreOptimizer = new LogicalPlanPreOptimizer(
+            new LogicalPreOptimizerContext(foldContext, inferenceService, localClusterMinimumVersion)
+        );
+        var logicalPlanOptimizer = new LogicalPlanOptimizer(
+            new LogicalOptimizerContext(configuration, foldContext, localClusterMinimumVersion)
+        );
+        SubscribableListener.<LogicalPlan>newForked(
+            l -> preOptimizedPlan(plan, logicalPlanPreOptimizer, planTimeProfile, l)
+        )
+            .<LogicalPlan>andThen(
+                (l, p) -> preMapper.preMapper(
+                    new Versioned<>(optimizedPlan(p, logicalPlanOptimizer, planTimeProfile), localClusterMinimumVersion),
+                    l
+                )
+            )
+            .<Result>andThen((l, p) -> {
+                EsqlCCSUtils.updateExecutionInfoAtEndOfPlanning(executionInfo);
+                var physicalPlanOptimizer = new PhysicalPlanOptimizer(
+                    new PhysicalOptimizerContext(configuration, localClusterMinimumVersion)
+                );
+                PhysicalPlan physicalPlan = logicalPlanToPhysicalPlan(p, request, physicalPlanOptimizer, planTimeProfile);
+                planRunner.run(physicalPlan, configuration, foldContext, planTimeProfile, l);
+            })
+            .<Versioned<Result>>andThen((l, r) -> l.onResponse(new Versioned<>(r, localClusterMinimumVersion)))
+            .addListener(listener);
+    }
+
+    private LogicalPlan deserializePlan(byte[] planBytes, Configuration configuration) {
+        try (
+            var bytesIn = StreamInput.wrap(planBytes);
+            var namedIn = new NamedWriteableAwareStreamInput(bytesIn, planWriteableRegistry());
+            var planIn = new PlanStreamInput(namedIn, namedIn.namedWriteableRegistry(), configuration)
+        ) {
+            return planIn.readNamedWriteable(LogicalPlan.class);
+        } catch (IOException e) {
+            throw new ElasticsearchException("Failed to deserialize binary plan", e);
+        }
+    }
+
+    private static volatile NamedWriteableRegistry PLAN_REGISTRY;
+
+    private static NamedWriteableRegistry planWriteableRegistry() {
+        if (PLAN_REGISTRY == null) {
+            var entries = new ArrayList<NamedWriteableRegistry.Entry>();
+            entries.addAll(ExpressionWritables.getNamedWriteables());
+            entries.addAll(PlanWritables.getNamedWriteables());
+            PLAN_REGISTRY = new NamedWriteableRegistry(entries);
+        }
+        return PLAN_REGISTRY;
     }
 
     /**
