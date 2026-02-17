@@ -49,6 +49,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Generates random {@link LogicalPlan} trees using jqwik's {@link Arbitraries#recursive} combinator.
@@ -58,6 +59,8 @@ import java.util.stream.Collectors;
 public class LogicalPlanGenerator {
     private static final int DEFAULT_PLAN_DEPTH = 5;
     private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", DEFAULT_PLAN_DEPTH);
+    private static final int DEFAULT_EXPR_DEPTH = 2;
+    private static final int EXPR_DEPTH = Integer.getInteger("simulator.exprDepth", DEFAULT_EXPR_DEPTH);
 
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
     private static final List<String> STATS_ALIAS_POOL = List.of("s0", "s1");
@@ -230,8 +233,19 @@ public class LogicalPlanGenerator {
         if (availableAliases.isEmpty()) {
             availableAliases = List.of("_col_0", "_col_1");
         }
-        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs))
-            .as((name, expr) -> new Eval(Source.EMPTY, current, List.of(new Alias(Source.EMPTY, name, expr))));
+        int maxAliases = Math.min(availableAliases.size(), 3);
+        return Arbitraries.of(availableAliases).set().ofMinSize(1).ofMaxSize(maxAliases).flatMap(nameSet -> {
+            var names = List.copyOf(nameSet);
+            return arbitraryExpression(integerAttrs).list()
+                .ofSize(names.size())
+                .map(
+                    exprs -> new Eval(
+                        Source.EMPTY,
+                        current,
+                        IntStream.range(0, names.size()).mapToObj(i -> new Alias(Source.EMPTY, names.get(i), exprs.get(i))).toList()
+                    )
+                );
+        });
     }
 
     private static Arbitrary<LogicalPlan> wrapFilter(LogicalPlan current, List<Attribute> integerAttrs) {
@@ -297,12 +311,17 @@ public class LogicalPlanGenerator {
     }
 
     private static Arbitrary<Expression> arbitraryExpression(List<Attribute> integerAttrs) {
-        var leaf = arbitraryLeaf(integerAttrs);
-        var pair = Combinators.combine(leaf, leaf).as((left, right) -> new Expression[] { left, right });
-        return Arbitraries.oneOf(
-            pair.map(p -> new Add(Source.EMPTY, p[0], p[1], EsqlTestUtils.TEST_CFG)),
-            pair.map(p -> new Sub(Source.EMPTY, p[0], p[1], EsqlTestUtils.TEST_CFG)),
-            pair.map(p -> new Mul(Source.EMPTY, p[0], p[1]))
+        return Arbitraries.recursive(
+            () -> arbitraryLeaf(integerAttrs),
+            child -> Combinators.combine(child, child)
+                .flatAs(
+                    (left, right) -> Arbitraries.<Expression>oneOf(
+                        Arbitraries.just(new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG)),
+                        Arbitraries.just(new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG)),
+                        Arbitraries.just(new Mul(Source.EMPTY, left, right))
+                    )
+                ),
+            EXPR_DEPTH
         );
     }
 

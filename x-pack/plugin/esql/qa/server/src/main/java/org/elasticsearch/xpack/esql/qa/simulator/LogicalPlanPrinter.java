@@ -128,12 +128,21 @@ public class LogicalPlanPrinter {
             );
     }
 
+    private static String parenthesizeArithmetic(Expression expr) {
+        return expr instanceof ArithmeticOperation ? "(" + printExpression(expr) + ")" : printExpression(expr);
+    }
+
     static String printExpression(Expression expression) {
         return switch (expression) {
             case Alias alias -> Strings.format("%s = %s", alias.name(), printExpression(alias.child()));
             case Attribute attr -> attr.name();
             case Literal literal -> literal.value() instanceof String s ? Strings.format("\"%s\"", s) : literal.value().toString();
-            case ArithmeticOperation op -> Strings.format("%s %s %s", printExpression(op.left()), op.symbol(), printExpression(op.right()));
+            case ArithmeticOperation op -> Strings.format(
+                "%s %s %s",
+                parenthesizeArithmetic(op.left()),
+                op.symbol(),
+                parenthesizeArithmetic(op.right())
+            );
             case EsqlBinaryComparison comp -> Strings.format(
                 "%s %s %s",
                 printExpression(comp.left()),
