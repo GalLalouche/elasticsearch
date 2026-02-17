@@ -23,17 +23,21 @@ import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.Order;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
+import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
+import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
@@ -238,6 +242,81 @@ public class SimulatorBugTests {
             var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
             var tc = (MetaTestCase) shrunk.parameters().get(0);
             assertMinimal(tc, " | LIMIT 1", 2);
+            return result.mapToSuccessful();
+        }
+    }
+
+    @Property(tries = 50)
+    @PerProperty(StatsCountOffByOneLifecycle.class)
+    void bugStatsCountOffByOne(@ForAll("statsCountTestCases") MetaTestCase tc) throws IOException {
+        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
+        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.STATS_COUNT_OFF_BY_ONE).simulate(tc.plan());
+        if (correct.equals(bugged) == false) {
+            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
+        }
+    }
+
+    @Provide
+    Arbitrary<MetaTestCase> statsCountTestCases() {
+        return schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
+            var rel = buildEsRelation(schema);
+            var intCol = firstIntegerAttr(rel);
+            var count = new Count(Source.EMPTY, intCol);
+            var alias = new Alias(Source.EMPTY, "s0", count);
+            var groupings = List.<Expression>of(intCol);
+            var aggregates = List.<NamedExpression>of(alias, intCol);
+            return new MetaTestCase(schema, data, new Aggregate(Source.EMPTY, rel, groupings, aggregates));
+        }));
+    }
+
+    public static class StatsCountOffByOneLifecycle implements PerProperty.Lifecycle {
+        @Override
+        public void onSuccess() {
+            throw new AssertionError("Expected property to fail: STATS_COUNT_OFF_BY_ONE bug should cause divergence");
+        }
+
+        @Override
+        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
+            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
+            var tc = (MetaTestCase) shrunk.parameters().get(0);
+            assertMinimal(tc, " | STATS s0 = COUNT(a) BY a", 1);
+            return result.mapToSuccessful();
+        }
+    }
+
+    @Property(tries = 50)
+    @PerProperty(InlineStatsDropsRowsLifecycle.class)
+    void bugInlineStatsDropsRows(@ForAll("inlineStatsTestCases") MetaTestCase tc) throws IOException {
+        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
+        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.INLINESTATS_DROPS_ROWS).simulate(tc.plan());
+        if (correct.equals(bugged) == false) {
+            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
+        }
+    }
+
+    @Provide
+    Arbitrary<MetaTestCase> inlineStatsTestCases() {
+        return schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).filter(data -> data.size() >= 2).map(data -> {
+            var rel = buildEsRelation(schema);
+            var intCol = firstIntegerAttr(rel);
+            var count = new Count(Source.EMPTY, intCol);
+            var alias = new Alias(Source.EMPTY, "s0", count);
+            var aggregates = List.<NamedExpression>of(alias);
+            return new MetaTestCase(schema, data, new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, rel, List.of(), aggregates)));
+        }));
+    }
+
+    public static class InlineStatsDropsRowsLifecycle implements PerProperty.Lifecycle {
+        @Override
+        public void onSuccess() {
+            throw new AssertionError("Expected property to fail: INLINESTATS_DROPS_ROWS bug should cause divergence");
+        }
+
+        @Override
+        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
+            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
+            var tc = (MetaTestCase) shrunk.parameters().get(0);
+            assertMinimal(tc, " | INLINESTATS s0 = COUNT(a)", 2);
             return result.mapToSuccessful();
         }
     }

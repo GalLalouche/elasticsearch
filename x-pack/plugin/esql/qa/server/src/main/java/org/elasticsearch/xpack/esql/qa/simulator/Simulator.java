@@ -32,10 +32,10 @@ import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.Gre
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
-import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
+import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
@@ -284,6 +284,7 @@ public class Simulator {
     }
 
     private Result visit(InlineStats inlineStats) throws IOException {
+        if (activeBug == SimBug.INLINESTATS_DROPS_ROWS) return visit(inlineStats.aggregate());
         var aggregate = inlineStats.aggregate();
         var childResult = simulate(aggregate.child());
         int numRows = childResult.columns().isEmpty() ? 0 : childResult.columns().getFirst().values().size();
@@ -308,7 +309,8 @@ public class Simulator {
                 Object[] broadcast = new Object[numRows];
                 for (var entry : groups.entrySet()) {
                     Object value = computeAggregate(aggFunc, childResult, entry.getValue());
-                    for (int idx : entry.getValue()) broadcast[idx] = value;
+                    for (int idx : entry.getValue())
+                        broadcast[idx] = value;
                 }
                 aggColumns.add(new Column(namedExpr.name(), aggFunc.dataType(), Arrays.asList(broadcast)));
             } else {
@@ -361,7 +363,7 @@ public class Simulator {
 
     private Object computeAggregate(AggregateFunction aggFunc, Result data, List<Integer> indices) {
         return switch (aggFunc) {
-            case Count count -> (long) indices.size();
+            case Count count -> (long) indices.size() + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
             case Sum sum -> {
                 var values = data.evaluate(sum.field(), activeBug);
                 long total = 0;
