@@ -271,8 +271,8 @@ public class LogicalPlanGenerator {
     private static Arbitrary<LogicalPlan> wrapSort(LogicalPlan current, List<Attribute> available) {
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
         Arbitrary<Expression> sortExpr = integerAttrs.isEmpty()
-            ? arbitraryAttribute(available).map(a -> a)
-            : Arbitraries.oneOf(arbitraryAttribute(available).map(a -> a), arbitraryExpression(integerAttrs));
+            ? arbitraryAttribute(available).map(a -> (Expression) a)
+            : Arbitraries.oneOf(arbitraryAttribute(available).map(a -> (Expression) a), arbitraryExpression(integerAttrs));
         int maxOrders = Math.min(available.size(), 3);
         return Combinators.combine(
             sortExpr.list().ofMinSize(1).ofMaxSize(maxOrders),
@@ -308,11 +308,12 @@ public class LogicalPlanGenerator {
                 Arbitraries.of("COUNT", "SUM", "MIN", "MAX").list().ofSize(names.size()),
                 groupsArb
             ).as((fields, funcs, groupKeys) -> {
-                var aggregates = new ArrayList<NamedExpression>();
-                for (int i = 0; i < names.size(); i++) {
-                    aggregates.add(new Alias(Source.EMPTY, names.get(i), buildAggFunc(funcs.get(i), fields.get(i))));
-                }
-                groupKeys.forEach(g -> aggregates.add(g));
+                var aggregates = new ArrayList<NamedExpression>(
+                    IntStream.range(0, names.size())
+                        .mapToObj(i -> (NamedExpression) new Alias(Source.EMPTY, names.get(i), buildAggFunc(funcs.get(i), fields.get(i))))
+                        .toList()
+                );
+                aggregates.addAll(groupKeys);
                 return new Aggregate(Source.EMPTY, current, List.copyOf(groupKeys), aggregates);
             });
         });
