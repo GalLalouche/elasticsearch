@@ -11,6 +11,7 @@ import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
 import net.jqwik.api.Combinators;
 
+import org.elasticsearch.core.Tuple;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
@@ -42,6 +43,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static java.util.function.Function.identity;
+
 /**
  * Generates random {@link LogicalPlan} trees using jqwik's {@link Arbitraries#recursive} combinator.
  * Plans are built bottom-up: an {@link org.elasticsearch.xpack.esql.plan.logical.EsRelation} base
@@ -58,23 +61,34 @@ public class LogicalPlanGenerator {
     }
 
     public static Arbitrary<LogicalPlan> plansFor(SimSchema schema, int depth) {
+        return rawPlansFor(schema, depth).map(LogicalPlanGenerator::resolveReferences);
+    }
+
+    /** Returns plans WITHOUT {@link #resolveReferences} — for testing shrinking validity. */
+    static Arbitrary<LogicalPlan> rawPlansFor(SimSchema schema, int depth) {
         return Arbitraries.recursive(
             () -> Arbitraries.just(buildEsRelation(schema)),
             childArb -> childArb.flatMap(LogicalPlanGenerator::wrapLayer),
             depth
-        ).map(LogicalPlanGenerator::resolveReferences);
+        );
     }
 
     /**
      * Walks the plan bottom-up, replacing stale attribute references with canonical ones from
      * each node's child output. This is required for binary plan serialization — do NOT remove.
      * <p>
-     * Although the generator uses {@code flatMap} to derive each layer from its child's output
-     * (so generation always produces consistent NameIds), jqwik's shrinking can independently
-     * mutate inner plan nodes without re-running outer {@code flatMap} closures. This creates
-     * plans where outer nodes retain attribute references with stale NameIds. The ES|QL optimizer
-     * validates NameId consistency and rejects such plans with "optimized incorrectly due to
-     * missing references" errors.
+     * The {@code Arbitraries.recursive} base supplier {@code () -> Arbitraries.just(buildEsRelation(schema))}
+     * is invoked multiple times by jqwik (for generation, shrinking, and reporting). Each invocation
+     * calls {@code buildEsRelation}, creating new {@code ReferenceAttribute} objects with fresh
+     * NameIds. But outer flatMap layers may retain closures referencing attributes from a previous
+     * invocation. This produces plans where outer nodes hold attribute references with stale NameIds.
+     * The ES|QL optimizer validates NameId consistency and rejects such plans with "optimized
+     * incorrectly due to missing references" errors.
+     * <p>
+     * See {@code ShrinkingValidityTests} for empirical proof that raw plans have stale NameIds.
+     * Staleness affects NameIds at ALL plan levels — not just the base EsRelation, but also
+     * EVAL-created columns and other derived attributes. The exact jqwik mechanism is unknown,
+     * but occurs during both generation and shrinking, regardless of edge-case mode.
      */
     static LogicalPlan resolveReferences(LogicalPlan plan) {
         if (plan instanceof EsRelation) {
@@ -141,7 +155,7 @@ public class LogicalPlanGenerator {
         return expr;
     }
 
-    private static LogicalPlan buildEsRelation(SimSchema schema) {
+    static LogicalPlan buildEsRelation(SimSchema schema) {
         List<Attribute> attrs = schema.columns()
             .stream()
             .map(col -> (Attribute) new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
@@ -149,18 +163,18 @@ public class LogicalPlanGenerator {
         return new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
     }
 
-    private static Arbitrary<LogicalPlan> wrapLayer(LogicalPlan current) {
+    static Arbitrary<LogicalPlan> wrapLayer(LogicalPlan current) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
 
         var options = new ArrayList<Arbitrary<LogicalPlan>>();
         options.add(Arbitraries.just(current)); // identity — allows shrinking layers away
-        options.add(wrapKeep(current, available));
+        options.add(wrapKeep(current));
         if (available.size() > 1) {
             options.add(wrapDrop(current, available));
         }
         if (integerAttrs.isEmpty() == false) {
-            options.add(wrapEval(current, available, integerAttrs));
+            options.add(wrapEval(current));
             options.add(wrapFilter(current, integerAttrs));
         }
         options.add(wrapLimit(current));
@@ -168,11 +182,34 @@ public class LogicalPlanGenerator {
         return Arbitraries.oneOf(options);
     }
 
-    private static Arbitrary<LogicalPlan> wrapKeep(LogicalPlan current, List<Attribute> available) {
-        return arbitraryNonEmptySubset(available).map(kept -> {
+    private static Arbitrary<LogicalPlan> wrapKeep(LogicalPlan current) {
+        var output = current.output();
+        return arbitraryNonEmptySubset(current.output()).map(kept -> {
+            for (var a : kept) {
+                if (output.contains(a) == false) {
+                    throw new IllegalStateException("Generated attribute '" + a + "' not in child output");
+                }
+            }
             var projections = kept.stream().map(a -> (NamedExpression) a).toList();
-            return new Keep(Source.EMPTY, current, projections);
+            var keep = new Keep(Source.EMPTY, current, projections);
+            assert current.output().equals(output);
+            var childOutput = current.output().stream().collect(Collectors.toMap(Attribute::name, identity(), (a, b) -> a));
+            verifyNoStaleness(projections, childOutput);
+            return keep;
         });
+    }
+
+    private static void verifyNoStaleness(List<NamedExpression> projections, Map<String, Attribute> childOutput) {
+        for (var proj : projections) {
+            var canon = childOutput.get(proj.name());
+            if (canon != null && canon.id().equals(((Attribute) proj).id()) == false) {
+                var err = new AssertionError(
+                    "Stale at Keep creation: '" + proj.name() + "' expected " + canon.id() + " got " + ((Attribute) proj).id()
+                );
+                err.printStackTrace(System.err);
+                throw err;
+            }
+        }
     }
 
     private static Arbitrary<LogicalPlan> wrapDrop(LogicalPlan current, List<Attribute> available) {
@@ -183,18 +220,30 @@ public class LogicalPlanGenerator {
         });
     }
 
-    private static Arbitrary<LogicalPlan> wrapEval(LogicalPlan current, List<Attribute> available, List<Attribute> integerAttrs) {
+    private static Arbitrary<LogicalPlan> wrapEval(LogicalPlan current) {
+        var available = current.output();
+        var integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
         var existingNames = available.stream().map(Attribute::name).collect(Collectors.toSet());
         List<String> availableAliases = EVAL_ALIAS_POOL.stream().filter(n -> existingNames.contains(n) == false).toList();
         if (availableAliases.isEmpty()) {
             availableAliases = List.of("_col_0", "_col_1");
         }
-        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs))
-            .as((name, expr) -> new Eval(Source.EMPTY, current, List.of(new Alias(Source.EMPTY, name, expr))));
+        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs)).as((name, expr) -> {
+            var childOutput = current.output().stream().collect(Collectors.toMap(Attribute::name, identity(), (a, b) -> a));
+            expr.forEachDown(Attribute.class, a -> {
+                var canon = childOutput.get(a.name());
+                if (canon != null && canon.id().equals(a.id()) == false) {
+                    var err = new AssertionError("Stale at Eval creation: '" + a.name() + "' expected " + canon.id() + " got " + a.id());
+                    err.printStackTrace(System.err);
+                    throw err;
+                }
+            });
+            return new Eval(Source.EMPTY, current, List.of(new Alias(Source.EMPTY, name, expr)));
+        });
     }
 
     private static Arbitrary<LogicalPlan> wrapFilter(LogicalPlan current, List<Attribute> integerAttrs) {
-        return Combinators.combine(Arbitraries.of(integerAttrs), Arbitraries.integers().between(1, 10), Arbitraries.of(true, false))
+        return Combinators.combine(arbitraryAttribute(integerAttrs), Arbitraries.integers().between(1, 10), Arbitraries.of(true, false))
             .as((attr, threshold, useGt) -> {
                 var literal = new Literal(Source.EMPTY, threshold, DataType.INTEGER);
                 Expression cond = useGt ? new GreaterThan(Source.EMPTY, attr, literal) : new LessThan(Source.EMPTY, attr, literal);
@@ -210,7 +259,7 @@ public class LogicalPlanGenerator {
 
     private static Arbitrary<LogicalPlan> wrapSort(LogicalPlan current, List<Attribute> available) {
         return Combinators.combine(
-            Arbitraries.of(available),
+            arbitraryAttribute(available),
             Arbitraries.of(Order.OrderDirection.values()),
             Arbitraries.integers().between(1, 10)
         ).as((attr, dir, n) -> {
@@ -220,15 +269,15 @@ public class LogicalPlanGenerator {
         });
     }
 
-    private static <T> Arbitrary<List<T>> arbitraryNonEmptySubset(List<T> pool) {
-        return Arbitraries.of(pool).set().ofMinSize(1).ofMaxSize(pool.size()).map(set -> List.copyOf(set));
+    private static Arbitrary<List<Attribute>> arbitraryNonEmptySubset(List<Attribute> attributes) {
+        return arbitraryAttribute(attributes).set().ofMinSize(1).ofMaxSize(attributes.size()).map(List::copyOf);
     }
 
     /**
      * A proper subset: at least 1 element, but strictly fewer than all.
      */
     private static <T> Arbitrary<List<T>> arbitraryProperSubset(List<T> pool) {
-        return Arbitraries.of(pool).set().ofMinSize(1).ofMaxSize(pool.size() - 1).map(set -> List.copyOf(set));
+        return Arbitraries.of(pool).set().ofMinSize(1).ofMaxSize(pool.size() - 1).map(List::copyOf);
     }
 
     private static Arbitrary<Expression> arbitraryExpression(List<Attribute> integerAttrs) {
@@ -243,8 +292,13 @@ public class LogicalPlanGenerator {
 
     private static Arbitrary<Expression> arbitraryLeaf(List<Attribute> integerAttrs) {
         return Arbitraries.oneOf(
-            Arbitraries.of(integerAttrs).map(a -> a),
+            arbitraryAttribute(integerAttrs),
             Arbitraries.integers().between(1, 10).map(i -> new Literal(Source.EMPTY, i, DataType.INTEGER))
         );
+    }
+
+    private static Arbitrary<Attribute> arbitraryAttribute(List<Attribute> available) {
+        // Getting around the fact that Arbitraries.of(List) doesn't work well with equals/hashCode since it doesn't consider NameId.
+        return Arbitraries.of(available.stream().map(a -> Tuple.tuple(a, a.id())).toList()).map(Tuple::v1);
     }
 }
