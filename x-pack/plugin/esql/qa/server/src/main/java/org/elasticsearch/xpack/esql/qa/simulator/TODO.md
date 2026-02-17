@@ -15,7 +15,7 @@
 - [x] Generate `WHERE` / `FILTER`
 - [x] Generate more complex `WHERE` expressions (arithmetic in conditions, e.g., `WHERE a + b > 5`, `WHERE a * 2 < c`)
 - [x] Generate `SORT` + `LIMIT` (paired — ES requires LIMIT after SORT)
-- [ ] Generate expressions in `SORT` (e.g., `SORT a + b ASC`, `SORT a * 2 DESC`)
+- [x] Generate expressions in `SORT` (e.g., `SORT a + b ASC`, `SORT a * 2 DESC`) and multiple sort keys
 - [x] Generate `LIMIT`
 - [x] Generate deeper plans (recursive depth configurable via `simulator.planDepth`, default 5)
 

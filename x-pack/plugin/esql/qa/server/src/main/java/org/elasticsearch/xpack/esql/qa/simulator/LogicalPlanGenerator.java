@@ -269,13 +269,21 @@ public class LogicalPlanGenerator {
     }
 
     private static Arbitrary<LogicalPlan> wrapSort(LogicalPlan current, List<Attribute> available) {
+        List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
+        Arbitrary<Expression> sortExpr = integerAttrs.isEmpty()
+            ? arbitraryAttribute(available).map(a -> a)
+            : Arbitraries.oneOf(arbitraryAttribute(available).map(a -> a), arbitraryExpression(integerAttrs));
+        int maxOrders = Math.min(available.size(), 3);
         return Combinators.combine(
-            arbitraryAttribute(available),
-            Arbitraries.of(Order.OrderDirection.values()),
+            sortExpr.list().ofMinSize(1).ofMaxSize(maxOrders),
+            Arbitraries.of(Order.OrderDirection.values()).list().ofMinSize(1).ofMaxSize(maxOrders),
             Arbitraries.integers().between(1, 10)
-        ).as((attr, dir, n) -> {
-            var order = new Order(Source.EMPTY, attr, dir, Order.NullsPosition.ANY);
-            var orderBy = new OrderBy(Source.EMPTY, current, List.of(order));
+        ).as((exprs, dirs, n) -> {
+            int size = Math.min(exprs.size(), dirs.size());
+            var orders = IntStream.range(0, size)
+                .mapToObj(i -> new Order(Source.EMPTY, exprs.get(i), dirs.get(i), Order.NullsPosition.ANY))
+                .toList();
+            var orderBy = new OrderBy(Source.EMPTY, current, orders);
             return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), orderBy);
         });
     }
