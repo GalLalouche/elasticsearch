@@ -243,6 +243,7 @@ public class Simulator {
     private Result visit(Limit limit) throws IOException {
         var childResult = simulate(limit.child());
         int n = ((Number) ((Literal) limit.limit()).value()).intValue();
+        if (activeBug == SimBug.LIMIT_OFF_BY_ONE) n++;
         int actual = Math.min(n, childResult.columns.getFirst().values.size());
         return new Result(childResult.columns.stream().map(c -> new Column(c.name, c.type, c.values.subList(0, actual))).toList());
     }
@@ -258,7 +259,10 @@ public class Simulator {
         Arrays.sort(indices, (a, b) -> {
             for (int i = 0; i < orders.size(); i++) {
                 int cmp = ((Comparable<Object>) orderValues.get(i).get(a)).compareTo(orderValues.get(i).get(b));
-                if (cmp != 0) return orders.get(i).direction() == Order.OrderDirection.ASC ? cmp : -cmp;
+                if (cmp != 0) {
+                    boolean asc = (orders.get(i).direction() == Order.OrderDirection.ASC) != (activeBug == SimBug.SORT_REVERSED);
+                    return asc ? cmp : -cmp;
+                }
             }
             return 0;
         });

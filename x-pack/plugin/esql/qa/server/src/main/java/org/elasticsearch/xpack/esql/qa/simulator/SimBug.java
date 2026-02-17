@@ -16,5 +16,7 @@ public enum SimBug {
     BUG_FREE,
     ADD_IS_SUB,
     KEEP_DROPS_FIRST,
-    WHERE_INVERTED
+    WHERE_INVERTED,
+    SORT_REVERSED,
+    LIMIT_OFF_BY_ONE
 }
