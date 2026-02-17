@@ -31,7 +31,7 @@ import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
 
-import java.util.List;
+import static java.util.stream.Collectors.joining;
 
 /**
  * Converts a {@link LogicalPlan} tree back into an ES|QL query string.
@@ -74,37 +74,17 @@ public class LogicalPlanPrinter {
 
     private static void printSpecific(Keep keep, StringBuilder sb) {
         printCommon(keep.child(), sb);
-        sb.append(" | KEEP ");
-        var projections = keep.projections();
-        for (int i = 0; i < projections.size(); i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(projections.get(i).name());
-        }
+        sb.append(" | KEEP ").append(keep.projections().stream().map(p -> p.name()).collect(joining(", ")));
     }
 
     private static void printSpecific(Drop drop, StringBuilder sb) {
         printCommon(drop.child(), sb);
-        sb.append(" | DROP ");
-        var removals = drop.removals();
-        for (int i = 0; i < removals.size(); i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(removals.get(i).name());
-        }
+        sb.append(" | DROP ").append(drop.removals().stream().map(r -> r.name()).collect(joining(", ")));
     }
 
     private static void printSpecific(Eval eval, StringBuilder sb) {
         printCommon(eval.child(), sb);
-        sb.append(" | EVAL ");
-        for (int i = 0; i < eval.expressions().size(); i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(printExpression(eval.expressions().get(i)));
-        }
+        sb.append(" | EVAL ").append(eval.expressions().stream().map(LogicalPlanPrinter::printExpression).collect(joining(", ")));
     }
 
     private static void printSpecific(Filter filter, StringBuilder sb) {
@@ -118,51 +98,34 @@ public class LogicalPlanPrinter {
     }
 
     private static void printSpecific(InlineStats inlineStats, StringBuilder sb) {
-        var aggregate = inlineStats.aggregate();
-        printCommon(aggregate.child(), sb);
-        sb.append(" | INLINESTATS ");
-        var aggs = aggregate.aggregates();
-        int numAggs = aggs.size() - aggregate.groupings().size();
-        for (int i = 0; i < numAggs; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(printExpression(aggs.get(i)));
-        }
-        if (aggregate.groupings().isEmpty() == false) {
-            sb.append(" BY ");
-            for (int i = 0; i < aggregate.groupings().size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(printExpression(aggregate.groupings().get(i)));
-            }
-        }
+        printAggregate(inlineStats.aggregate(), "INLINESTATS", sb);
     }
 
     private static void printSpecific(Aggregate aggregate, StringBuilder sb) {
+        printAggregate(aggregate, "STATS", sb);
+    }
+
+    private static void printAggregate(Aggregate aggregate, String keyword, StringBuilder sb) {
         printCommon(aggregate.child(), sb);
-        sb.append(" | STATS ");
-        var aggs = aggregate.aggregates();
-        int numAggs = aggs.size() - aggregate.groupings().size();
-        for (int i = 0; i < numAggs; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(printExpression(aggs.get(i)));
-        }
+        int numAggs = aggregate.aggregates().size() - aggregate.groupings().size();
+        sb.append(" | ")
+            .append(keyword)
+            .append(" ")
+            .append(aggregate.aggregates().subList(0, numAggs).stream().map(LogicalPlanPrinter::printExpression).collect(joining(", ")));
         if (aggregate.groupings().isEmpty() == false) {
-            sb.append(" BY ");
-            for (int i = 0; i < aggregate.groupings().size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(printExpression(aggregate.groupings().get(i)));
-            }
+            sb.append(" BY ").append(aggregate.groupings().stream().map(LogicalPlanPrinter::printExpression).collect(joining(", ")));
         }
     }
 
     private static void printSpecific(OrderBy orderBy, StringBuilder sb) {
         printCommon(orderBy.child(), sb);
-        sb.append(" | SORT ");
-        List<Order> orders = orderBy.order();
-        for (int i = 0; i < orders.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(printExpression(orders.get(i).child()))
-                .append(orders.get(i).direction() == Order.OrderDirection.ASC ? " ASC" : " DESC");
-        }
+        sb.append(" | SORT ")
+            .append(
+                orderBy.order()
+                    .stream()
+                    .map(o -> printExpression(o.child()) + (o.direction() == Order.OrderDirection.ASC ? " ASC" : " DESC"))
+                    .collect(joining(", "))
+            );
     }
 
     static String printExpression(Expression expression) {

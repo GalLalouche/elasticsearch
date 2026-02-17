@@ -18,7 +18,6 @@ import net.jqwik.api.lifecycle.PropertyExecutionResult;
 
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.logging.LogConfigurator;
-import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
@@ -26,7 +25,6 @@ import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
-import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.Order;
@@ -69,11 +67,7 @@ public class SimulatorBugTests {
     @Property(tries = 50)
     @PerProperty(AddIsSubLifecycle.class)
     void bugAddIsSub(@ForAll("addTestCases") MetaTestCase tc) throws IOException {
-        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
-        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.ADD_IS_SUB).simulate(tc.plan());
-        if (correct.equals(bugged) == false) {
-            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
-        }
+        assertNoDivergence(tc, SimBug.ADD_IS_SUB);
     }
 
     @Provide
@@ -104,11 +98,7 @@ public class SimulatorBugTests {
     @Property(tries = 50)
     @PerProperty(KeepDropsFirstLifecycle.class)
     void bugKeepDropsFirst(@ForAll("keepTestCases") MetaTestCase tc) throws IOException {
-        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
-        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.KEEP_DROPS_FIRST).simulate(tc.plan());
-        if (correct.equals(bugged) == false) {
-            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
-        }
+        assertNoDivergence(tc, SimBug.KEEP_DROPS_FIRST);
     }
 
     @Provide
@@ -138,11 +128,7 @@ public class SimulatorBugTests {
     @Property(tries = 50)
     @PerProperty(WhereInvertedLifecycle.class)
     void bugWhereInverted(@ForAll("whereTestCases") MetaTestCase tc) throws IOException {
-        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
-        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.WHERE_INVERTED).simulate(tc.plan());
-        if (correct.equals(bugged) == false) {
-            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
-        }
+        assertNoDivergence(tc, SimBug.WHERE_INVERTED);
     }
 
     @Provide
@@ -175,11 +161,7 @@ public class SimulatorBugTests {
     @Property(tries = 50)
     @PerProperty(SortReversedLifecycle.class)
     void bugSortReversed(@ForAll("sortTestCases") MetaTestCase tc) throws IOException {
-        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
-        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.SORT_REVERSED).simulate(tc.plan());
-        if (correct.equals(bugged) == false) {
-            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
-        }
+        assertNoDivergence(tc, SimBug.SORT_REVERSED);
     }
 
     @Provide
@@ -216,11 +198,7 @@ public class SimulatorBugTests {
     @Property(tries = 50)
     @PerProperty(LimitOffByOneLifecycle.class)
     void bugLimitOffByOne(@ForAll("limitTestCases") MetaTestCase tc) throws IOException {
-        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
-        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.LIMIT_OFF_BY_ONE).simulate(tc.plan());
-        if (correct.equals(bugged) == false) {
-            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
-        }
+        assertNoDivergence(tc, SimBug.LIMIT_OFF_BY_ONE);
     }
 
     @Provide
@@ -249,11 +227,7 @@ public class SimulatorBugTests {
     @Property(tries = 50)
     @PerProperty(StatsCountOffByOneLifecycle.class)
     void bugStatsCountOffByOne(@ForAll("statsCountTestCases") MetaTestCase tc) throws IOException {
-        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
-        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.STATS_COUNT_OFF_BY_ONE).simulate(tc.plan());
-        if (correct.equals(bugged) == false) {
-            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
-        }
+        assertNoDivergence(tc, SimBug.STATS_COUNT_OFF_BY_ONE);
     }
 
     @Provide
@@ -287,11 +261,7 @@ public class SimulatorBugTests {
     @Property(tries = 50)
     @PerProperty(InlineStatsDropsRowsLifecycle.class)
     void bugInlineStatsDropsRows(@ForAll("inlineStatsTestCases") MetaTestCase tc) throws IOException {
-        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
-        var bugged = new Simulator(tc.schema(), tc.data(), SimBug.INLINESTATS_DROPS_ROWS).simulate(tc.plan());
-        if (correct.equals(bugged) == false) {
-            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
-        }
+        assertNoDivergence(tc, SimBug.INLINESTATS_DROPS_ROWS);
     }
 
     @Provide
@@ -335,16 +305,20 @@ public class SimulatorBugTests {
         }
     }
 
+    private static void assertNoDivergence(MetaTestCase tc, SimBug bug) throws IOException {
+        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
+        var bugged = new Simulator(tc.schema(), tc.data(), bug).simulate(tc.plan());
+        if (correct.equals(bugged) == false) {
+            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
+        }
+    }
+
     private static Arbitrary<SimSchema> schemasWithInteger() {
         return SimSchemaGenerator.schemas().filter(s -> s.columns().stream().anyMatch(c -> c.type() == DataType.INTEGER));
     }
 
     private static EsRelation buildEsRelation(SimSchema schema) {
-        List<Attribute> attrs = schema.columns()
-            .stream()
-            .map(col -> (Attribute) new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
-            .toList();
-        return new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
+        return (EsRelation) LogicalPlanGenerator.buildEsRelation(schema);
     }
 
     private static Attribute firstIntegerAttr(EsRelation rel) {

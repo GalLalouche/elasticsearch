@@ -46,7 +46,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.BitSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -166,20 +165,18 @@ public class Simulator {
     }
 
     private static Result buildResultFromMemory(SimSchema schema, List<Map<String, Object>> data) {
-        var columns = new ArrayList<Column>(schema.columns().size());
-        for (var col : schema.columns()) {
-            var values = new ArrayList<>();
-            for (var row : data) {
-                Object value = row.get(col.name());
-                // Normalize: integers from generated data may be Integer, convert to Long for consistency
-                if (value instanceof Integer i) {
-                    value = i.longValue();
-                }
-                values.add(value);
-            }
-            columns.add(new Column(col.name(), col.type(), values));
-        }
-        return new Result(columns);
+        return new Result(
+            schema.columns()
+                .stream()
+                .map(
+                    col -> new Column(
+                        col.name(),
+                        col.type(),
+                        data.stream().map(row -> row.get(col.name()) instanceof Integer i ? i.longValue() : row.get(col.name())).toList()
+                    )
+                )
+                .toList()
+        );
     }
 
     private Result visit(EsRelation relation) {
@@ -227,27 +224,15 @@ public class Simulator {
 
     private Result visit(Filter filter) throws IOException {
         var childResult = simulate(filter.child());
-        var conditionResult = childResult.evaluate(filter.condition(), activeBug);
-        var validIndices = new BitSet();
-        for (int i = 0; i < conditionResult.values.size(); i++) {
-            if ((boolean) conditionResult.values.get(i)) {
-                validIndices.set(i);
-            }
-        }
-        if (activeBug == SimBug.WHERE_INVERTED) {
-            validIndices.flip(0, conditionResult.values.size());
-        }
-        var result = new ArrayList<Column>(childResult.columns.size());
-        for (var column : childResult.columns) {
-            var newValues = new ArrayList<>();
-            for (int i = 0; i < column.values.size(); i++) {
-                if (validIndices.get(i)) {
-                    newValues.add(column.values.get(i));
-                }
-            }
-            result.add(new Column(column.name, column.type, newValues));
-        }
-        return new Result(result);
+        var cond = childResult.evaluate(filter.condition(), activeBug);
+        var mask = IntStream.range(0, cond.values.size())
+            .filter(i -> ((boolean) cond.values.get(i)) != (activeBug == SimBug.WHERE_INVERTED))
+            .toArray();
+        return new Result(
+            childResult.columns.stream()
+                .map(c -> new Column(c.name, c.type, Arrays.stream(mask).mapToObj(i -> c.values.get(i)).toList()))
+                .toList()
+        );
     }
 
     private Result visit(Limit limit) throws IOException {
@@ -287,23 +272,10 @@ public class Simulator {
         if (activeBug == SimBug.INLINESTATS_DROPS_ROWS) return visit(inlineStats.aggregate());
         var aggregate = inlineStats.aggregate();
         var childResult = simulate(aggregate.child());
-        int numRows = childResult.columns().isEmpty() ? 0 : childResult.columns().getFirst().values().size();
-        // Build groups (same as Aggregate)
-        var groups = new LinkedHashMap<List<Object>, List<Integer>>();
-        if (aggregate.groupings().isEmpty()) {
-            groups.put(List.of(), IntStream.range(0, numRows).boxed().toList());
-        } else {
-            for (int i = 0; i < numRows; i++) {
-                var key = new ArrayList<>();
-                for (var groupExpr : aggregate.groupings()) {
-                    key.add(childResult.evaluate(groupExpr, activeBug).values().get(i));
-                }
-                groups.computeIfAbsent(key, k -> new ArrayList<>()).add(i);
-            }
-        }
+        int numRows = numRows(childResult);
+        var groups = buildGroups(aggregate, childResult, numRows);
         // Build aggregate columns, broadcasting per-group values to each original row
-        var aggColumns = new ArrayList<Column>();
-        for (var namedExpr : aggregate.aggregates()) {
+        var aggColumns = aggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
                 Object[] broadcast = new Object[numRows];
@@ -312,166 +284,138 @@ public class Simulator {
                     for (int idx : entry.getValue())
                         broadcast[idx] = value;
                 }
-                aggColumns.add(new Column(namedExpr.name(), aggFunc.dataType(), Arrays.asList(broadcast)));
-            } else {
-                var col = childResult.evaluate(unwrapped, activeBug);
-                aggColumns.add(new Column(namedExpr.name(), col.type(), col.values()));
+                return new Column(namedExpr.name(), aggFunc.dataType(), Arrays.asList(broadcast));
             }
-        }
+            var col = childResult.evaluate(unwrapped, activeBug);
+            return new Column(namedExpr.name(), col.type(), col.values());
+        }).toList();
         // Merge: child columns not in aggregate output, then aggregate columns
         var aggNames = aggColumns.stream().map(Column::name).collect(Collectors.toSet());
-        var resultColumns = new ArrayList<Column>();
-        for (var col : childResult.columns()) {
-            if (aggNames.contains(col.name()) == false) resultColumns.add(col);
-        }
-        resultColumns.addAll(aggColumns);
-        return new Result(resultColumns);
+        var kept = childResult.columns().stream().filter(c -> aggNames.contains(c.name()) == false).toList();
+        return new Result(CollectionUtils.concatLists(kept, aggColumns));
     }
 
     private Result visit(Aggregate aggregate) throws IOException {
         var childResult = simulate(aggregate.child());
-        int numRows = childResult.columns.isEmpty() ? 0 : childResult.columns.getFirst().values.size();
-        // Build groups: map from group key → row indices (LinkedHashMap preserves insertion order)
+        var groups = buildGroups(aggregate, childResult, numRows(childResult));
+        return new Result(aggregate.aggregates().stream().map(namedExpr -> {
+            Expression unwrapped = Alias.unwrap(namedExpr);
+            if (unwrapped instanceof AggregateFunction aggFunc) {
+                return new Column(
+                    namedExpr.name(),
+                    aggFunc.dataType(),
+                    groups.values().stream().map(indices -> computeAggregate(aggFunc, childResult, indices)).toList()
+                );
+            }
+            var col = childResult.evaluate(unwrapped, activeBug);
+            return new Column(
+                namedExpr.name(),
+                col.type,
+                groups.values().stream().map(indices -> col.values.get(indices.getFirst())).toList()
+            );
+        }).toList());
+    }
+
+    private LinkedHashMap<List<Object>, List<Integer>> buildGroups(Aggregate aggregate, Result childResult, int numRows) {
         var groups = new LinkedHashMap<List<Object>, List<Integer>>();
         if (aggregate.groupings().isEmpty()) {
             groups.put(List.of(), IntStream.range(0, numRows).boxed().toList());
         } else {
             for (int i = 0; i < numRows; i++) {
-                var key = new ArrayList<>();
-                for (var groupExpr : aggregate.groupings()) {
-                    key.add(childResult.evaluate(groupExpr, activeBug).values.get(i));
-                }
+                int row = i;
+                var key = aggregate.groupings().stream().map(g -> childResult.evaluate(g, activeBug).values.get(row)).toList();
                 groups.computeIfAbsent(key, k -> new ArrayList<>()).add(i);
             }
         }
-        // Build result columns from aggregates list
-        var resultColumns = new ArrayList<Column>();
-        for (var namedExpr : aggregate.aggregates()) {
-            Expression unwrapped = Alias.unwrap(namedExpr);
-            if (unwrapped instanceof AggregateFunction aggFunc) {
-                var values = groups.values().stream().map(indices -> computeAggregate(aggFunc, childResult, indices)).toList();
-                resultColumns.add(new Column(namedExpr.name(), aggFunc.dataType(), values));
-            } else {
-                // Grouping key reference
-                var col = childResult.evaluate(unwrapped, activeBug);
-                var values = groups.values().stream().map(indices -> col.values.get(indices.getFirst())).toList();
-                resultColumns.add(new Column(namedExpr.name(), col.type, values));
-            }
-        }
-        return new Result(resultColumns);
+        return groups;
+    }
+
+    private static int numRows(Result result) {
+        return result.columns.isEmpty() ? 0 : result.columns.getFirst().values.size();
     }
 
     private Object computeAggregate(AggregateFunction aggFunc, Result data, List<Integer> indices) {
         return switch (aggFunc) {
             case Count count -> (long) indices.size() + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
-            case Sum sum -> {
-                var values = data.evaluate(sum.field(), activeBug);
-                long total = 0;
-                for (int idx : indices)
-                    total += toLong(values.values.get(idx));
-                yield total;
-            }
-            case Min min -> {
-                var values = data.evaluate(min.field(), activeBug);
-                long result = Long.MAX_VALUE;
-                for (int idx : indices)
-                    result = Math.min(result, toLong(values.values.get(idx)));
-                yield result;
-            }
-            case Max max -> {
-                var values = data.evaluate(max.field(), activeBug);
-                long result = Long.MIN_VALUE;
-                for (int idx : indices)
-                    result = Math.max(result, toLong(values.values.get(idx)));
-                yield result;
-            }
+            case Sum sum -> indices.stream().mapToLong(i -> toLong(data.evaluate(sum.field(), activeBug).values.get(i))).sum();
+            case Min min -> indices.stream()
+                .mapToLong(i -> toLong(data.evaluate(min.field(), activeBug).values.get(i)))
+                .min()
+                .orElseThrow();
+            case Max max -> indices.stream()
+                .mapToLong(i -> toLong(data.evaluate(max.field(), activeBug).values.get(i)))
+                .max()
+                .orElseThrow();
             default -> throw new UnsupportedOperationException(Strings.format("Unsupported aggregate function: %s", aggFunc.getClass()));
         };
     }
 
     public record Result(List<Column> columns) {
-        public Result append(ArrayList<Column> newColumns) {
+        public Result append(List<Column> newColumns) {
             return new Result(CollectionUtils.concatLists(columns, newColumns));
         }
 
-        public Column getColumn(String leftName) {
+        public Column getColumn(String name) {
             return columns.stream()
-                .filter(c -> c.name().equals(leftName))
+                .filter(c -> c.name().equals(name))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Column not found: " + leftName));
+                .orElseThrow(() -> new IllegalArgumentException("Column not found: " + name));
         }
 
         @SuppressWarnings("unchecked")
         public UnnamedColumn evaluate(Expression expression, SimBug activeBug) {
-            switch (expression) {
-                case Attribute attr -> {
-                    return new UnnamedColumn(getColumn(attr.name()));
-                }
-                case Literal literal -> {
-                    return new UnnamedColumn(
-                        literal.dataType(),
-                        IntStream.range(0, columns().getFirst().values.size()).mapToObj(unused -> normalizeObject(literal.value())).toList()
-                    );
-                }
-                case Add add -> {
-                    var leftColumn = evaluate(add.left(), activeBug);
-                    var rightColumn = evaluate(add.right(), activeBug);
-                    var values = new ArrayList<>();
-                    for (int i = 0; i < leftColumn.values.size(); i++) {
-                        long l = toLong(leftColumn.values.get(i));
-                        long r = toLong(rightColumn.values.get(i));
-                        values.add(activeBug == SimBug.ADD_IS_SUB ? l - r : l + r);
-                    }
-                    return new UnnamedColumn(leftColumn.type, values);
-                }
-                case Sub sub -> {
-                    var leftColumn = evaluate(sub.left(), activeBug);
-                    var rightColumn = evaluate(sub.right(), activeBug);
-                    var values = new ArrayList<>();
-                    for (int i = 0; i < leftColumn.values.size(); i++) {
-                        values.add(toLong(leftColumn.values.get(i)) - toLong(rightColumn.values.get(i)));
-                    }
-                    return new UnnamedColumn(leftColumn.type, values);
-                }
-                case Mul mul -> {
-                    var leftColumn = evaluate(mul.left(), activeBug);
-                    var rightColumn = evaluate(mul.right(), activeBug);
-                    var values = new ArrayList<>();
-                    for (int i = 0; i < leftColumn.values.size(); i++) {
-                        values.add(toLong(leftColumn.values.get(i)) * toLong(rightColumn.values.get(i)));
-                    }
-                    return new UnnamedColumn(leftColumn.type, values);
-                }
-                // FIXME(gal, NOCOMMIT) Reduce duplication with above
-                case Div div -> {
-                    var leftColumn = evaluate(div.left(), activeBug);
-                    var rightColumn = evaluate(div.right(), activeBug);
-                    var values = new ArrayList<>();
-                    for (int i = 0; i < leftColumn.values.size(); i++) {
-                        values.add(toLong(leftColumn.values.get(i)) / toLong(rightColumn.values.get(i)));
-                    }
-                    return new UnnamedColumn(leftColumn.type, values);
-                }
-                case GreaterThan gt -> {
-                    var leftColumn = evaluate(gt.left(), activeBug);
-                    var rightColumn = evaluate(gt.right(), activeBug);
-                    var values = new ArrayList<>();
-                    for (int i = 0; i < leftColumn.values.size(); i++) {
-                        values.add(((Comparable<Object>) leftColumn.values.get(i)).compareTo(toLong(rightColumn.values.get(i))) > 0);
-                    }
-                    return new UnnamedColumn(DataType.BOOLEAN, values);
-                }
-                case LessThan lt -> {
-                    var leftColumn = evaluate(lt.left(), activeBug);
-                    var rightColumn = evaluate(lt.right(), activeBug);
-                    var values = new ArrayList<>();
-                    for (int i = 0; i < leftColumn.values.size(); i++) {
-                        values.add(((Comparable<Object>) leftColumn.values.get(i)).compareTo(toLong(rightColumn.values.get(i))) < 0);
-                    }
-                    return new UnnamedColumn(DataType.BOOLEAN, values);
-                }
-                default -> throw new UnsupportedOperationException(Strings.format("Unsupported Expression in getColumn: [%s]", expression));
-            }
+            return switch (expression) {
+                case Attribute attr -> new UnnamedColumn(getColumn(attr.name()));
+                case Literal literal -> new UnnamedColumn(
+                    literal.dataType(),
+                    IntStream.range(0, columns().getFirst().values.size()).mapToObj(unused -> normalizeObject(literal.value())).toList()
+                );
+                case Add add -> evalBinaryLong(
+                    add.left(),
+                    add.right(),
+                    activeBug,
+                    (l, r) -> { return activeBug == SimBug.ADD_IS_SUB ? l - r : l + r; }
+                );
+                case Sub sub -> evalBinaryLong(sub.left(), sub.right(), activeBug, (l, r) -> l - r);
+                case Mul mul -> evalBinaryLong(mul.left(), mul.right(), activeBug, (l, r) -> l * r);
+                case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r) -> l / r);
+                case GreaterThan gt -> evalComparison(gt.left(), gt.right(), activeBug, cmp -> cmp > 0);
+                case LessThan lt -> evalComparison(lt.left(), lt.right(), activeBug, cmp -> cmp < 0);
+                default -> throw new UnsupportedOperationException(Strings.format("Unsupported Expression in evaluate: [%s]", expression));
+            };
+        }
+
+        private UnnamedColumn evalBinaryLong(
+            Expression leftExpr,
+            Expression rightExpr,
+            SimBug activeBug,
+            java.util.function.LongBinaryOperator op
+        ) {
+            var left = evaluate(leftExpr, activeBug);
+            var right = evaluate(rightExpr, activeBug);
+            return new UnnamedColumn(
+                left.type,
+                IntStream.range(0, left.values.size())
+                    .mapToObj(i -> (Object) op.applyAsLong(toLong(left.values.get(i)), toLong(right.values.get(i))))
+                    .toList()
+            );
+        }
+
+        @SuppressWarnings("unchecked")
+        private UnnamedColumn evalComparison(
+            Expression leftExpr,
+            Expression rightExpr,
+            SimBug activeBug,
+            java.util.function.IntPredicate test
+        ) {
+            var left = evaluate(leftExpr, activeBug);
+            var right = evaluate(rightExpr, activeBug);
+            return new UnnamedColumn(
+                DataType.BOOLEAN,
+                IntStream.range(0, left.values.size())
+                    .mapToObj(i -> (Object) test.test(((Comparable<Object>) left.values.get(i)).compareTo(toLong(right.values.get(i)))))
+                    .toList()
+            );
         }
     }
 

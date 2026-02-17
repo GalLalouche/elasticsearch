@@ -262,27 +262,14 @@ public class LogicalPlanGenerator {
     }
 
     private static Arbitrary<LogicalPlan> wrapStats(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
-        return Combinators.combine(
-            arbitraryAttribute(integerAttrs),
-            Arbitraries.of("COUNT", "SUM", "MIN", "MAX"),
-            Arbitraries.of(STATS_ALIAS_POOL),
-            arbitraryAttribute(available)
-        ).as((field, funcName, aliasName, groupBy) -> {
-            AggregateFunction aggFunc = switch (funcName) {
-                case "COUNT" -> new Count(Source.EMPTY, field);
-                case "SUM" -> new Sum(Source.EMPTY, field);
-                case "MIN" -> new Min(Source.EMPTY, field);
-                case "MAX" -> new Max(Source.EMPTY, field);
-                default -> throw new IllegalStateException();
-            };
-            var alias = new Alias(Source.EMPTY, aliasName, aggFunc);
-            var groupings = List.<Expression>of(groupBy);
-            var aggregates = List.<NamedExpression>of(alias, groupBy);
-            return new Aggregate(Source.EMPTY, current, groupings, aggregates);
-        });
+        return arbitraryAggregate(current, integerAttrs, available).map(agg -> agg);
     }
 
     private static Arbitrary<LogicalPlan> wrapInlineStats(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
+        return arbitraryAggregate(current, integerAttrs, available).map(agg -> new InlineStats(Source.EMPTY, agg));
+    }
+
+    private static Arbitrary<Aggregate> arbitraryAggregate(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
         return Combinators.combine(
             arbitraryAttribute(integerAttrs),
             Arbitraries.of("COUNT", "SUM", "MIN", "MAX"),
@@ -296,10 +283,12 @@ public class LogicalPlanGenerator {
                 case "MAX" -> new Max(Source.EMPTY, field);
                 default -> throw new IllegalStateException();
             };
-            var alias = new Alias(Source.EMPTY, aliasName, aggFunc);
-            var groupings = List.<Expression>of(groupBy);
-            var aggregates = List.<NamedExpression>of(alias, groupBy);
-            return new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, current, groupings, aggregates));
+            return new Aggregate(
+                Source.EMPTY,
+                current,
+                List.<Expression>of(groupBy),
+                List.<NamedExpression>of(new Alias(Source.EMPTY, aliasName, aggFunc), groupBy)
+            );
         });
     }
 
