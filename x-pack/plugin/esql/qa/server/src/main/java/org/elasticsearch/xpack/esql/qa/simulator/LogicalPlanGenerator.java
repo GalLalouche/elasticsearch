@@ -297,26 +297,35 @@ public class LogicalPlanGenerator {
     }
 
     private static Arbitrary<Aggregate> arbitraryAggregate(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
-        return Combinators.combine(
-            arbitraryAttribute(integerAttrs),
-            Arbitraries.of("COUNT", "SUM", "MIN", "MAX"),
-            Arbitraries.of(STATS_ALIAS_POOL),
-            arbitraryAttribute(available)
-        ).as((field, funcName, aliasName, groupBy) -> {
-            AggregateFunction aggFunc = switch (funcName) {
-                case "COUNT" -> new Count(Source.EMPTY, field);
-                case "SUM" -> new Sum(Source.EMPTY, field);
-                case "MIN" -> new Min(Source.EMPTY, field);
-                case "MAX" -> new Max(Source.EMPTY, field);
-                default -> throw new IllegalStateException();
-            };
-            return new Aggregate(
-                Source.EMPTY,
-                current,
-                List.<Expression>of(groupBy),
-                List.<NamedExpression>of(new Alias(Source.EMPTY, aliasName, aggFunc), groupBy)
-            );
+        int maxGroups = Math.min(available.size(), 2);
+        Arbitrary<List<Attribute>> groupsArb = maxGroups > 0
+            ? Arbitraries.oneOf(Arbitraries.just(List.of()), arbitrarySubset(available, 1, maxGroups))
+            : Arbitraries.just(List.of());
+        return Arbitraries.of(STATS_ALIAS_POOL).set().ofMinSize(1).ofMaxSize(STATS_ALIAS_POOL.size()).flatMap(aliasNames -> {
+            var names = List.copyOf(aliasNames);
+            return Combinators.combine(
+                arbitraryAttribute(integerAttrs).list().ofSize(names.size()),
+                Arbitraries.of("COUNT", "SUM", "MIN", "MAX").list().ofSize(names.size()),
+                groupsArb
+            ).as((fields, funcs, groupKeys) -> {
+                var aggregates = new ArrayList<NamedExpression>();
+                for (int i = 0; i < names.size(); i++) {
+                    aggregates.add(new Alias(Source.EMPTY, names.get(i), buildAggFunc(funcs.get(i), fields.get(i))));
+                }
+                groupKeys.forEach(g -> aggregates.add(g));
+                return new Aggregate(Source.EMPTY, current, List.copyOf(groupKeys), aggregates);
+            });
         });
+    }
+
+    private static AggregateFunction buildAggFunc(String funcName, Expression field) {
+        return switch (funcName) {
+            case "COUNT" -> new Count(Source.EMPTY, field);
+            case "SUM" -> new Sum(Source.EMPTY, field);
+            case "MIN" -> new Min(Source.EMPTY, field);
+            case "MAX" -> new Max(Source.EMPTY, field);
+            default -> throw new IllegalStateException();
+        };
     }
 
     private static Arbitrary<List<Attribute>> arbitrarySubset(List<Attribute> attrs, int minSize, int maxSize) {
