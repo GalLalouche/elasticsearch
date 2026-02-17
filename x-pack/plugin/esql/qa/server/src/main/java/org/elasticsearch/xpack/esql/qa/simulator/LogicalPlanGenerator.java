@@ -43,8 +43,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static java.util.function.Function.identity;
-
 /**
  * Generates random {@link LogicalPlan} trees using jqwik's {@link Arbitraries#recursive} combinator.
  * Plans are built bottom-up: an {@link org.elasticsearch.xpack.esql.plan.logical.EsRelation} base
@@ -183,37 +181,14 @@ public class LogicalPlanGenerator {
     }
 
     private static Arbitrary<LogicalPlan> wrapKeep(LogicalPlan current) {
-        var output = current.output();
-        return arbitraryNonEmptySubset(current.output()).map(kept -> {
-            for (var a : kept) {
-                if (output.contains(a) == false) {
-                    throw new IllegalStateException("Generated attribute '" + a + "' not in child output");
-                }
-            }
+        return arbitrarySubset(current.output(), 1, current.output().size()).map(kept -> {
             var projections = kept.stream().map(a -> (NamedExpression) a).toList();
-            var keep = new Keep(Source.EMPTY, current, projections);
-            assert current.output().equals(output);
-            var childOutput = current.output().stream().collect(Collectors.toMap(Attribute::name, identity(), (a, b) -> a));
-            verifyNoStaleness(projections, childOutput);
-            return keep;
+            return new Keep(Source.EMPTY, current, projections);
         });
     }
 
-    private static void verifyNoStaleness(List<NamedExpression> projections, Map<String, Attribute> childOutput) {
-        for (var proj : projections) {
-            var canon = childOutput.get(proj.name());
-            if (canon != null && canon.id().equals(((Attribute) proj).id()) == false) {
-                var err = new AssertionError(
-                    "Stale at Keep creation: '" + proj.name() + "' expected " + canon.id() + " got " + ((Attribute) proj).id()
-                );
-                err.printStackTrace(System.err);
-                throw err;
-            }
-        }
-    }
-
     private static Arbitrary<LogicalPlan> wrapDrop(LogicalPlan current, List<Attribute> available) {
-        return arbitraryProperSubset(available).map(dropped -> {
+        return arbitrarySubset(available, 1, available.size() - 1).map(dropped -> {
             var dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
             var kept = available.stream().filter(a -> dropNames.contains(a.name()) == false).map(a -> (NamedExpression) a).toList();
             return new Keep(Source.EMPTY, current, kept);
@@ -228,18 +203,8 @@ public class LogicalPlanGenerator {
         if (availableAliases.isEmpty()) {
             availableAliases = List.of("_col_0", "_col_1");
         }
-        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs)).as((name, expr) -> {
-            var childOutput = current.output().stream().collect(Collectors.toMap(Attribute::name, identity(), (a, b) -> a));
-            expr.forEachDown(Attribute.class, a -> {
-                var canon = childOutput.get(a.name());
-                if (canon != null && canon.id().equals(a.id()) == false) {
-                    var err = new AssertionError("Stale at Eval creation: '" + a.name() + "' expected " + canon.id() + " got " + a.id());
-                    err.printStackTrace(System.err);
-                    throw err;
-                }
-            });
-            return new Eval(Source.EMPTY, current, List.of(new Alias(Source.EMPTY, name, expr)));
-        });
+        return Combinators.combine(Arbitraries.of(availableAliases), arbitraryExpression(integerAttrs))
+            .as((name, expr) -> new Eval(Source.EMPTY, current, List.of(new Alias(Source.EMPTY, name, expr))));
     }
 
     private static Arbitrary<LogicalPlan> wrapFilter(LogicalPlan current, List<Attribute> integerAttrs) {
@@ -269,15 +234,8 @@ public class LogicalPlanGenerator {
         });
     }
 
-    private static Arbitrary<List<Attribute>> arbitraryNonEmptySubset(List<Attribute> attributes) {
-        return arbitraryAttribute(attributes).set().ofMinSize(1).ofMaxSize(attributes.size()).map(List::copyOf);
-    }
-
-    /**
-     * A proper subset: at least 1 element, but strictly fewer than all.
-     */
-    private static <T> Arbitrary<List<T>> arbitraryProperSubset(List<T> pool) {
-        return Arbitraries.of(pool).set().ofMinSize(1).ofMaxSize(pool.size() - 1).map(List::copyOf);
+    private static Arbitrary<List<Attribute>> arbitrarySubset(List<Attribute> attrs, int minSize, int maxSize) {
+        return arbitraryAttribute(attrs).set().ofMinSize(minSize).ofMaxSize(maxSize).map(List::copyOf);
     }
 
     private static Arbitrary<Expression> arbitraryExpression(List<Attribute> integerAttrs) {
