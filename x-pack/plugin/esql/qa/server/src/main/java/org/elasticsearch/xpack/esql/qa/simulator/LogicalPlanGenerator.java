@@ -34,8 +34,10 @@ import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
+import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -60,7 +62,83 @@ public class LogicalPlanGenerator {
             () -> Arbitraries.just(buildEsRelation(schema)),
             childArb -> childArb.flatMap(LogicalPlanGenerator::wrapLayer),
             depth
-        );
+        ).map(LogicalPlanGenerator::resolveReferences);
+    }
+
+    /**
+     * Walks the plan bottom-up, replacing stale attribute references with canonical ones from
+     * each node's child output. This is required for binary plan serialization — do NOT remove.
+     * <p>
+     * Although the generator uses {@code flatMap} to derive each layer from its child's output
+     * (so generation always produces consistent NameIds), jqwik's shrinking can independently
+     * mutate inner plan nodes without re-running outer {@code flatMap} closures. This creates
+     * plans where outer nodes retain attribute references with stale NameIds. The ES|QL optimizer
+     * validates NameId consistency and rejects such plans with "optimized incorrectly due to
+     * missing references" errors.
+     */
+    static LogicalPlan resolveReferences(LogicalPlan plan) {
+        if (plan instanceof EsRelation) {
+            return plan;
+        }
+        if (plan instanceof UnaryPlan == false) {
+            return plan;
+        }
+        LogicalPlan resolvedChild = resolveReferences(((UnaryPlan) plan).child());
+        Map<String, Attribute> canonical = new HashMap<>();
+        for (Attribute attr : resolvedChild.output()) {
+            canonical.put(attr.name(), attr);
+        }
+        if (plan instanceof Keep keep) {
+            var newProj = keep.projections()
+                .stream()
+                .map(ne -> (NamedExpression) canonical.getOrDefault(ne.name(), (Attribute) ne))
+                .toList();
+            return new Keep(keep.source(), resolvedChild, newProj);
+        }
+        if (plan instanceof Filter filter) {
+            return new Filter(filter.source(), resolvedChild, resolveExpr(filter.condition(), canonical));
+        }
+        if (plan instanceof Eval eval) {
+            var newFields = eval.fields()
+                .stream()
+                .map(a -> new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic()))
+                .toList();
+            return new Eval(eval.source(), resolvedChild, newFields);
+        }
+        if (plan instanceof OrderBy orderBy) {
+            var newOrders = orderBy.order()
+                .stream()
+                .map(o -> new Order(o.source(), resolveExpr(o.child(), canonical), o.direction(), o.nullsPosition()))
+                .toList();
+            return new OrderBy(orderBy.source(), resolvedChild, newOrders);
+        }
+        // Limit and other pass-through nodes: just replace child
+        return ((UnaryPlan) plan).replaceChild(resolvedChild);
+    }
+
+    private static Expression resolveExpr(Expression expr, Map<String, Attribute> canonical) {
+        if (expr instanceof Attribute a) {
+            return canonical.getOrDefault(a.name(), a);
+        }
+        if (expr instanceof Literal) {
+            return expr;
+        }
+        if (expr instanceof Add e) {
+            return new Add(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.configuration());
+        }
+        if (expr instanceof Sub e) {
+            return new Sub(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.configuration());
+        }
+        if (expr instanceof Mul e) {
+            return new Mul(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
+        }
+        if (expr instanceof GreaterThan e) {
+            return new GreaterThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+        }
+        if (expr instanceof LessThan e) {
+            return new LessThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+        }
+        return expr;
     }
 
     private static LogicalPlan buildEsRelation(SimSchema schema) {
@@ -99,8 +177,9 @@ public class LogicalPlanGenerator {
 
     private static Arbitrary<LogicalPlan> wrapDrop(LogicalPlan current, List<Attribute> available) {
         return arbitraryProperSubset(available).map(dropped -> {
-            var removals = dropped.stream().map(a -> (NamedExpression) a).toList();
-            return new SimDrop(Source.EMPTY, current, removals);
+            var dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
+            var kept = available.stream().filter(a -> dropNames.contains(a.name()) == false).map(a -> (NamedExpression) a).toList();
+            return new Keep(Source.EMPTY, current, kept);
         });
     }
 

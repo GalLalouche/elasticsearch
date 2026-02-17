@@ -37,9 +37,7 @@ class SimDataGenerator {
 
         List<Arbitrary<Object>> valueArbitraries = columns.stream().map(col -> arbitraryValue(col.type())).toList();
         return Combinators.combine(valueArbitraries)
-            .as(values -> IntStream.range(0, columns.size())
-                .boxed()
-                .collect(Collectors.toMap(i -> columns.get(i).name(), values::get)));
+            .as(values -> IntStream.range(0, columns.size()).boxed().collect(Collectors.toMap(i -> columns.get(i).name(), values::get)));
     }
 
     private static Arbitrary<Object> arbitraryValue(DataType type) {
