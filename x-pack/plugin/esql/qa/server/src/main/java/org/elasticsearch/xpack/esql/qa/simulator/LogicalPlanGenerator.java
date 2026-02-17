@@ -23,11 +23,17 @@ import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.expression.Order;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
+import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
@@ -53,6 +59,7 @@ public class LogicalPlanGenerator {
     private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", DEFAULT_PLAN_DEPTH);
 
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
+    private static final List<String> STATS_ALIAS_POOL = List.of("s0", "s1");
 
     public static Arbitrary<LogicalPlan> plansFor(SimSchema schema) {
         return plansFor(schema, PLAN_DEPTH);
@@ -124,6 +131,19 @@ public class LogicalPlanGenerator {
                 .toList();
             return new OrderBy(orderBy.source(), resolvedChild, newOrders);
         }
+        if (plan instanceof Aggregate agg) {
+            var newGroupings = agg.groupings().stream().map(e -> resolveExpr(e, canonical)).toList();
+            var newAggregates = agg.aggregates().stream().<NamedExpression>map(ne -> {
+                if (ne instanceof Alias a) {
+                    return new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic());
+                }
+                if (ne instanceof Attribute attr) {
+                    return (NamedExpression) canonical.getOrDefault(attr.name(), attr);
+                }
+                return ne;
+            }).toList();
+            return new Aggregate(agg.source(), resolvedChild, newGroupings, newAggregates);
+        }
         // Limit and other pass-through nodes: just replace child
         return ((UnaryPlan) plan).replaceChild(resolvedChild);
     }
@@ -150,6 +170,10 @@ public class LogicalPlanGenerator {
         if (expr instanceof LessThan e) {
             return new LessThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
         }
+        if (expr instanceof Count e) return new Count(e.source(), resolveExpr(e.field(), canonical));
+        if (expr instanceof Sum e) return new Sum(e.source(), resolveExpr(e.field(), canonical));
+        if (expr instanceof Min e) return new Min(e.source(), resolveExpr(e.field(), canonical));
+        if (expr instanceof Max e) return new Max(e.source(), resolveExpr(e.field(), canonical));
         return expr;
     }
 
@@ -174,6 +198,7 @@ public class LogicalPlanGenerator {
         if (integerAttrs.isEmpty() == false) {
             options.add(wrapEval(current));
             options.add(wrapFilter(current, integerAttrs));
+            options.add(wrapStats(current, integerAttrs, available));
         }
         options.add(wrapLimit(current));
         options.add(wrapSort(current, available));
@@ -231,6 +256,27 @@ public class LogicalPlanGenerator {
             var order = new Order(Source.EMPTY, attr, dir, Order.NullsPosition.ANY);
             var orderBy = new OrderBy(Source.EMPTY, current, List.of(order));
             return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), orderBy);
+        });
+    }
+
+    private static Arbitrary<LogicalPlan> wrapStats(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
+        return Combinators.combine(
+            arbitraryAttribute(integerAttrs),
+            Arbitraries.of("COUNT", "SUM", "MIN", "MAX"),
+            Arbitraries.of(STATS_ALIAS_POOL),
+            arbitraryAttribute(available)
+        ).as((field, funcName, aliasName, groupBy) -> {
+            AggregateFunction aggFunc = switch (funcName) {
+                case "COUNT" -> new Count(Source.EMPTY, field);
+                case "SUM" -> new Sum(Source.EMPTY, field);
+                case "MIN" -> new Min(Source.EMPTY, field);
+                case "MAX" -> new Max(Source.EMPTY, field);
+                default -> throw new IllegalStateException();
+            };
+            var alias = new Alias(Source.EMPTY, aliasName, aggFunc);
+            var groupings = List.<Expression>of(groupBy);
+            var aggregates = List.<NamedExpression>of(alias, groupBy);
+            return new Aggregate(Source.EMPTY, current, groupings, aggregates);
         });
     }
 

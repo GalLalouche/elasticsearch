@@ -19,12 +19,18 @@ import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.Order;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
+import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
@@ -40,6 +46,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -85,6 +92,7 @@ public class Simulator {
             case Drop drop -> visit(drop);
             case Filter filter -> visit(filter);
             case Eval eval -> visit(eval);
+            case Aggregate aggregate -> visit(aggregate);
             case Limit limit -> visit(limit);
             case OrderBy orderBy -> visit(orderBy);
             default -> throw new UnsupportedOperationException(
@@ -271,6 +279,67 @@ public class Simulator {
                 .map(c -> new Column(c.name, c.type, Arrays.stream(indices).map(i -> c.values.get(i)).toList()))
                 .toList()
         );
+    }
+
+    private Result visit(Aggregate aggregate) throws IOException {
+        var childResult = simulate(aggregate.child());
+        int numRows = childResult.columns.isEmpty() ? 0 : childResult.columns.getFirst().values.size();
+        // Build groups: map from group key → row indices (LinkedHashMap preserves insertion order)
+        var groups = new LinkedHashMap<List<Object>, List<Integer>>();
+        if (aggregate.groupings().isEmpty()) {
+            groups.put(List.of(), IntStream.range(0, numRows).boxed().toList());
+        } else {
+            for (int i = 0; i < numRows; i++) {
+                var key = new ArrayList<>();
+                for (var groupExpr : aggregate.groupings()) {
+                    key.add(childResult.evaluate(groupExpr, activeBug).values.get(i));
+                }
+                groups.computeIfAbsent(key, k -> new ArrayList<>()).add(i);
+            }
+        }
+        // Build result columns from aggregates list
+        var resultColumns = new ArrayList<Column>();
+        for (var namedExpr : aggregate.aggregates()) {
+            Expression unwrapped = Alias.unwrap(namedExpr);
+            if (unwrapped instanceof AggregateFunction aggFunc) {
+                var values = groups.values().stream().map(indices -> computeAggregate(aggFunc, childResult, indices)).toList();
+                resultColumns.add(new Column(namedExpr.name(), aggFunc.dataType(), values));
+            } else {
+                // Grouping key reference
+                var col = childResult.evaluate(unwrapped, activeBug);
+                var values = groups.values().stream().map(indices -> col.values.get(indices.getFirst())).toList();
+                resultColumns.add(new Column(namedExpr.name(), col.type, values));
+            }
+        }
+        return new Result(resultColumns);
+    }
+
+    private Object computeAggregate(AggregateFunction aggFunc, Result data, List<Integer> indices) {
+        return switch (aggFunc) {
+            case Count count -> (long) indices.size();
+            case Sum sum -> {
+                var values = data.evaluate(sum.field(), activeBug);
+                long total = 0;
+                for (int idx : indices)
+                    total += toLong(values.values.get(idx));
+                yield total;
+            }
+            case Min min -> {
+                var values = data.evaluate(min.field(), activeBug);
+                long result = Long.MAX_VALUE;
+                for (int idx : indices)
+                    result = Math.min(result, toLong(values.values.get(idx)));
+                yield result;
+            }
+            case Max max -> {
+                var values = data.evaluate(max.field(), activeBug);
+                long result = Long.MIN_VALUE;
+                for (int idx : indices)
+                    result = Math.max(result, toLong(values.values.get(idx)));
+                yield result;
+            }
+            default -> throw new UnsupportedOperationException(Strings.format("Unsupported aggregate function: %s", aggFunc.getClass()));
+        };
     }
 
     public record Result(List<Column> columns) {

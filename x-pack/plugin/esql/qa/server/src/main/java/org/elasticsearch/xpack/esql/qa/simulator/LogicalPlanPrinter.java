@@ -13,8 +13,13 @@ import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.expression.Order;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.EsqlBinaryComparison;
+import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
@@ -48,6 +53,7 @@ public class LogicalPlanPrinter {
             case Drop drop -> printSpecific(drop, sb);
             case Eval eval -> printSpecific(eval, sb);
             case Filter filter -> printSpecific(filter, sb);
+            case Aggregate aggregate -> printSpecific(aggregate, sb);
             case Limit limit -> printSpecific(limit, sb);
             case OrderBy orderBy -> printSpecific(orderBy, sb);
             default -> throw new UnsupportedOperationException(
@@ -109,6 +115,24 @@ public class LogicalPlanPrinter {
         sb.append(" | LIMIT ").append(((Literal) limit.limit()).value());
     }
 
+    private static void printSpecific(Aggregate aggregate, StringBuilder sb) {
+        printCommon(aggregate.child(), sb);
+        sb.append(" | STATS ");
+        var aggs = aggregate.aggregates();
+        int numAggs = aggs.size() - aggregate.groupings().size();
+        for (int i = 0; i < numAggs; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(printExpression(aggs.get(i)));
+        }
+        if (aggregate.groupings().isEmpty() == false) {
+            sb.append(" BY ");
+            for (int i = 0; i < aggregate.groupings().size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(printExpression(aggregate.groupings().get(i)));
+            }
+        }
+    }
+
     private static void printSpecific(OrderBy orderBy, StringBuilder sb) {
         printCommon(orderBy.child(), sb);
         sb.append(" | SORT ");
@@ -132,6 +156,10 @@ public class LogicalPlanPrinter {
                 comp.getFunctionType().symbol(),
                 printExpression(comp.right())
             );
+            case Count c -> Strings.format("COUNT(%s)", printExpression(c.field()));
+            case Sum s -> Strings.format("SUM(%s)", printExpression(s.field()));
+            case Min m -> Strings.format("MIN(%s)", printExpression(m.field()));
+            case Max m -> Strings.format("MAX(%s)", printExpression(m.field()));
             default -> throw new UnsupportedOperationException(
                 Strings.format("Printing of expression [%s] is not supported yet", expression.getClass())
             );

@@ -11,11 +11,19 @@ import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
+import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
+import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 
 import java.io.IOException;
@@ -364,6 +372,125 @@ public class SimulatorTests extends ESTestCase {
                     )
                 )
             )
+        );
+    }
+
+    public void testStatsSumWithGrouping() throws Exception {
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 2, "b", "x"), Map.of("a", 3, "b", "y"));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0); // a:INTEGER
+        var bAttr = from.output().get(1); // b:KEYWORD
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "s0", new Sum(Source.EMPTY, aAttr)), bAttr)
+        );
+        // Groups: "x" → rows 0,1 (a=1,2), "y" → row 2 (a=3)
+        assertThat(
+            new Simulator(schema, data).simulate(aggregate),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("s0", DataType.LONG, List.of(3L, 3L)),
+                        new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
+                    )
+                )
+            )
+        );
+    }
+
+    public void testStatsCountWithGrouping() throws Exception {
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 2, "b", "x"), Map.of("a", 3, "b", "y"));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var bAttr = from.output().get(1);
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "cnt", new Count(Source.EMPTY, aAttr)), bAttr)
+        );
+        assertThat(
+            new Simulator(schema, data).simulate(aggregate),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("cnt", DataType.LONG, List.of(2L, 1L)),
+                        new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
+                    )
+                )
+            )
+        );
+    }
+
+    public void testStatsMinMax() throws Exception {
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 5, "b", "x"), Map.of("a", 3, "b", "y"));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var bAttr = from.output().get(1);
+        var aggMin = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "lo", new Min(Source.EMPTY, aAttr)), bAttr)
+        );
+        assertThat(
+            new Simulator(schema, data).simulate(aggMin),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("lo", DataType.INTEGER, List.of(1L, 3L)),
+                        new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
+                    )
+                )
+            )
+        );
+        var aggMax = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "hi", new Max(Source.EMPTY, aAttr)), bAttr)
+        );
+        assertThat(
+            new Simulator(schema, data).simulate(aggMax),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("hi", DataType.INTEGER, List.of(5L, 3L)),
+                        new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
+                    )
+                )
+            )
+        );
+    }
+
+    public void testStatsNoGrouping() throws Exception {
+        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.INTEGER)));
+        var data = List.<Map<String, Object>>of(Map.of("a", 2), Map.of("a", 3), Map.of("a", 5));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.of(),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "total", new Sum(Source.EMPTY, aAttr)))
+        );
+        assertThat(
+            new Simulator(schema, data).simulate(aggregate),
+            equalTo(new Simulator.Result(List.of(new Simulator.Column("total", DataType.LONG, List.of(10L)))))
         );
     }
 

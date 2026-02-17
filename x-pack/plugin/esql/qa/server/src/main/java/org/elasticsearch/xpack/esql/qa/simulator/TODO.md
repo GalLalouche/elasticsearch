@@ -17,7 +17,8 @@
 
 ## 3. LogicalPlan shrinker
 - [x] Implement shrinking — handled natively by jqwik-engine (no custom `Shrinkable` needed)
-- [ ] Investigate: jqwik shrinking can independently mutate inner plan nodes without re-running outer `flatMap` closures, producing plans with stale NameIds. Currently patched by `resolveReferences` but this may mask deeper issues or cause invalid shrink candidates to be tested.
+- [x] Investigate: jqwik shrinking can independently mutate inner plan nodes without re-running outer `flatMap` closures, producing plans with stale NameIds. Currently patched by `resolveReferences` but this may mask deeper issues or cause invalid shrink candidates to be tested.
+- [ ] Print the jqwik seed prominently on failure so it's easy to find in logs. Support passing a seed via `-Dsimulator.seed=12345` for reproducibility.
 
 ## Meta-tests
 - [x] **Deterministic bug injection**: define named simulator bugs (`ADD_IS_SUB`, `KEEP_DROPS_FIRST`, `WHERE_INVERTED`, etc.) that can be toggled on. Run the property test with a bug active and verify it detects the failure. Assert properties of the shrunk counterexample (e.g., `ADD_IS_SUB` should shrink to a plan containing `Eval` with `Add`).
@@ -45,7 +46,8 @@
 - [ ] Support more expression types beyond Add, Sub, Mul, Div, GreaterThan, LessThan
 - [x] `SORT` + `LIMIT` — sort by column(s) ASC/DESC, take first N rows
 - [x] `LIMIT` — take first N rows
-- [ ] Support more commands (STATS, etc.)
+- [x] Support `STATS` (Aggregate with COUNT, SUM, MIN, MAX; grouping + no-grouping)
+- [ ] Support more commands (RENAME, etc.)
 - [x] Unit tests for simulator (Row, From, Keep, Drop, Where, Eval with Add/Sub/Mul, EsRelation in-memory)
 
 ## 7. End-to-end property test
