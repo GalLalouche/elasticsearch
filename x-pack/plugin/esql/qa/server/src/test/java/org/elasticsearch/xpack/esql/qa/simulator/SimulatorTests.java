@@ -25,6 +25,7 @@ import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
+import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 
 import java.io.IOException;
 import java.util.List;
@@ -491,6 +492,63 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             new Simulator(schema, data).simulate(aggregate),
             equalTo(new Simulator.Result(List.of(new Simulator.Column("total", DataType.LONG, List.of(10L)))))
+        );
+    }
+
+    public void testInlineStatsWithGrouping() throws Exception {
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 2, "b", "x"), Map.of("a", 3, "b", "y"));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0); // a:INTEGER
+        var bAttr = from.output().get(1); // b:KEYWORD
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "s0", new Sum(Source.EMPTY, aAttr)), bAttr)
+        );
+        var inlineStats = new InlineStats(Source.EMPTY, aggregate);
+        // All 3 rows preserved; s0 broadcast per group. Columns: [a, s0, b]
+        assertThat(
+            new Simulator(schema, data).simulate(inlineStats),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("a", DataType.INTEGER, List.of(1L, 2L, 3L)),
+                        new Simulator.Column("s0", DataType.LONG, List.of(3L, 3L, 3L)),
+                        new Simulator.Column("b", DataType.KEYWORD, List.of("x", "x", "y"))
+                    )
+                )
+            )
+        );
+    }
+
+    public void testInlineStatsNoGrouping() throws Exception {
+        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.INTEGER)));
+        var data = List.<Map<String, Object>>of(Map.of("a", 2), Map.of("a", 3), Map.of("a", 5));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.of(),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "total", new Sum(Source.EMPTY, aAttr)))
+        );
+        var inlineStats = new InlineStats(Source.EMPTY, aggregate);
+        // All 3 rows preserved; total broadcast to all. Columns: [a, total]
+        assertThat(
+            new Simulator(schema, data).simulate(inlineStats),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("a", DataType.INTEGER, List.of(2L, 3L, 5L)),
+                        new Simulator.Column("total", DataType.LONG, List.of(10L, 10L, 10L))
+                    )
+                )
+            )
         );
     }
 

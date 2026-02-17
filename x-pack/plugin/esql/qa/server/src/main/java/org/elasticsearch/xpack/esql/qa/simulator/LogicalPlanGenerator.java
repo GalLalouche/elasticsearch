@@ -35,6 +35,7 @@ import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.Gre
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
+import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
@@ -199,6 +200,7 @@ public class LogicalPlanGenerator {
             options.add(wrapEval(current));
             options.add(wrapFilter(current, integerAttrs));
             options.add(wrapStats(current, integerAttrs, available));
+            options.add(wrapInlineStats(current, integerAttrs, available));
         }
         options.add(wrapLimit(current));
         options.add(wrapSort(current, available));
@@ -277,6 +279,27 @@ public class LogicalPlanGenerator {
             var groupings = List.<Expression>of(groupBy);
             var aggregates = List.<NamedExpression>of(alias, groupBy);
             return new Aggregate(Source.EMPTY, current, groupings, aggregates);
+        });
+    }
+
+    private static Arbitrary<LogicalPlan> wrapInlineStats(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
+        return Combinators.combine(
+            arbitraryAttribute(integerAttrs),
+            Arbitraries.of("COUNT", "SUM", "MIN", "MAX"),
+            Arbitraries.of(STATS_ALIAS_POOL),
+            arbitraryAttribute(available)
+        ).as((field, funcName, aliasName, groupBy) -> {
+            AggregateFunction aggFunc = switch (funcName) {
+                case "COUNT" -> new Count(Source.EMPTY, field);
+                case "SUM" -> new Sum(Source.EMPTY, field);
+                case "MIN" -> new Min(Source.EMPTY, field);
+                case "MAX" -> new Max(Source.EMPTY, field);
+                default -> throw new IllegalStateException();
+            };
+            var alias = new Alias(Source.EMPTY, aliasName, aggFunc);
+            var groupings = List.<Expression>of(groupBy);
+            var aggregates = List.<NamedExpression>of(alias, groupBy);
+            return new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, current, groupings, aggregates));
         });
     }
 

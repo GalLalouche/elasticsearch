@@ -32,6 +32,7 @@ import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.Gre
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
+import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
@@ -92,6 +93,7 @@ public class Simulator {
             case Drop drop -> visit(drop);
             case Filter filter -> visit(filter);
             case Eval eval -> visit(eval);
+            case InlineStats inlineStats -> visit(inlineStats);
             case Aggregate aggregate -> visit(aggregate);
             case Limit limit -> visit(limit);
             case OrderBy orderBy -> visit(orderBy);
@@ -279,6 +281,49 @@ public class Simulator {
                 .map(c -> new Column(c.name, c.type, Arrays.stream(indices).map(i -> c.values.get(i)).toList()))
                 .toList()
         );
+    }
+
+    private Result visit(InlineStats inlineStats) throws IOException {
+        var aggregate = inlineStats.aggregate();
+        var childResult = simulate(aggregate.child());
+        int numRows = childResult.columns().isEmpty() ? 0 : childResult.columns().getFirst().values().size();
+        // Build groups (same as Aggregate)
+        var groups = new LinkedHashMap<List<Object>, List<Integer>>();
+        if (aggregate.groupings().isEmpty()) {
+            groups.put(List.of(), IntStream.range(0, numRows).boxed().toList());
+        } else {
+            for (int i = 0; i < numRows; i++) {
+                var key = new ArrayList<>();
+                for (var groupExpr : aggregate.groupings()) {
+                    key.add(childResult.evaluate(groupExpr, activeBug).values().get(i));
+                }
+                groups.computeIfAbsent(key, k -> new ArrayList<>()).add(i);
+            }
+        }
+        // Build aggregate columns, broadcasting per-group values to each original row
+        var aggColumns = new ArrayList<Column>();
+        for (var namedExpr : aggregate.aggregates()) {
+            Expression unwrapped = Alias.unwrap(namedExpr);
+            if (unwrapped instanceof AggregateFunction aggFunc) {
+                Object[] broadcast = new Object[numRows];
+                for (var entry : groups.entrySet()) {
+                    Object value = computeAggregate(aggFunc, childResult, entry.getValue());
+                    for (int idx : entry.getValue()) broadcast[idx] = value;
+                }
+                aggColumns.add(new Column(namedExpr.name(), aggFunc.dataType(), Arrays.asList(broadcast)));
+            } else {
+                var col = childResult.evaluate(unwrapped, activeBug);
+                aggColumns.add(new Column(namedExpr.name(), col.type(), col.values()));
+            }
+        }
+        // Merge: child columns not in aggregate output, then aggregate columns
+        var aggNames = aggColumns.stream().map(Column::name).collect(Collectors.toSet());
+        var resultColumns = new ArrayList<Column>();
+        for (var col : childResult.columns()) {
+            if (aggNames.contains(col.name()) == false) resultColumns.add(col);
+        }
+        resultColumns.addAll(aggColumns);
+        return new Result(resultColumns);
     }
 
     private Result visit(Aggregate aggregate) throws IOException {

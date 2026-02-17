@@ -21,6 +21,7 @@ import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Ari
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.EsqlBinaryComparison;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
+import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
@@ -53,6 +54,7 @@ public class LogicalPlanPrinter {
             case Drop drop -> printSpecific(drop, sb);
             case Eval eval -> printSpecific(eval, sb);
             case Filter filter -> printSpecific(filter, sb);
+            case InlineStats inlineStats -> printSpecific(inlineStats, sb);
             case Aggregate aggregate -> printSpecific(aggregate, sb);
             case Limit limit -> printSpecific(limit, sb);
             case OrderBy orderBy -> printSpecific(orderBy, sb);
@@ -113,6 +115,25 @@ public class LogicalPlanPrinter {
     private static void printSpecific(Limit limit, StringBuilder sb) {
         printCommon(limit.child(), sb);
         sb.append(" | LIMIT ").append(((Literal) limit.limit()).value());
+    }
+
+    private static void printSpecific(InlineStats inlineStats, StringBuilder sb) {
+        var aggregate = inlineStats.aggregate();
+        printCommon(aggregate.child(), sb);
+        sb.append(" | INLINESTATS ");
+        var aggs = aggregate.aggregates();
+        int numAggs = aggs.size() - aggregate.groupings().size();
+        for (int i = 0; i < numAggs; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(printExpression(aggs.get(i)));
+        }
+        if (aggregate.groupings().isEmpty() == false) {
+            sb.append(" BY ");
+            for (int i = 0; i < aggregate.groupings().size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(printExpression(aggregate.groupings().get(i)));
+            }
+        }
     }
 
     private static void printSpecific(Aggregate aggregate, StringBuilder sb) {
