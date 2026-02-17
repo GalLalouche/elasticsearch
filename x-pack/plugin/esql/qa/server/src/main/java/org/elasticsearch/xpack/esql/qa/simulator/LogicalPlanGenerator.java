@@ -249,12 +249,17 @@ public class LogicalPlanGenerator {
     }
 
     private static Arbitrary<LogicalPlan> wrapFilter(LogicalPlan current, List<Attribute> integerAttrs) {
-        return Combinators.combine(arbitraryAttribute(integerAttrs), Arbitraries.integers().between(1, 10), Arbitraries.of(true, false))
-            .as((attr, threshold, useGt) -> {
-                var literal = new Literal(Source.EMPTY, threshold, DataType.INTEGER);
-                Expression cond = useGt ? new GreaterThan(Source.EMPTY, attr, literal) : new LessThan(Source.EMPTY, attr, literal);
-                return new Filter(Source.EMPTY, current, cond);
-            });
+        return Combinators.combine(
+            arbitraryExpression(integerAttrs),
+            Arbitraries.oneOf(
+                arbitraryExpression(integerAttrs),
+                Arbitraries.integers().between(1, 10).map(i -> (Expression) new Literal(Source.EMPTY, i, DataType.INTEGER))
+            ),
+            Arbitraries.of(true, false)
+        ).as((left, right, useGt) -> {
+            Expression cond = useGt ? new GreaterThan(Source.EMPTY, left, right) : new LessThan(Source.EMPTY, left, right);
+            return new Filter(Source.EMPTY, current, cond);
+        });
     }
 
     private static Arbitrary<LogicalPlan> wrapLimit(LogicalPlan current) {

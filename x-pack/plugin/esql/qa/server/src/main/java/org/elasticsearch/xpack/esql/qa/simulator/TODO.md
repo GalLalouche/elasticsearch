@@ -10,8 +10,12 @@
 - [x] Generate `KEEP` (random non-empty subset of columns)
 - [x] Generate `DROP` (random non-empty subset of columns)
 - [x] Generate `EVAL`
+- [x] Generate multi-field `EVAL` (e.g., `EVAL z = a + b, w = a * 2`)
+- [x] Generate nested arithmetic expressions (e.g., `(a + b) * c`; depth configurable via `simulator.exprDepth`)
 - [x] Generate `WHERE` / `FILTER`
+- [x] Generate more complex `WHERE` expressions (arithmetic in conditions, e.g., `WHERE a + b > 5`, `WHERE a * 2 < c`)
 - [x] Generate `SORT` + `LIMIT` (paired — ES requires LIMIT after SORT)
+- [ ] Generate expressions in `SORT` (e.g., `SORT a + b ASC`, `SORT a * 2 DESC`)
 - [x] Generate `LIMIT`
 - [x] Generate deeper plans (recursive depth configurable via `simulator.planDepth`, default 5)
 
@@ -47,6 +51,8 @@
 - [x] `SORT` + `LIMIT` — sort by column(s) ASC/DESC, take first N rows
 - [x] `LIMIT` — take first N rows
 - [x] Support `STATS` (Aggregate with COUNT, SUM, MIN, MAX; grouping + no-grouping)
+- [ ] More aggregation variety in STATS/INLINESTATS: multiple aggregations per query (e.g., `STATS s0 = SUM(a), s1 = MAX(b) BY c`), multiple grouping keys, no-grouping variants
+- [ ] Generate arithmetic expressions in aggregation fields (e.g., `STATS s0 = SUM(a + b) BY c`)
 - [ ] Support more commands (RENAME, etc.)
 - [x] Unit tests for simulator (Row, From, Keep, Drop, Where, Eval with Add/Sub/Mul, EsRelation in-memory)
 
