@@ -60,14 +60,20 @@ public class Simulator {
     private final SimSchema schema;
     @Nullable
     private final List<Map<String, Object>> data;
+    private final SimBug activeBug;
 
     Simulator() {
-        this(null, null);
+        this(null, null, SimBug.BUG_FREE);
     }
 
     Simulator(@Nullable SimSchema schema, @Nullable List<Map<String, Object>> data) {
+        this(schema, data, SimBug.BUG_FREE);
+    }
+
+    Simulator(@Nullable SimSchema schema, @Nullable List<Map<String, Object>> data, SimBug activeBug) {
         this.schema = schema;
         this.data = data;
+        this.activeBug = activeBug;
     }
 
     public Result simulate(LogicalPlan plan) throws IOException {
@@ -180,6 +186,9 @@ public class Simulator {
         for (var projection : keep.projections()) {
             newColumns.add(childResult.getColumn(projection.name()));
         }
+        if (activeBug == SimBug.KEEP_DROPS_FIRST && newColumns.isEmpty() == false) {
+            newColumns.removeFirst();
+        }
         return new Result(newColumns);
     }
 
@@ -196,7 +205,7 @@ public class Simulator {
         var newColumns = new ArrayList<Column>();
         for (var expression : eval.expressions()) {
             if (expression instanceof Alias alias) {
-                newColumns.add(childResult.evaluate(alias.child()).toNamed(alias.name()));
+                newColumns.add(childResult.evaluate(alias.child(), activeBug).toNamed(alias.name()));
             } else {
                 throw new UnsupportedOperationException(
                     Strings.format("Eval expression [%s] is not an alias, but a %s", expression, expression.getClass())
@@ -208,12 +217,15 @@ public class Simulator {
 
     private Result visit(Filter filter) throws IOException {
         var childResult = simulate(filter.child());
-        var conditionResult = childResult.evaluate(filter.condition());
+        var conditionResult = childResult.evaluate(filter.condition(), activeBug);
         var validIndices = new BitSet();
         for (int i = 0; i < conditionResult.values.size(); i++) {
             if ((boolean) conditionResult.values.get(i)) {
                 validIndices.set(i);
             }
+        }
+        if (activeBug == SimBug.WHERE_INVERTED) {
+            validIndices.flip(0, conditionResult.values.size());
         }
         var result = new ArrayList<Column>(childResult.columns.size());
         for (var column : childResult.columns) {
@@ -242,7 +254,7 @@ public class Simulator {
         Integer[] indices = IntStream.range(0, numRows).boxed().toArray(Integer[]::new);
         // Pre-evaluate order expressions to column values
         List<Order> orders = orderBy.order();
-        List<List<Object>> orderValues = orders.stream().map(o -> childResult.evaluate(o.child()).values).toList();
+        List<List<Object>> orderValues = orders.stream().map(o -> childResult.evaluate(o.child(), activeBug).values).toList();
         Arrays.sort(indices, (a, b) -> {
             for (int i = 0; i < orders.size(); i++) {
                 int cmp = ((Comparable<Object>) orderValues.get(i).get(a)).compareTo(orderValues.get(i).get(b));
@@ -270,7 +282,7 @@ public class Simulator {
         }
 
         @SuppressWarnings("unchecked")
-        public UnnamedColumn evaluate(Expression expression) {
+        public UnnamedColumn evaluate(Expression expression, SimBug activeBug) {
             switch (expression) {
                 case Attribute attr -> {
                     return new UnnamedColumn(getColumn(attr.name()));
@@ -282,17 +294,19 @@ public class Simulator {
                     );
                 }
                 case Add add -> {
-                    var leftColumn = evaluate(add.left());
-                    var rightColumn = evaluate(add.right());
+                    var leftColumn = evaluate(add.left(), activeBug);
+                    var rightColumn = evaluate(add.right(), activeBug);
                     var values = new ArrayList<>();
                     for (int i = 0; i < leftColumn.values.size(); i++) {
-                        values.add(toLong(leftColumn.values.get(i)) + toLong(rightColumn.values.get(i)));
+                        long l = toLong(leftColumn.values.get(i));
+                        long r = toLong(rightColumn.values.get(i));
+                        values.add(activeBug == SimBug.ADD_IS_SUB ? l - r : l + r);
                     }
                     return new UnnamedColumn(leftColumn.type, values);
                 }
                 case Sub sub -> {
-                    var leftColumn = evaluate(sub.left());
-                    var rightColumn = evaluate(sub.right());
+                    var leftColumn = evaluate(sub.left(), activeBug);
+                    var rightColumn = evaluate(sub.right(), activeBug);
                     var values = new ArrayList<>();
                     for (int i = 0; i < leftColumn.values.size(); i++) {
                         values.add(toLong(leftColumn.values.get(i)) - toLong(rightColumn.values.get(i)));
@@ -300,8 +314,8 @@ public class Simulator {
                     return new UnnamedColumn(leftColumn.type, values);
                 }
                 case Mul mul -> {
-                    var leftColumn = evaluate(mul.left());
-                    var rightColumn = evaluate(mul.right());
+                    var leftColumn = evaluate(mul.left(), activeBug);
+                    var rightColumn = evaluate(mul.right(), activeBug);
                     var values = new ArrayList<>();
                     for (int i = 0; i < leftColumn.values.size(); i++) {
                         values.add(toLong(leftColumn.values.get(i)) * toLong(rightColumn.values.get(i)));
@@ -310,8 +324,8 @@ public class Simulator {
                 }
                 // FIXME(gal, NOCOMMIT) Reduce duplication with above
                 case Div div -> {
-                    var leftColumn = evaluate(div.left());
-                    var rightColumn = evaluate(div.right());
+                    var leftColumn = evaluate(div.left(), activeBug);
+                    var rightColumn = evaluate(div.right(), activeBug);
                     var values = new ArrayList<>();
                     for (int i = 0; i < leftColumn.values.size(); i++) {
                         values.add(toLong(leftColumn.values.get(i)) / toLong(rightColumn.values.get(i)));
@@ -319,8 +333,8 @@ public class Simulator {
                     return new UnnamedColumn(leftColumn.type, values);
                 }
                 case GreaterThan gt -> {
-                    var leftColumn = evaluate(gt.left());
-                    var rightColumn = evaluate(gt.right());
+                    var leftColumn = evaluate(gt.left(), activeBug);
+                    var rightColumn = evaluate(gt.right(), activeBug);
                     var values = new ArrayList<>();
                     for (int i = 0; i < leftColumn.values.size(); i++) {
                         values.add(((Comparable<Object>) leftColumn.values.get(i)).compareTo(toLong(rightColumn.values.get(i))) > 0);
@@ -328,8 +342,8 @@ public class Simulator {
                     return new UnnamedColumn(DataType.BOOLEAN, values);
                 }
                 case LessThan lt -> {
-                    var leftColumn = evaluate(lt.left());
-                    var rightColumn = evaluate(lt.right());
+                    var leftColumn = evaluate(lt.left(), activeBug);
+                    var rightColumn = evaluate(lt.right(), activeBug);
                     var values = new ArrayList<>();
                     for (int i = 0; i < leftColumn.values.size(); i++) {
                         values.add(((Comparable<Object>) leftColumn.values.get(i)).compareTo(toLong(rightColumn.values.get(i))) < 0);
