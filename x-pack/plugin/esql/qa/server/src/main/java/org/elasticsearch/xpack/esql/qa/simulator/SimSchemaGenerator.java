@@ -20,6 +20,8 @@ import java.util.List;
  * with names and types drawn from fixed pools.
  */
 class SimSchemaGenerator {
+    private SimSchemaGenerator() { /* static class */ }
+
     private static final List<String> COLUMN_NAME_POOL = List.of("a", "b", "c", "d", "x", "y");
     private static final List<DataType> TYPE_POOL = List.of(DataType.INTEGER, DataType.KEYWORD);
 

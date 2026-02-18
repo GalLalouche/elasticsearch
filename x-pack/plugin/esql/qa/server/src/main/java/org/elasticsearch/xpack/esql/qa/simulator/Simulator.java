@@ -143,6 +143,7 @@ public class Simulator {
                 columns.add(new Column(name, type, new ArrayList<>()));
             }
             while ((line = reader.readLine()) != null) {
+                lineNumber++;
                 entries = multiValuesAwareCsvToStringArray(line, lineNumber);
                 if (entries.length != columns.size()) {
                     throw new IllegalArgumentException(
@@ -281,8 +282,9 @@ public class Simulator {
                 Object[] broadcast = new Object[numRows];
                 for (var entry : groups.entrySet()) {
                     Object value = computeAggregate(aggFunc, childResult, entry.getValue());
-                    for (int idx : entry.getValue())
+                    for (int idx : entry.getValue()) {
                         broadcast[idx] = value;
+                    }
                 }
                 return new Column(namedExpr.name(), aggFunc.dataType(), Arrays.asList(broadcast));
             }
@@ -374,7 +376,7 @@ public class Simulator {
                     add.left(),
                     add.right(),
                     activeBug,
-                    (l, r) -> { return activeBug == SimBug.ADD_IS_SUB ? l - r : l + r; }
+                    (l, r) -> activeBug == SimBug.ADD_IS_SUB ? l - r : l + r
                 );
                 case Sub sub -> evalBinaryLong(sub.left(), sub.right(), activeBug, (l, r) -> l - r);
                 case Mul mul -> evalBinaryLong(mul.left(), mul.right(), activeBug, (l, r) -> l * r);

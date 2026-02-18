@@ -38,8 +38,6 @@ public class GeneratorInvariantTests {
         SimulatorTestUtils.initLogging();
     }
 
-    // --- Providers ---
-
     @Provide
     Arbitrary<LogicalPlan> resolvedPlans() {
         return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.plansFor(schema, 5));
@@ -49,8 +47,6 @@ public class GeneratorInvariantTests {
     Arbitrary<LogicalPlan> rawPlans() {
         return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
     }
-
-    // --- Invariant 1: All column references exist in child output ---
 
     @Property(tries = 1000)
     void allColumnReferencesExistInChildOutput(@ForAll("resolvedPlans") LogicalPlan plan) {
@@ -102,8 +98,6 @@ public class GeneratorInvariantTests {
         };
     }
 
-    // --- Invariant 2: resolveReferences is idempotent ---
-
     @Property(tries = 1000)
     void resolveReferencesIsIdempotent(@ForAll("rawPlans") LogicalPlan plan) {
         var plan1 = LogicalPlanGenerator.resolveReferences(plan);
@@ -115,8 +109,6 @@ public class GeneratorInvariantTests {
         }
     }
 
-    // --- Invariant 3: Every plan prints to parseable ES|QL ---
-
     @Property(tries = 1000)
     void everyPlanPrintsToParseableEsql(@ForAll("resolvedPlans") LogicalPlan plan) {
         var query = LogicalPlanPrinter.print(plan);
@@ -126,8 +118,6 @@ public class GeneratorInvariantTests {
             throw new AssertionError("Failed to parse printed query: " + query, e);
         }
     }
-
-    // --- Invariant 4: No plan node has zero output columns ---
 
     @Property(tries = 1000)
     void noPlanNodeHasZeroOutputColumns(@ForAll("resolvedPlans") LogicalPlan plan) {

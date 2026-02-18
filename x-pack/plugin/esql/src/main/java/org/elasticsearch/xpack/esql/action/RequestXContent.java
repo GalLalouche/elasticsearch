@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -124,7 +125,7 @@ final class RequestXContent {
         parser.declareString((request, timeZone) -> request.timeZone(ZoneId.of(timeZone)), TIME_ZONE_FIELD);
         parser.declareString((request, localeTag) -> request.locale(Locale.forLanguageTag(localeTag)), LOCALE_FIELD);
         parser.declareBoolean(EsqlQueryRequest::profile, PROFILE_FIELD);
-        parser.declareString((request, base64) -> request.planBytes(java.util.Base64.getDecoder().decode(base64)), PLAN_FIELD);
+        parser.declareString((request, base64) -> request.planBytes(Base64.getDecoder().decode(base64)), PLAN_FIELD);
         parser.declareField((p, r, c) -> new ParseTables(r, p).parseTables(), TABLES_FIELD, ObjectParser.ValueType.OBJECT);
         parser.declareString(EsqlQueryRequest::projectRouting, PROJECT_ROUTING);
         parser.declareObjectOrBooleanOrNull(

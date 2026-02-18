@@ -37,7 +37,7 @@ class SimulatorTestUtils {
     static void initLogging() {
         LogConfigurator.configureESLogging();
         // Force IndexSettings to initialize before IndexMode to break circular class init dependency.
-        var unused = IndexSettings.MODE;
+        assert IndexSettings.MODE != null;
     }
 
     /** Schemas that contain at least one INTEGER column (needed by most generators). */

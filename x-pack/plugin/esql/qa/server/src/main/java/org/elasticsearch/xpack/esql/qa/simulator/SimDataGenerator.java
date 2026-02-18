@@ -23,6 +23,8 @@ import java.util.stream.IntStream;
  * Each row is a map from column name to a value matching the column's {@link org.elasticsearch.xpack.esql.core.type.DataType}.
  */
 class SimDataGenerator {
+    private SimDataGenerator() { /* static class */ }
+
     private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz");
 
     static Arbitrary<List<Map<String, Object>>> rows(SimSchema schema) {

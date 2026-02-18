@@ -12,6 +12,7 @@ import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
+import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
@@ -74,12 +75,12 @@ public class LogicalPlanPrinter {
 
     private static void printSpecific(Keep keep, StringBuilder sb) {
         printCommon(keep.child(), sb);
-        sb.append(" | KEEP ").append(keep.projections().stream().map(p -> p.name()).collect(joining(", ")));
+        sb.append(" | KEEP ").append(keep.projections().stream().map(NamedExpression::name).collect(joining(", ")));
     }
 
     private static void printSpecific(Drop drop, StringBuilder sb) {
         printCommon(drop.child(), sb);
-        sb.append(" | DROP ").append(drop.removals().stream().map(r -> r.name()).collect(joining(", ")));
+        sb.append(" | DROP ").append(drop.removals().stream().map(NamedExpression::name).collect(joining(", ")));
     }
 
     private static void printSpecific(Eval eval, StringBuilder sb) {

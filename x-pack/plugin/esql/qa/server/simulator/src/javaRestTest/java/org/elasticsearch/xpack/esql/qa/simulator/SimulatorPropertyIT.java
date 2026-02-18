@@ -236,12 +236,10 @@ public class SimulatorPropertyIT {
         }
     }
 
-    private Map<String, Object> runEsqlQuery(String query) throws IOException {
+    private static Map<String, Object> runEsqlQuery(String query) throws IOException {
         Request request = new Request("POST", "/_query");
         request.setJsonEntity("{\"query\": \"" + query.replace("\"", "\\\"") + "\"}");
-        request.setOptions(
-            request.getOptions().toBuilder().setWarningsHandler(org.elasticsearch.client.WarningsHandler.PERMISSIVE)
-        );
+        request.setOptions(request.getOptions().toBuilder().setWarningsHandler(org.elasticsearch.client.WarningsHandler.PERMISSIVE));
         Response response = restClient.performRequest(request);
         assertStatusCode(200, response);
         return XContentHelper.convertToMap(JsonXContent.jsonXContent, response.getEntity().getContent(), false);

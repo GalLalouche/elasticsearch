@@ -288,13 +288,12 @@ public class EsqlSession {
             LogicalPlan plan = deserializePlan(request.planBytes(), binaryPlanConfig);
             // Add implicit limit (normally done by Analyzer.AddImplicitLimit)
             boolean hasLimit = plan.collectFirstChildren(Limit.class::isInstance).isEmpty() == false;
-            int limit = hasLimit
-                ? analyzerSettings.resultTruncationMaxSize()
-                : analyzerSettings.resultTruncationDefaultSize();
+            int limit = hasLimit ? analyzerSettings.resultTruncationMaxSize() : analyzerSettings.resultTruncationDefaultSize();
             plan = new Limit(EMPTY, new Literal(EMPTY, limit, DataType.INTEGER), plan);
             plan.setAnalyzed();
             PlanTimeProfile planTimeProfile = request.profile() ? new PlanTimeProfile() : null;
             FoldContext foldContext = binaryPlanConfig.newFoldContext();
+            executionInfo.queryProfile().planning().stop();
             executeBinaryPlan(plan, request, binaryPlanConfig, foldContext, planTimeProfile, executionInfo, planRunner, listener);
             return;
         }
@@ -475,9 +474,7 @@ public class EsqlSession {
         var logicalPlanOptimizer = new LogicalPlanOptimizer(
             new LogicalOptimizerContext(configuration, foldContext, localClusterMinimumVersion)
         );
-        SubscribableListener.<LogicalPlan>newForked(
-            l -> preOptimizedPlan(plan, logicalPlanPreOptimizer, planTimeProfile, l)
-        )
+        SubscribableListener.<LogicalPlan>newForked(l -> preOptimizedPlan(plan, logicalPlanPreOptimizer, planTimeProfile, l))
             .<LogicalPlan>andThen(
                 (l, p) -> preMapper.preMapper(
                     new Versioned<>(optimizedPlan(p, logicalPlanOptimizer, planTimeProfile), localClusterMinimumVersion),
@@ -508,16 +505,20 @@ public class EsqlSession {
         }
     }
 
-    private static volatile NamedWriteableRegistry PLAN_REGISTRY;
+    private static volatile NamedWriteableRegistry planRegistry;
 
     private static NamedWriteableRegistry planWriteableRegistry() {
-        if (PLAN_REGISTRY == null) {
-            var entries = new ArrayList<NamedWriteableRegistry.Entry>();
-            entries.addAll(ExpressionWritables.getNamedWriteables());
-            entries.addAll(PlanWritables.getNamedWriteables());
-            PLAN_REGISTRY = new NamedWriteableRegistry(entries);
+        if (planRegistry == null) {
+            synchronized (EsqlSession.class) {
+                if (planRegistry == null) {
+                    var entries = new ArrayList<NamedWriteableRegistry.Entry>();
+                    entries.addAll(ExpressionWritables.getNamedWriteables());
+                    entries.addAll(PlanWritables.getNamedWriteables());
+                    planRegistry = new NamedWriteableRegistry(entries);
+                }
+            }
         }
-        return PLAN_REGISTRY;
+        return planRegistry;
     }
 
     /**

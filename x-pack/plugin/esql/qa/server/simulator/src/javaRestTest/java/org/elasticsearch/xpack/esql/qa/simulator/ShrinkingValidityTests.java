@@ -47,7 +47,7 @@ public class ShrinkingValidityTests {
     }
 
     static List<String> validateReferences(LogicalPlan plan) {
-        if (plan instanceof EsRelation || plan instanceof UnaryPlan == false) return List.of();
+        if (plan instanceof EsRelation || (plan instanceof UnaryPlan) == false) return List.of();
         var unary = (UnaryPlan) plan;
         var canonical = unary.child().output().stream().collect(toMap(Attribute::name, a -> a, (a, b) -> a));
         var issues = new ArrayList<>(validateReferences(unary.child()));

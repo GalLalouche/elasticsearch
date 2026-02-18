@@ -13,6 +13,7 @@ import net.jqwik.api.Combinators;
 
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.index.IndexMode;
+import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
@@ -21,7 +22,6 @@ import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
-import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
@@ -57,10 +57,10 @@ import java.util.stream.IntStream;
  * is wrapped in randomly chosen layers (KEEP, DROP, EVAL) up to a configurable depth.
  */
 public class LogicalPlanGenerator {
-    private static final int DEFAULT_PLAN_DEPTH = 5;
-    private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", DEFAULT_PLAN_DEPTH);
-    private static final int DEFAULT_EXPR_DEPTH = 2;
-    private static final int EXPR_DEPTH = Integer.getInteger("simulator.exprDepth", DEFAULT_EXPR_DEPTH);
+    private LogicalPlanGenerator() { /* static class */ }
+
+    private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", 5);
+    private static final int EXPR_DEPTH = Integer.getInteger("simulator.exprDepth", 2);
 
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
     private static final List<String> STATS_ALIAS_POOL = List.of("s0", "s1");
@@ -289,7 +289,7 @@ public class LogicalPlanGenerator {
     }
 
     private static Arbitrary<LogicalPlan> wrapStats(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
-        return arbitraryAggregate(current, integerAttrs, available).map(agg -> agg);
+        return arbitraryAggregate(current, integerAttrs, available).map(agg -> (LogicalPlan) agg);
     }
 
     private static Arbitrary<LogicalPlan> wrapInlineStats(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
