@@ -12,12 +12,9 @@ import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
 
-import org.elasticsearch.common.logging.LogConfigurator;
-import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
-import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
@@ -29,8 +26,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.elasticsearch.xpack.esql.qa.simulator.ShrinkingValidityTests.collectAttributeReferences;
-import static org.elasticsearch.xpack.esql.qa.simulator.ShrinkingValidityTests.collectExprAttrs;
+import static org.elasticsearch.xpack.esql.qa.simulator.SimulatorTestUtils.collectAttributeReferences;
+import static org.elasticsearch.xpack.esql.qa.simulator.SimulatorTestUtils.collectExprAttrs;
 
 /**
  * Structural invariant tests for {@link LogicalPlanGenerator}.
@@ -38,24 +35,19 @@ import static org.elasticsearch.xpack.esql.qa.simulator.ShrinkingValidityTests.c
  */
 public class GeneratorInvariantTests {
     static {
-        LogConfigurator.configureESLogging();
-        var unused = IndexSettings.MODE;
+        SimulatorTestUtils.initLogging();
     }
 
     // --- Providers ---
 
     @Provide
     Arbitrary<LogicalPlan> resolvedPlans() {
-        return schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.plansFor(schema, 5));
+        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.plansFor(schema, 5));
     }
 
     @Provide
     Arbitrary<LogicalPlan> rawPlans() {
-        return schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
-    }
-
-    private static Arbitrary<SimSchema> schemasWithInteger() {
-        return SimSchemaGenerator.schemas().filter(s -> s.columns().stream().anyMatch(c -> c.type() == DataType.INTEGER));
+        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
     }
 
     // --- Invariant 1: All column references exist in child output ---
@@ -86,7 +78,7 @@ public class GeneratorInvariantTests {
     }
 
     /**
-     * Extends {@link ShrinkingValidityTests#collectAttributeReferences} to also cover {@link Aggregate}.
+     * Extends {@link SimulatorTestUtils#collectAttributeReferences} to also cover {@link Aggregate}.
      * {@link InlineStats} is skipped because its child() is the inner Aggregate, which is checked separately.
      */
     static List<Attribute> collectAllAttributeReferences(LogicalPlan plan) {

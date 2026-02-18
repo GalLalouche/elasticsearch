@@ -12,24 +12,16 @@ import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
 
-import org.elasticsearch.common.logging.LogConfigurator;
-import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
-import org.elasticsearch.xpack.esql.core.expression.Expression;
-import org.elasticsearch.xpack.esql.core.expression.Literal;
-import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
-import org.elasticsearch.xpack.esql.plan.logical.Eval;
-import org.elasticsearch.xpack.esql.plan.logical.Filter;
-import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
-import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static java.util.stream.Collectors.toMap;
+import static org.elasticsearch.xpack.esql.qa.simulator.SimulatorTestUtils.collectAttributeReferences;
 
 /**
  * Regression test: raw plans (without {@link LogicalPlanGenerator#resolveReferences}) must have
@@ -38,8 +30,7 @@ import static java.util.stream.Collectors.toMap;
  */
 public class ShrinkingValidityTests {
     static {
-        LogConfigurator.configureESLogging();
-        var unused = IndexSettings.MODE;
+        SimulatorTestUtils.initLogging();
     }
 
     @Property(tries = 1000)
@@ -52,7 +43,7 @@ public class ShrinkingValidityTests {
 
     @Provide
     Arbitrary<LogicalPlan> rawPlans() {
-        return schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
+        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
     }
 
     static List<String> validateReferences(LogicalPlan plan) {
@@ -79,29 +70,5 @@ public class ShrinkingValidityTests {
             }
         }
         return issues;
-    }
-
-    static List<Attribute> collectAttributeReferences(LogicalPlan plan) {
-        return switch (plan) {
-            case Keep keep -> keep.projections().stream().filter(ne -> ne instanceof Attribute).map(ne -> (Attribute) ne).toList();
-            case Filter filter -> collectExprAttrs(filter.condition());
-            case Eval eval -> eval.fields().stream().flatMap(a -> collectExprAttrs(a.child()).stream()).toList();
-            case OrderBy ob -> ob.order().stream().flatMap(o -> collectExprAttrs(o.child()).stream()).toList();
-            default -> List.of();
-        };
-    }
-
-    static List<Attribute> collectExprAttrs(Expression expr) {
-        if (expr instanceof Attribute a) return List.of(a);
-        if (expr instanceof Literal) return List.of();
-        var result = new ArrayList<Attribute>();
-        for (Expression child : expr.children()) {
-            result.addAll(collectExprAttrs(child));
-        }
-        return result;
-    }
-
-    private static Arbitrary<SimSchema> schemasWithInteger() {
-        return SimSchemaGenerator.schemas().filter(s -> s.columns().stream().anyMatch(c -> c.type() == DataType.INTEGER));
     }
 }

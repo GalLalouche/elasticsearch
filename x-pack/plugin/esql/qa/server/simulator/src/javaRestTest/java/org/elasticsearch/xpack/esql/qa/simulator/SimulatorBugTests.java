@@ -17,8 +17,6 @@ import net.jqwik.api.lifecycle.PerProperty;
 import net.jqwik.api.lifecycle.PropertyExecutionResult;
 
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.logging.LogConfigurator;
-import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
@@ -52,9 +50,7 @@ import java.util.Map;
  */
 public class SimulatorBugTests {
     static {
-        LogConfigurator.configureESLogging();
-        // Force IndexSettings to initialize before IndexMode to break circular class init dependency.
-        var unused = IndexSettings.MODE;
+        SimulatorTestUtils.initLogging();
     }
 
     record MetaTestCase(SimSchema schema, List<Map<String, Object>> data, LogicalPlan plan) {
@@ -72,7 +68,7 @@ public class SimulatorBugTests {
 
     @Provide
     Arbitrary<MetaTestCase> addTestCases() {
-        return schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
+        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
             var rel = buildEsRelation(schema);
             var intCol = firstIntegerAttr(rel);
             var add = new Add(Source.EMPTY, intCol, intCol, EsqlTestUtils.TEST_CFG);
@@ -80,18 +76,9 @@ public class SimulatorBugTests {
         }));
     }
 
-    public static class AddIsSubLifecycle implements PerProperty.Lifecycle {
-        @Override
-        public void onSuccess() {
-            throw new AssertionError("Expected property to fail: ADD_IS_SUB bug should cause divergence");
-        }
-
-        @Override
-        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
-            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
-            var tc = (MetaTestCase) shrunk.parameters().get(0);
-            assertMinimal(tc, " | EVAL z = a + a", 1);
-            return result.mapToSuccessful();
+    public static class AddIsSubLifecycle extends ExpectFailureLifecycle {
+        AddIsSubLifecycle() {
+            super("ADD_IS_SUB", " | EVAL z = a + a", 1);
         }
     }
 
@@ -110,18 +97,9 @@ public class SimulatorBugTests {
         }));
     }
 
-    public static class KeepDropsFirstLifecycle implements PerProperty.Lifecycle {
-        @Override
-        public void onSuccess() {
-            throw new AssertionError("Expected property to fail: KEEP_DROPS_FIRST bug should cause divergence");
-        }
-
-        @Override
-        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
-            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
-            var tc = (MetaTestCase) shrunk.parameters().get(0);
-            assertMinimal(tc, " | KEEP a", 1);
-            return result.mapToSuccessful();
+    public static class KeepDropsFirstLifecycle extends ExpectFailureLifecycle {
+        KeepDropsFirstLifecycle() {
+            super("KEEP_DROPS_FIRST", " | KEEP a", 1);
         }
     }
 
@@ -133,28 +111,21 @@ public class SimulatorBugTests {
 
     @Provide
     Arbitrary<MetaTestCase> whereTestCases() {
-        return schemasWithInteger().flatMap(
-            schema -> Combinators.combine(SimDataGenerator.rows(schema), Arbitraries.integers().between(1, 10)).as((data, threshold) -> {
-                var rel = buildEsRelation(schema);
-                var intCol = firstIntegerAttr(rel);
-                var cond = new GreaterThan(Source.EMPTY, intCol, new Literal(Source.EMPTY, threshold, DataType.INTEGER));
-                return new MetaTestCase(schema, data, new Filter(Source.EMPTY, rel, cond));
-            })
-        );
+        return SimulatorTestUtils.schemasWithInteger()
+            .flatMap(
+                schema -> Combinators.combine(SimDataGenerator.rows(schema), Arbitraries.integers().between(1, 10))
+                    .as((data, threshold) -> {
+                        var rel = buildEsRelation(schema);
+                        var intCol = firstIntegerAttr(rel);
+                        var cond = new GreaterThan(Source.EMPTY, intCol, new Literal(Source.EMPTY, threshold, DataType.INTEGER));
+                        return new MetaTestCase(schema, data, new Filter(Source.EMPTY, rel, cond));
+                    })
+            );
     }
 
-    public static class WhereInvertedLifecycle implements PerProperty.Lifecycle {
-        @Override
-        public void onSuccess() {
-            throw new AssertionError("Expected property to fail: WHERE_INVERTED bug should cause divergence");
-        }
-
-        @Override
-        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
-            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
-            var tc = (MetaTestCase) shrunk.parameters().get(0);
-            assertMinimal(tc, " | WHERE a > 1", 1);
-            return result.mapToSuccessful();
+    public static class WhereInvertedLifecycle extends ExpectFailureLifecycle {
+        WhereInvertedLifecycle() {
+            super("WHERE_INVERTED", " | WHERE a > 1", 1);
         }
     }
 
@@ -166,7 +137,7 @@ public class SimulatorBugTests {
 
     @Provide
     Arbitrary<MetaTestCase> sortTestCases() {
-        return schemasWithInteger().flatMap(schema -> {
+        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> {
             var intColName = schema.columns().stream().filter(c -> c.type() == DataType.INTEGER).findFirst().orElseThrow().name();
             return SimDataGenerator.rows(schema)
                 .filter(data -> data.size() >= 2 && data.stream().map(row -> row.get(intColName)).distinct().count() >= 2)
@@ -180,18 +151,9 @@ public class SimulatorBugTests {
         });
     }
 
-    public static class SortReversedLifecycle implements PerProperty.Lifecycle {
-        @Override
-        public void onSuccess() {
-            throw new AssertionError("Expected property to fail: SORT_REVERSED bug should cause divergence");
-        }
-
-        @Override
-        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
-            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
-            var tc = (MetaTestCase) shrunk.parameters().get(0);
-            assertMinimal(tc, " | SORT a ASC | LIMIT 1", 2);
-            return result.mapToSuccessful();
+    public static class SortReversedLifecycle extends ExpectFailureLifecycle {
+        SortReversedLifecycle() {
+            super("SORT_REVERSED", " | SORT a ASC | LIMIT 1", 2);
         }
     }
 
@@ -209,18 +171,9 @@ public class SimulatorBugTests {
         }));
     }
 
-    public static class LimitOffByOneLifecycle implements PerProperty.Lifecycle {
-        @Override
-        public void onSuccess() {
-            throw new AssertionError("Expected property to fail: LIMIT_OFF_BY_ONE bug should cause divergence");
-        }
-
-        @Override
-        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
-            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
-            var tc = (MetaTestCase) shrunk.parameters().get(0);
-            assertMinimal(tc, " | LIMIT 1", 2);
-            return result.mapToSuccessful();
+    public static class LimitOffByOneLifecycle extends ExpectFailureLifecycle {
+        LimitOffByOneLifecycle() {
+            super("LIMIT_OFF_BY_ONE", " | LIMIT 1", 2);
         }
     }
 
@@ -232,7 +185,7 @@ public class SimulatorBugTests {
 
     @Provide
     Arbitrary<MetaTestCase> statsCountTestCases() {
-        return schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
+        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
             var rel = buildEsRelation(schema);
             var intCol = firstIntegerAttr(rel);
             var count = new Count(Source.EMPTY, intCol);
@@ -243,18 +196,9 @@ public class SimulatorBugTests {
         }));
     }
 
-    public static class StatsCountOffByOneLifecycle implements PerProperty.Lifecycle {
-        @Override
-        public void onSuccess() {
-            throw new AssertionError("Expected property to fail: STATS_COUNT_OFF_BY_ONE bug should cause divergence");
-        }
-
-        @Override
-        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
-            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
-            var tc = (MetaTestCase) shrunk.parameters().get(0);
-            assertMinimal(tc, " | STATS s0 = COUNT(a) BY a", 1);
-            return result.mapToSuccessful();
+    public static class StatsCountOffByOneLifecycle extends ExpectFailureLifecycle {
+        StatsCountOffByOneLifecycle() {
+            super("STATS_COUNT_OFF_BY_ONE", " | STATS s0 = COUNT(a) BY a", 1);
         }
     }
 
@@ -266,27 +210,48 @@ public class SimulatorBugTests {
 
     @Provide
     Arbitrary<MetaTestCase> inlineStatsTestCases() {
-        return schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).filter(data -> data.size() >= 2).map(data -> {
-            var rel = buildEsRelation(schema);
-            var intCol = firstIntegerAttr(rel);
-            var count = new Count(Source.EMPTY, intCol);
-            var alias = new Alias(Source.EMPTY, "s0", count);
-            var aggregates = List.<NamedExpression>of(alias);
-            return new MetaTestCase(schema, data, new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, rel, List.of(), aggregates)));
-        }));
+        return SimulatorTestUtils.schemasWithInteger()
+            .flatMap(schema -> SimDataGenerator.rows(schema).filter(data -> data.size() >= 2).map(data -> {
+                var rel = buildEsRelation(schema);
+                var intCol = firstIntegerAttr(rel);
+                var count = new Count(Source.EMPTY, intCol);
+                var alias = new Alias(Source.EMPTY, "s0", count);
+                var aggregates = List.<NamedExpression>of(alias);
+                return new MetaTestCase(
+                    schema,
+                    data,
+                    new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, rel, List.of(), aggregates))
+                );
+            }));
     }
 
-    public static class InlineStatsDropsRowsLifecycle implements PerProperty.Lifecycle {
+    public static class InlineStatsDropsRowsLifecycle extends ExpectFailureLifecycle {
+        InlineStatsDropsRowsLifecycle() {
+            super("INLINESTATS_DROPS_ROWS", " | INLINESTATS s0 = COUNT(a)", 2);
+        }
+    }
+
+    abstract static class ExpectFailureLifecycle implements PerProperty.Lifecycle {
+        private final String bugName;
+        private final String expectedSuffix;
+        private final int expectedRows;
+
+        ExpectFailureLifecycle(String bugName, String expectedSuffix, int expectedRows) {
+            this.bugName = bugName;
+            this.expectedSuffix = expectedSuffix;
+            this.expectedRows = expectedRows;
+        }
+
         @Override
         public void onSuccess() {
-            throw new AssertionError("Expected property to fail: INLINESTATS_DROPS_ROWS bug should cause divergence");
+            throw new AssertionError("Expected property to fail: " + bugName + " bug should cause divergence");
         }
 
         @Override
         public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
             var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
             var tc = (MetaTestCase) shrunk.parameters().get(0);
-            assertMinimal(tc, " | INLINESTATS s0 = COUNT(a)", 2);
+            assertMinimal(tc, expectedSuffix, expectedRows);
             return result.mapToSuccessful();
         }
     }
@@ -311,10 +276,6 @@ public class SimulatorBugTests {
         if (correct.equals(bugged) == false) {
             throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
         }
-    }
-
-    private static Arbitrary<SimSchema> schemasWithInteger() {
-        return SimSchemaGenerator.schemas().filter(s -> s.columns().stream().anyMatch(c -> c.type() == DataType.INTEGER));
     }
 
     private static EsRelation buildEsRelation(SimSchema schema) {

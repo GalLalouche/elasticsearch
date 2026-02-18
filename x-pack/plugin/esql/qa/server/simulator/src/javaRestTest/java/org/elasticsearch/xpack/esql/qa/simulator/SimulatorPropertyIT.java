@@ -20,9 +20,7 @@ import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.logging.LogConfigurator;
 import org.elasticsearch.common.xcontent.XContentHelper;
-import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.test.cluster.ElasticsearchCluster;
 import org.elasticsearch.test.cluster.local.distribution.DistributionType;
 import org.elasticsearch.xcontent.json.JsonXContent;
@@ -36,12 +34,7 @@ import java.util.Map;
 
 public class SimulatorPropertyIT {
     static {
-        // Initialize ES logging (required outside the ES test framework).
-        LogConfigurator.configureESLogging();
-        // Force IndexSettings to initialize before IndexMode to break circular class init dependency.
-        // IndexMode.<clinit> references IndexSettings fields, and IndexSettings.<clinit> references
-        // IndexMode.VALIDATE_WITH_SETTINGS which would be null if IndexMode is still initializing.
-        var unused = IndexSettings.MODE;
+        SimulatorTestUtils.initLogging();
     }
 
     private static ElasticsearchCluster cluster;
@@ -246,10 +239,9 @@ public class SimulatorPropertyIT {
     private Map<String, Object> runEsqlQuery(String query) throws IOException {
         Request request = new Request("POST", "/_query");
         request.setJsonEntity("{\"query\": \"" + query.replace("\"", "\\\"") + "\"}");
-        request.setOptions(request.getOptions().toBuilder().setWarningsHandler(warnings -> {
-            // Allow the "No limit defined" warning from ES|QL
-            return warnings.stream().noneMatch(w -> w.contains("No limit defined"));
-        }));
+        request.setOptions(
+            request.getOptions().toBuilder().setWarningsHandler(org.elasticsearch.client.WarningsHandler.PERMISSIVE)
+        );
         Response response = restClient.performRequest(request);
         assertStatusCode(200, response);
         return XContentHelper.convertToMap(JsonXContent.jsonXContent, response.getEntity().getContent(), false);
