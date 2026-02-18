@@ -143,23 +143,24 @@ public class SimulatorPropertyIT {
                         )
                     );
                 }
+            }
 
-                List<Object> simValues = normalizeValues(simCol.values());
-                List<Object> esValues = normalizeValues(esCol.values());
+            // Compare rows order-insensitively: sort both sides before comparing.
+            // Row order is nondeterministic when sort keys are tied or when there is no SORT.
+            List<List<Object>> simRows = extractSortedRows(simColumns);
+            List<List<Object>> esRows = extractSortedRows(esCols);
 
-                if (simValues.equals(esValues) == false) {
-                    throw new AssertionError(
-                        Strings.format(
-                            "Value mismatch for column [%s] in query [%s] with %s and data %s:\nsimulator=%s\nes=%s",
-                            simCol.name(),
-                            tc.query(),
-                            tc.schema(),
-                            tc.data(),
-                            simValues,
-                            esValues
-                        )
-                    );
-                }
+            if (simRows.equals(esRows) == false) {
+                throw new AssertionError(
+                    Strings.format(
+                        "Row mismatch for query [%s] with %s and data %s:\nsimulator=%s\nes=%s",
+                        tc.query(),
+                        tc.schema(),
+                        tc.data(),
+                        simRows,
+                        esRows
+                    )
+                );
             }
         } finally {
             deleteIndex(tc.schema().indexName());
@@ -283,7 +284,53 @@ public class SimulatorPropertyIT {
         }
     }
 
-    private static List<Object> normalizeValues(List<Object> values) {
-        return values.stream().map(v -> v instanceof Number n ? n.longValue() : v).toList();
+    private static Object normalizeValue(Object v) {
+        return v instanceof Number n ? n.longValue() : v;
+    }
+
+    /**
+     * Builds rows from columnar data, normalizes values, and sorts the rows lexicographically.
+     * This makes the comparison order-insensitive, which is correct because row order is
+     * nondeterministic when sort keys are tied or when there is no SORT.
+     */
+    private static List<List<Object>> extractSortedRows(List<Simulator.Column> columns) {
+        int numRows = columns.isEmpty() ? 0 : columns.getFirst().values().size();
+        List<List<Object>> rows = new ArrayList<>(numRows);
+        for (int r = 0; r < numRows; r++) {
+            List<Object> row = new ArrayList<>(columns.size());
+            for (Simulator.Column col : columns) {
+                row.add(normalizeValue(col.values().get(r)));
+            }
+            rows.add(row);
+        }
+        rows.sort(SimulatorPropertyIT::compareRows);
+        return rows;
+    }
+
+    private static int compareRows(List<Object> a, List<Object> b) {
+        for (int i = 0; i < a.size(); i++) {
+            int cmp = compareValues(a.get(i), b.get(i));
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+        return 0;
+    }
+
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    private static int compareValues(Object a, Object b) {
+        if (a == null && b == null) {
+            return 0;
+        }
+        if (a == null) {
+            return -1;
+        }
+        if (b == null) {
+            return 1;
+        }
+        if (a instanceof Comparable<?> ac) {
+            return ((Comparable) ac).compareTo(b);
+        }
+        return a.toString().compareTo(b.toString());
     }
 }
