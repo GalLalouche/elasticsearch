@@ -28,13 +28,16 @@ def jqwikPropsDir = layout.buildDirectory.dir('generated-jqwik-resources')
 def generateJqwikProps = tasks.register('generateJqwikProperties') {
   def shrinkingMode = providers.systemProperty('simulator.shrinking').getOrElse('')
   def shrinkSeconds = providers.systemProperty('simulator.shrinkSeconds').getOrElse('')
+  def tries = providers.systemProperty('simulator.tries').getOrElse('50')
   inputs.property('shrinkingMode', shrinkingMode)
   inputs.property('shrinkSeconds', shrinkSeconds)
+  inputs.property('tries', tries)
   outputs.dir(jqwikPropsDir)
   doLast {
     def dir = jqwikPropsDir.get().asFile
     dir.mkdirs()
     def props = []
+    props << "jqwik.tries.default=${tries}"
     if (!shrinkingMode.isEmpty()) props << "jqwik.shrinking.default=${shrinkingMode}"
     if (!shrinkSeconds.isEmpty()) props << "jqwik.shrinking.bounded.seconds=${shrinkSeconds}"
     new File(dir, 'junit-platform.properties').text = props.join('\n') + '\n'

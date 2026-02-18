@@ -95,7 +95,7 @@ public class SimulatorPropertyIT {
         }
     }
 
-    @Property(tries = 50)
+    @Property
     void simulatorMatchesEs(@ForAll("testCases") TestCase tc) throws Exception {
         // Clean up any stale index from a previous run, then set up fresh
         deleteIndex(tc.schema().indexName());
