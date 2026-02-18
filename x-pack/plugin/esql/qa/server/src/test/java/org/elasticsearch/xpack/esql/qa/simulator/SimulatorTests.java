@@ -551,6 +551,38 @@ public class SimulatorTests extends ESTestCase {
         );
     }
 
+    public void testStatsGroupingKeyDuplicatesAggregateName() throws Exception {
+        // STATS s1 = COUNT(...), s0 = COUNT(...) BY s1 — grouping key "s1" shares name with aggregate output "s1".
+        // ES deduplicates to 2 columns (s1, s0); simulator must do the same.
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("s1", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("s1", 1, "b", "x"), Map.of("s1", 1, "b", "y"), Map.of("s1", 2, "b", "x"));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var s1Attr = from.output().get(0); // s1:INTEGER
+        var bAttr = from.output().get(1); // b:KEYWORD
+        // aggregates list: [Alias("s1", COUNT(b)), Alias("s0", COUNT(b)), s1Attr]
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(s1Attr),
+            List.<NamedExpression>of(
+                new Alias(Source.EMPTY, "s1", new Count(Source.EMPTY, bAttr)),
+                new Alias(Source.EMPTY, "s0", new Count(Source.EMPTY, bAttr)),
+                s1Attr
+            )
+        );
+        var result = new Simulator(schema, data).simulate(aggregate);
+        // Should produce 2 columns (s1, s0), not 3 (s1, s0, s1)
+        assertThat(result.columns().size(), equalTo(2));
+        assertThat(result.columns().get(0).name(), equalTo("s1"));
+        assertThat(result.columns().get(1).name(), equalTo("s0"));
+        // The first "s1" is COUNT(b), not the grouping key — both groups yield count values
+        assertThat(result.columns().get(0).values(), equalTo(List.of(2L, 1L)));
+        assertThat(result.columns().get(1).values(), equalTo(List.of(2L, 1L)));
+    }
+
     private Simulator.Result simulate(String statement) throws IOException {
         return simulator.simulate(parser.createStatement(statement).plan());
     }

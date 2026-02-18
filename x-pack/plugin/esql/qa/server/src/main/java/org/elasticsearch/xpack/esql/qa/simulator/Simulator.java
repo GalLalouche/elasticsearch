@@ -46,6 +46,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -270,7 +271,9 @@ public class Simulator {
         var childResult = simulate(aggregate.child());
         int numRows = childResult.numRows();
         var groups = buildGroups(aggregate, childResult, numRows);
-        // Build aggregate columns, broadcasting per-group values to each original row
+        // Build aggregate columns, broadcasting per-group values to each original row.
+        // Deduplicate by name (keep first): when a grouping key shares a name with an aggregate output.
+        var seenInline = new HashSet<String>();
         var aggColumns = aggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
@@ -285,7 +288,7 @@ public class Simulator {
             }
             var col = childResult.evaluate(unwrapped, activeBug);
             return new Column(namedExpr.name(), col.type(), col.values());
-        }).toList();
+        }).filter(col -> seenInline.add(col.name())).toList();
         // Merge: child columns not in aggregate output, then aggregate columns
         var aggNames = aggColumns.stream().map(Column::name).collect(Collectors.toSet());
         var kept = childResult.columns().stream().filter(c -> aggNames.contains(c.name()) == false).toList();
@@ -295,6 +298,9 @@ public class Simulator {
     private Result visit(Aggregate aggregate) throws IOException {
         var childResult = simulate(aggregate.child());
         var groups = buildGroups(aggregate, childResult, childResult.numRows());
+        // Deduplicate by name (keep first): when a grouping key has the same name as an aggregate
+        // output (e.g., STATS s1 = COUNT(...) BY s1), ES produces one column, not two.
+        var seen = new HashSet<String>();
         return new Result(aggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
@@ -310,7 +316,7 @@ public class Simulator {
                 col.type,
                 groups.values().stream().map(indices -> col.values.get(indices.getFirst())).toList()
             );
-        }).toList());
+        }).filter(col -> seen.add(col.name())).toList());
     }
 
     private LinkedHashMap<List<Object>, List<Integer>> buildGroups(Aggregate aggregate, Result childResult, int numRows) {
