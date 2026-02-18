@@ -39,12 +39,12 @@ public class GeneratorInvariantTests {
     }
 
     @Provide
-    Arbitrary<LogicalPlan> resolvedPlans() {
+    private static Arbitrary<LogicalPlan> resolvedPlans() {
         return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.plansFor(schema, 5));
     }
 
     @Provide
-    Arbitrary<LogicalPlan> rawPlans() {
+    private static Arbitrary<LogicalPlan> rawPlans() {
         return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
     }
 
@@ -77,7 +77,7 @@ public class GeneratorInvariantTests {
      * Extends {@link SimulatorTestUtils#collectAttributeReferences} to also cover {@link Aggregate}.
      * {@link InlineStats} is skipped because its child() is the inner Aggregate, which is checked separately.
      */
-    static List<Attribute> collectAllAttributeReferences(LogicalPlan plan) {
+    private static List<Attribute> collectAllAttributeReferences(LogicalPlan plan) {
         return switch (plan) {
             case InlineStats ignored -> List.of();
             case Aggregate agg -> {

@@ -21,7 +21,6 @@ import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -58,12 +57,12 @@ class SimulatorTestUtils {
 
     /** Recursively collect all {@link Attribute} references from an expression tree. */
     static List<Attribute> collectExprAttrs(Expression expr) {
-        if (expr instanceof Attribute a) return List.of(a);
-        if (expr instanceof Literal) return List.of();
-        var result = new ArrayList<Attribute>();
-        for (Expression child : expr.children()) {
-            result.addAll(collectExprAttrs(child));
+        if (expr instanceof Attribute a) {
+            return List.of(a);
         }
-        return result;
+        if (expr instanceof Literal) {
+            return List.of();
+        }
+        return expr.children().stream().flatMap(child -> collectExprAttrs(child).stream()).toList();
     }
 }

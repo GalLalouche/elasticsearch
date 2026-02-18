@@ -44,9 +44,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Meta-tests that verify the simulator's bug injection infrastructure.
- * Each test activates a {@link SimBug}, generates random inputs, and asserts
- * that jqwik shrinks the counter-example to a deterministic minimum.
+ * Meta-tests that verify the simulator's bug injection infrastructure. Each test activates a {@link SimBug}, generates random inputs, and
+ * asserts that jqwik shrinks the counter-example to a deterministic minimum.
  */
 public class SimulatorBugTests {
     static {
@@ -60,14 +59,16 @@ public class SimulatorBugTests {
         }
     }
 
-    @Property(tries = 50)
+    private static final int TRIES = 200;
+
+    @Property(tries = TRIES)
     @PerProperty(AddIsSubLifecycle.class)
     void bugAddIsSub(@ForAll("addTestCases") MetaTestCase tc) throws IOException {
         assertNoDivergence(tc, SimBug.ADD_IS_SUB);
     }
 
     @Provide
-    Arbitrary<MetaTestCase> addTestCases() {
+    private static Arbitrary<MetaTestCase> addTestCases() {
         return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
             var rel = buildEsRelation(schema);
             var intCol = firstIntegerAttr(rel);
@@ -76,20 +77,20 @@ public class SimulatorBugTests {
         }));
     }
 
-    public static class AddIsSubLifecycle extends ExpectFailureLifecycle {
+    private static class AddIsSubLifecycle extends ExpectFailureLifecycle {
         AddIsSubLifecycle() {
             super("ADD_IS_SUB", " | EVAL z = a + a", 1);
         }
     }
 
-    @Property(tries = 50)
+    @Property(tries = TRIES)
     @PerProperty(KeepDropsFirstLifecycle.class)
     void bugKeepDropsFirst(@ForAll("keepTestCases") MetaTestCase tc) throws IOException {
         assertNoDivergence(tc, SimBug.KEEP_DROPS_FIRST);
     }
 
     @Provide
-    Arbitrary<MetaTestCase> keepTestCases() {
+    private static Arbitrary<MetaTestCase> keepTestCases() {
         return SimSchemaGenerator.schemas().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
             var rel = buildEsRelation(schema);
             var projections = rel.output().stream().map(a -> (NamedExpression) a).toList();
@@ -97,20 +98,20 @@ public class SimulatorBugTests {
         }));
     }
 
-    public static class KeepDropsFirstLifecycle extends ExpectFailureLifecycle {
+    private static class KeepDropsFirstLifecycle extends ExpectFailureLifecycle {
         KeepDropsFirstLifecycle() {
             super("KEEP_DROPS_FIRST", " | KEEP a", 1);
         }
     }
 
-    @Property(tries = 50)
+    @Property(tries = TRIES)
     @PerProperty(WhereInvertedLifecycle.class)
     void bugWhereInverted(@ForAll("whereTestCases") MetaTestCase tc) throws IOException {
         assertNoDivergence(tc, SimBug.WHERE_INVERTED);
     }
 
     @Provide
-    Arbitrary<MetaTestCase> whereTestCases() {
+    private static Arbitrary<MetaTestCase> whereTestCases() {
         return SimulatorTestUtils.schemasWithInteger()
             .flatMap(
                 schema -> Combinators.combine(SimDataGenerator.rows(schema), Arbitraries.integers().between(1, 10))
@@ -123,20 +124,20 @@ public class SimulatorBugTests {
             );
     }
 
-    public static class WhereInvertedLifecycle extends ExpectFailureLifecycle {
+    private static class WhereInvertedLifecycle extends ExpectFailureLifecycle {
         WhereInvertedLifecycle() {
             super("WHERE_INVERTED", " | WHERE a > 1", 1);
         }
     }
 
-    @Property(tries = 50)
+    @Property(tries = TRIES)
     @PerProperty(SortReversedLifecycle.class)
     void bugSortReversed(@ForAll("sortTestCases") MetaTestCase tc) throws IOException {
         assertNoDivergence(tc, SimBug.SORT_REVERSED);
     }
 
     @Provide
-    Arbitrary<MetaTestCase> sortTestCases() {
+    private static Arbitrary<MetaTestCase> sortTestCases() {
         return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> {
             var intColName = schema.columns().stream().filter(c -> c.type() == DataType.INTEGER).findFirst().orElseThrow().name();
             return SimDataGenerator.rows(schema)
@@ -151,40 +152,40 @@ public class SimulatorBugTests {
         });
     }
 
-    public static class SortReversedLifecycle extends ExpectFailureLifecycle {
+    private static class SortReversedLifecycle extends ExpectFailureLifecycle {
         SortReversedLifecycle() {
             super("SORT_REVERSED", " | SORT a ASC | LIMIT 1", 2);
         }
     }
 
-    @Property(tries = 50)
+    @Property(tries = TRIES)
     @PerProperty(LimitOffByOneLifecycle.class)
     void bugLimitOffByOne(@ForAll("limitTestCases") MetaTestCase tc) throws IOException {
         assertNoDivergence(tc, SimBug.LIMIT_OFF_BY_ONE);
     }
 
     @Provide
-    Arbitrary<MetaTestCase> limitTestCases() {
+    private static Arbitrary<MetaTestCase> limitTestCases() {
         return SimSchemaGenerator.schemas().flatMap(schema -> SimDataGenerator.rows(schema).filter(data -> data.size() >= 2).map(data -> {
             var rel = buildEsRelation(schema);
             return new MetaTestCase(schema, data, new Limit(Source.EMPTY, new Literal(Source.EMPTY, 1, DataType.INTEGER), rel));
         }));
     }
 
-    public static class LimitOffByOneLifecycle extends ExpectFailureLifecycle {
+    private static class LimitOffByOneLifecycle extends ExpectFailureLifecycle {
         LimitOffByOneLifecycle() {
             super("LIMIT_OFF_BY_ONE", " | LIMIT 1", 2);
         }
     }
 
-    @Property(tries = 50)
+    @Property(tries = TRIES)
     @PerProperty(StatsCountOffByOneLifecycle.class)
-    void bugStatsCountOffByOne(@ForAll("statsCountTestCases") MetaTestCase tc) throws IOException {
+    private void bugStatsCountOffByOne(@ForAll("statsCountTestCases") MetaTestCase tc) throws IOException {
         assertNoDivergence(tc, SimBug.STATS_COUNT_OFF_BY_ONE);
     }
 
     @Provide
-    Arbitrary<MetaTestCase> statsCountTestCases() {
+    private static Arbitrary<MetaTestCase> statsCountTestCases() {
         return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
             var rel = buildEsRelation(schema);
             var intCol = firstIntegerAttr(rel);
@@ -196,20 +197,20 @@ public class SimulatorBugTests {
         }));
     }
 
-    public static class StatsCountOffByOneLifecycle extends ExpectFailureLifecycle {
+    private static class StatsCountOffByOneLifecycle extends ExpectFailureLifecycle {
         StatsCountOffByOneLifecycle() {
             super("STATS_COUNT_OFF_BY_ONE", " | STATS s0 = COUNT(a) BY a", 1);
         }
     }
 
-    @Property(tries = 50)
+    @Property(tries = TRIES)
     @PerProperty(InlineStatsDropsRowsLifecycle.class)
     void bugInlineStatsDropsRows(@ForAll("inlineStatsTestCases") MetaTestCase tc) throws IOException {
-        assertNoDivergence(tc, SimBug.INLINESTATS_DROPS_ROWS);
+        assertNoDivergence(tc, SimBug.INLINE_STATS_DROPS_ROWS);
     }
 
     @Provide
-    Arbitrary<MetaTestCase> inlineStatsTestCases() {
+    private static Arbitrary<MetaTestCase> inlineStatsTestCases() {
         return SimulatorTestUtils.schemasWithInteger()
             .flatMap(schema -> SimDataGenerator.rows(schema).filter(data -> data.size() >= 2).map(data -> {
                 var rel = buildEsRelation(schema);
@@ -225,13 +226,13 @@ public class SimulatorBugTests {
             }));
     }
 
-    public static class InlineStatsDropsRowsLifecycle extends ExpectFailureLifecycle {
+    private static class InlineStatsDropsRowsLifecycle extends ExpectFailureLifecycle {
         InlineStatsDropsRowsLifecycle() {
-            super("INLINESTATS_DROPS_ROWS", " | INLINESTATS s0 = COUNT(a)", 2);
+            super("INLINESTATS_DROPS_ROWS", " | INLINE STATS s0 = COUNT(a)", 2);
         }
     }
 
-    abstract static class ExpectFailureLifecycle implements PerProperty.Lifecycle {
+    private abstract static class ExpectFailureLifecycle implements PerProperty.Lifecycle {
         private final String bugName;
         private final String expectedSuffix;
         private final int expectedRows;

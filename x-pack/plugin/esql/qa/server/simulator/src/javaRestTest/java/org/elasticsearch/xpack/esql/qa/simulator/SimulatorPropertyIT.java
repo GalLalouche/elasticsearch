@@ -165,7 +165,7 @@ public class SimulatorPropertyIT {
     }
 
     @Provide
-    Arbitrary<TestCase> testCases() {
+    private static Arbitrary<TestCase> testCases() {
         return SimSchemaGenerator.schemas()
             .flatMap(
                 schema -> Combinators.combine(SimDataGenerator.rows(schema), LogicalPlanGenerator.plansFor(schema))

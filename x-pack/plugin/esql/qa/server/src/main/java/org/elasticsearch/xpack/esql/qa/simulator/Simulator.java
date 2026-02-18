@@ -270,7 +270,7 @@ public class Simulator {
     }
 
     private Result visit(InlineStats inlineStats) throws IOException {
-        if (activeBug == SimBug.INLINESTATS_DROPS_ROWS) return visit(inlineStats.aggregate());
+        if (activeBug == SimBug.INLINE_STATS_DROPS_ROWS) return visit(inlineStats.aggregate());
         var aggregate = inlineStats.aggregate();
         var childResult = simulate(aggregate.child());
         int numRows = numRows(childResult);

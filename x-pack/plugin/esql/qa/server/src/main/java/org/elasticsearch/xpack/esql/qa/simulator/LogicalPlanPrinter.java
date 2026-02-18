@@ -99,7 +99,7 @@ public class LogicalPlanPrinter {
     }
 
     private static void printSpecific(InlineStats inlineStats, StringBuilder sb) {
-        printAggregate(inlineStats.aggregate(), "INLINESTATS", sb);
+        printAggregate(inlineStats.aggregate(), "INLINE STATS", sb);
     }
 
     private static void printSpecific(Aggregate aggregate, StringBuilder sb) {

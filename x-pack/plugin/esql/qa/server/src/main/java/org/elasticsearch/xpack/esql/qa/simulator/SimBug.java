@@ -8,9 +8,8 @@
 package org.elasticsearch.xpack.esql.qa.simulator;
 
 /**
- * Named simulator bugs for meta-testing. When active, each variant causes the
- * {@link Simulator} to behave incorrectly in a specific way. Property tests
- * verify that these bugs produce detectable, minimal counter-examples after shrinking.
+ * Named simulator bugs for meta-testing. When active, each variant causes the {@link Simulator} to behave incorrectly in a specific way.
+ * Property tests verify that these bugs produce detectable, minimal counter-examples after shrinking.
  */
 public enum SimBug {
     BUG_FREE,
@@ -20,5 +19,5 @@ public enum SimBug {
     SORT_REVERSED,
     LIMIT_OFF_BY_ONE,
     STATS_COUNT_OFF_BY_ONE,
-    INLINESTATS_DROPS_ROWS
+    INLINE_STATS_DROPS_ROWS
 }

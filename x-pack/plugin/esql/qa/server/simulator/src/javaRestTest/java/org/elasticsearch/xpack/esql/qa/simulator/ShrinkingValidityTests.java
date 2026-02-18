@@ -42,11 +42,11 @@ public class ShrinkingValidityTests {
     }
 
     @Provide
-    Arbitrary<LogicalPlan> rawPlans() {
+    private static Arbitrary<LogicalPlan> rawPlans() {
         return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
     }
 
-    static List<String> validateReferences(LogicalPlan plan) {
+    private static List<String> validateReferences(LogicalPlan plan) {
         if (plan instanceof EsRelation || (plan instanceof UnaryPlan) == false) return List.of();
         var unary = (UnaryPlan) plan;
         var canonical = unary.child().output().stream().collect(toMap(Attribute::name, a -> a, (a, b) -> a));

@@ -65,11 +65,11 @@ public class LogicalPlanGenerator {
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
     private static final List<String> STATS_ALIAS_POOL = List.of("s0", "s1");
 
-    public static Arbitrary<LogicalPlan> plansFor(SimSchema schema) {
+    static Arbitrary<LogicalPlan> plansFor(SimSchema schema) {
         return plansFor(schema, PLAN_DEPTH);
     }
 
-    public static Arbitrary<LogicalPlan> plansFor(SimSchema schema, int depth) {
+    static Arbitrary<LogicalPlan> plansFor(SimSchema schema, int depth) {
         return rawPlansFor(schema, depth).map(LogicalPlanGenerator::resolveReferences);
     }
 
