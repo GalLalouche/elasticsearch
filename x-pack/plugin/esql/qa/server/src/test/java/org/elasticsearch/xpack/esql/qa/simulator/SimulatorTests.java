@@ -576,14 +576,14 @@ public class SimulatorTests extends ESTestCase {
                 s1Attr
             )
         );
-        var result = new Simulator(schema, data).simulate(aggregate);
-        // Should produce 2 columns (s1, s0), not 3 (s1, s0, s1)
+        Simulator.Result result = new Simulator(schema, data).simulate(aggregate);
+        // Should produce 2 columns (s0, s1), not 3 (s1, s0, s1)
         assertThat(result.columns().size(), equalTo(2));
-        assertThat(result.columns().get(0).name(), equalTo("s1"));
-        assertThat(result.columns().get(1).name(), equalTo("s0"));
-        // The first "s1" is COUNT(b), not the grouping key — both groups yield count values
-        assertThat(result.columns().get(0).values(), equalTo(List.of(2L, 1L)));
-        assertThat(result.columns().get(1).values(), equalTo(List.of(2L, 1L)));
+        assertThat(result.columns().get(0).name(), equalTo("s0"));
+        assertThat(result.columns().get(1).name(), equalTo("s1"));
+        // deduplicateKeepLast keeps the grouping key "s1" (last), not the COUNT "s1" (first)
+        assertThat(result.columns().get(0).values(), equalTo(List.of(2L, 1L)));  // s0: COUNT values
+        assertThat(result.columns().get(1).values(), equalTo(List.of(1L, 2L)));  // s1: grouping key values
     }
 
     public void testChainedInlineStatsShadowingKeepsGroupingKeyValue() throws Exception {
@@ -608,7 +608,7 @@ public class SimulatorTests extends ESTestCase {
 
         // After inline1, result should be: [b=[1], s1=[6]]
         var sim = new Simulator(schema, data);
-        var result1 = sim.simulate(inline1);
+        Simulator.Result result1 = sim.simulate(inline1);
         assertThat(result1.columns().size(), equalTo(2));
         assertThat(result1.getColumn("b").values(), equalTo(List.of(1L)));
         assertThat(result1.getColumn("s1").values(), equalTo(List.of(6L)));
@@ -617,7 +617,7 @@ public class SimulatorTests extends ESTestCase {
         // aggregates: [Alias("s1", COUNT(b)), s1Attr_from_inline1_output]
         // The grouping key s1 has value 6; COUNT(b) = 1.
         // ES keeps the grouping key value (s1=6), not the COUNT value (s1=1).
-        var s1Attr = result1.columns().stream().filter(c -> c.name().equals("s1")).findFirst().orElseThrow();
+        Simulator.Column s1Attr = result1.columns().stream().filter(c -> c.name().equals("s1")).findFirst().orElseThrow();
         var s1Ref = new ReferenceAttribute(Source.EMPTY, "s1", s1Attr.type());
         var bRef = new ReferenceAttribute(Source.EMPTY, "b", DataType.INTEGER);
         var agg2 = new Aggregate(
@@ -628,7 +628,7 @@ public class SimulatorTests extends ESTestCase {
         );
         var inline2 = new InlineStats(Source.EMPTY, agg2);
 
-        var result2 = sim.simulate(inline2);
+        Simulator.Result result2 = sim.simulate(inline2);
         // s1 should be 6 (grouping key value), not 1 (COUNT value)
         assertThat(result2.getColumn("s1").values(), equalTo(List.of(6L)));
         assertThat(result2.getColumn("b").values(), equalTo(List.of(1L)));

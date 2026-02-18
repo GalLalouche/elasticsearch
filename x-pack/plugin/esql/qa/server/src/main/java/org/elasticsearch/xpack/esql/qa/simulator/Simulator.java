@@ -275,7 +275,7 @@ public class Simulator {
         // the last entry wins. For INLINE STATS, grouping keys appear after aggregate functions
         // in the aggregates list, so the grouping key's original child value takes precedence
         // over an aggregate output with the same name.
-        var allAggColumns = aggregate.aggregates().stream().map(namedExpr -> {
+        List<Column> allAggColumns = aggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
                 Object[] broadcast = new Object[numRows];
@@ -290,7 +290,7 @@ public class Simulator {
             var col = childResult.evaluate(unwrapped, activeBug);
             return new Column(namedExpr.name(), col.type(), col.values());
         }).toList();
-        var aggColumns = deduplicateKeepLast(allAggColumns);
+        List<Column> aggColumns = deduplicateKeepLast(allAggColumns);
         // Merge: child columns not in aggregate output, then aggregate columns
         var aggNames = aggColumns.stream().map(Column::name).collect(Collectors.toSet());
         var kept = childResult.columns().stream().filter(c -> aggNames.contains(c.name()) == false).toList();
@@ -303,7 +303,7 @@ public class Simulator {
         // Deduplicate by name (keep last): matches ES mergeOutputExpressions semantics.
         // Grouping keys appear after aggregate functions in the aggregates list, so the
         // grouping key value takes precedence over an aggregate output with the same name.
-        var allCols = aggregate.aggregates().stream().map(namedExpr -> {
+        List<Column> allCols = aggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
                 return new Column(
@@ -355,15 +355,15 @@ public class Simulator {
             // COUNT returns 0 for empty groups (not null), matching ES semantics.
             case Count ignored -> (long) indices.size() + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
             case Sum sum -> {
-                var nonNull = nonNullValues(indices, data, sum.field(), activeBug);
+                List<Object> nonNull = nonNullValues(indices, data, sum.field(), activeBug);
                 yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).sum();
             }
             case Min min -> {
-                var nonNull = nonNullValues(indices, data, min.field(), activeBug);
+                List<Object> nonNull = nonNullValues(indices, data, min.field(), activeBug);
                 yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).min().orElseThrow();
             }
             case Max max -> {
-                var nonNull = nonNullValues(indices, data, max.field(), activeBug);
+                List<Object> nonNull = nonNullValues(indices, data, max.field(), activeBug);
                 yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).max().orElseThrow();
             }
             default -> throw new UnsupportedOperationException(Strings.format("Unsupported aggregate function: %s", aggFunc.getClass()));
@@ -371,7 +371,7 @@ public class Simulator {
     }
 
     private static List<Object> nonNullValues(List<Integer> indices, Result data, Expression field, SimBug activeBug) {
-        var col = data.evaluate(field, activeBug);
+        UnnamedColumn col = data.evaluate(field, activeBug);
         return indices.stream().map(i -> col.values.get(i)).filter(v -> v != null).toList();
     }
 
