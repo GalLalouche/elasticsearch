@@ -21,9 +21,33 @@ restResources {
   }
 }
 
+// Generate junit-platform.properties with configurable jqwik settings:
+//   -Dsimulator.shrinking=FULL       -> shrinking.default=FULL
+//   -Dsimulator.shrinkSeconds=30     -> shrinking.bounded.seconds=30
+def jqwikPropsDir = layout.buildDirectory.dir('generated-jqwik-resources')
+def generateJqwikProps = tasks.register('generateJqwikProperties') {
+  def shrinkingMode = providers.systemProperty('simulator.shrinking').getOrElse('')
+  def shrinkSeconds = providers.systemProperty('simulator.shrinkSeconds').getOrElse('')
+  inputs.property('shrinkingMode', shrinkingMode)
+  inputs.property('shrinkSeconds', shrinkSeconds)
+  outputs.dir(jqwikPropsDir)
+  doLast {
+    def dir = jqwikPropsDir.get().asFile
+    dir.mkdirs()
+    def props = []
+    if (!shrinkingMode.isEmpty()) props << "jqwik.shrinking.default=${shrinkingMode}"
+    if (!shrinkSeconds.isEmpty()) props << "jqwik.shrinking.bounded.seconds=${shrinkSeconds}"
+    new File(dir, 'junit-platform.properties').text = props.join('\n') + '\n'
+  }
+}
+sourceSets.javaRestTest.output.dir(jqwikPropsDir, builtBy: generateJqwikProps)
+
 tasks.named('javaRestTest') {
   usesDefaultDistribution("to be triaged")
   useJUnitPlatform()
   maxParallelForks = 1
   systemProperty 'simulator.planDepth', providers.systemProperty('simulator.planDepth').getOrElse('5')
+  providers.systemProperty('simulator.seed').orElse('').get().with { seed ->
+    if (!seed.isEmpty()) systemProperty 'simulator.seed', seed
+  }
 }

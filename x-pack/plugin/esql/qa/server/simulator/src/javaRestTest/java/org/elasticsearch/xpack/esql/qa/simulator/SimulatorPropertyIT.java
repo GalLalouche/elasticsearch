@@ -12,6 +12,7 @@ import net.jqwik.api.Combinators;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
+import net.jqwik.api.lifecycle.AddLifecycleHook;
 import net.jqwik.api.lifecycle.AfterContainer;
 import net.jqwik.api.lifecycle.BeforeContainer;
 
@@ -32,6 +33,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
+@AddLifecycleHook(SimulatorSeedHook.class)
 public class SimulatorPropertyIT {
     static {
         SimulatorTestUtils.initLogging();
@@ -93,7 +95,7 @@ public class SimulatorPropertyIT {
         }
     }
 
-    @Property(tries = 10)
+    @Property(tries = 50)
     void simulatorMatchesEs(@ForAll("testCases") TestCase tc) throws Exception {
         // Clean up any stale index from a previous run, then set up fresh
         deleteIndex(tc.schema().indexName());

@@ -22,7 +22,11 @@
 ## 3. LogicalPlan shrinker
 - [x] Implement shrinking — handled natively by jqwik-engine (no custom `Shrinkable` needed)
 - [x] Investigate: jqwik shrinking can independently mutate inner plan nodes without re-running outer `flatMap` closures, producing plans with stale NameIds. Currently patched by `resolveReferences` but this may mask deeper issues or cause invalid shrink candidates to be tested.
-- [ ] Print the jqwik seed prominently on failure so it's easy to find in logs. Support passing a seed via `-Dsimulator.seed=12345` for reproducibility.
+- [x] Print the jqwik seed prominently on failure so it's easy to find in logs. Support passing a seed via `-Dsimulator.seed=12345` for reproducibility.
+- [x] **Configurable shrinking**: `-Dsimulator.shrinkSeconds=30` and `-Dsimulator.shrinking=FULL` now work via generated `junit-platform.properties` (jqwik 1.9+ requires `jqwik.` prefix; `AroundPropertyHook.setShrinking()` is too late). Note: `jqwik.properties` is deprecated since 1.6.
+- [ ] **Forced shrinking mode 2**: Add a mode that takes a query as input and tries to shrink it until it no longer fails.
+- [ ] **Investigate shrinking quality**: even with 30s (98 shrink steps), shrunk samples are still complex. Each shrink attempt needs an ES round-trip (~130ms), limiting attempts to ~230 in 30s. Consider: (a) running the simulator locally to pre-filter invalid shrink candidates without ES, (b) caching ES responses for identical queries.
+- [ ] **Loop mode**: continuously run and shrink, automatically logging discovered bugs to a file (and later, filing GitHub issues).
 
 ## Meta-tests
 - [x] **Deterministic bug injection**: define named simulator bugs (`ADD_IS_SUB`, `KEEP_DROPS_FIRST`, `WHERE_INVERTED`, etc.) that can be toggled on. Run the property test with a bug active and verify it detects the failure. Assert properties of the shrunk counterexample (e.g., `ADD_IS_SUB` should shrink to a plan containing `Eval` with `Add`).
@@ -62,5 +66,11 @@
 - [x] Result comparison with type normalization (Integer/Long → Long)
 - [x] Fix warning handling (allow "No limit defined" warning from ES|QL)
 - [ ] Use binary serialization instead of string serialization when passing LogicalPlan to ES (avoids string round-trip bugs)
-- [x] Increase trial count beyond 1 (now 10)
+- [x] Increase trial count beyond 1 (now 50)
 - [x] On mismatch, rely on jqwik shrinking to find minimal failing case (jqwik-engine handles this natively)
+
+## 8. Bugs found by simulator
+- [x] **INLINE STATS after LIMIT**: generator produced `LIMIT N | INLINE STATS ...` which ES rejects with "INLINE STATS cannot be used after an explicit or implicit LIMIT command". Fix: skip `wrapInlineStats` when plan tree already contains a `Limit` node.
+- [x] **Empty aggregation returns wrong value**: `SUM`/`MIN`/`MAX` over zero rows returned `0` in simulator but `null` in ES. Fix: return `null` when `indices.isEmpty()` for all aggregates except `COUNT` (which correctly returns `0`).
+- [x] **Shrinking mode not configurable**: `SimulatorSeedHook` only overrode seed, not shrinking mode. Fix: generate `junit-platform.properties` from Gradle with `jqwik.shrinking.bounded.seconds` / `jqwik.shrinking.default` via `-Dsimulator.shrinkSeconds=N` / `-Dsimulator.shrinking=FULL`.
+- [ ] **Chained STATS duplicate columns**: `STATS s1 = COUNT(...), s0 = COUNT(...) BY s1` — when a STATS grouping key (`BY s1`) has the same name as an aggregate output (`s1 = COUNT(...)`), ES deduplicates to 2 columns but the simulator keeps 3 (`s0, s1, s1`). Seed: `-4461844028516981882`.

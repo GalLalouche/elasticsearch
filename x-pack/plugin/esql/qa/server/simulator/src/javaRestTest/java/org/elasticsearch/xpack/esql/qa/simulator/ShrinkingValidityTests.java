@@ -11,6 +11,7 @@ import net.jqwik.api.Arbitrary;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
+import net.jqwik.api.lifecycle.AddLifecycleHook;
 
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
@@ -28,6 +29,7 @@ import static org.elasticsearch.xpack.esql.qa.simulator.SimulatorTestUtils.colle
  * no stale NameId references. The tuple-wrapping fix in {@code arbitraryAttribute()} prevents
  * jqwik's {@code FlatMappedShrinkable} from silently substituting attributes across re-evaluations.
  */
+@AddLifecycleHook(SimulatorSeedHook.class)
 public class ShrinkingValidityTests {
     static {
         SimulatorTestUtils.initLogging();

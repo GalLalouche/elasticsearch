@@ -50,6 +50,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntPredicate;
+import java.util.function.LongBinaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -166,18 +168,10 @@ public class Simulator {
     }
 
     private static Result buildResultFromMemory(SimSchema schema, List<Map<String, Object>> data) {
-        return new Result(
-            schema.columns()
-                .stream()
-                .map(
-                    col -> new Column(
-                        col.name(),
-                        col.type(),
-                        data.stream().map(row -> row.get(col.name()) instanceof Integer i ? i.longValue() : row.get(col.name())).toList()
-                    )
-                )
-                .toList()
-        );
+        return new Result(schema.columns().stream().map(col -> new Column(col.name(), col.type(), data.stream().map(row -> {
+            Object v = row.get(col.name());
+            return v instanceof Integer i ? i.longValue() : v;
+        }).toList())).toList());
     }
 
     private Result visit(EsRelation relation) {
@@ -238,16 +232,15 @@ public class Simulator {
 
     private Result visit(Limit limit) throws IOException {
         var childResult = simulate(limit.child());
-        int n = ((Number) ((Literal) limit.limit()).value()).intValue();
-        if (activeBug == SimBug.LIMIT_OFF_BY_ONE) n++;
-        int actual = Math.min(n, childResult.columns.getFirst().values.size());
+        int n = ((Number) ((Literal) limit.limit()).value()).intValue() + (activeBug == SimBug.LIMIT_OFF_BY_ONE ? 1 : 0);
+        int actual = Math.min(n, childResult.numRows());
         return new Result(childResult.columns.stream().map(c -> new Column(c.name, c.type, c.values.subList(0, actual))).toList());
     }
 
     @SuppressWarnings("unchecked")
     private Result visit(OrderBy orderBy) throws IOException {
         var childResult = simulate(orderBy.child());
-        int numRows = childResult.columns.getFirst().values.size();
+        int numRows = childResult.numRows();
         Integer[] indices = IntStream.range(0, numRows).boxed().toArray(Integer[]::new);
         // Pre-evaluate order expressions to column values
         List<Order> orders = orderBy.order();
@@ -270,10 +263,12 @@ public class Simulator {
     }
 
     private Result visit(InlineStats inlineStats) throws IOException {
-        if (activeBug == SimBug.INLINE_STATS_DROPS_ROWS) return visit(inlineStats.aggregate());
+        if (activeBug == SimBug.INLINE_STATS_DROPS_ROWS) {
+            return visit(inlineStats.aggregate());
+        }
         var aggregate = inlineStats.aggregate();
         var childResult = simulate(aggregate.child());
-        int numRows = numRows(childResult);
+        int numRows = childResult.numRows();
         var groups = buildGroups(aggregate, childResult, numRows);
         // Build aggregate columns, broadcasting per-group values to each original row
         var aggColumns = aggregate.aggregates().stream().map(namedExpr -> {
@@ -299,7 +294,7 @@ public class Simulator {
 
     private Result visit(Aggregate aggregate) throws IOException {
         var childResult = simulate(aggregate.child());
-        var groups = buildGroups(aggregate, childResult, numRows(childResult));
+        var groups = buildGroups(aggregate, childResult, childResult.numRows());
         return new Result(aggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
@@ -332,27 +327,28 @@ public class Simulator {
         return groups;
     }
 
-    private static int numRows(Result result) {
-        return result.columns.isEmpty() ? 0 : result.columns.getFirst().values.size();
-    }
-
     private Object computeAggregate(AggregateFunction aggFunc, Result data, List<Integer> indices) {
         return switch (aggFunc) {
-            case Count count -> (long) indices.size() + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
-            case Sum sum -> indices.stream().mapToLong(i -> toLong(data.evaluate(sum.field(), activeBug).values.get(i))).sum();
-            case Min min -> indices.stream()
-                .mapToLong(i -> toLong(data.evaluate(min.field(), activeBug).values.get(i)))
-                .min()
-                .orElseThrow();
-            case Max max -> indices.stream()
-                .mapToLong(i -> toLong(data.evaluate(max.field(), activeBug).values.get(i)))
-                .max()
-                .orElseThrow();
+            // COUNT returns 0 for empty groups (not null), matching ES semantics.
+            case Count ignored -> (long) indices.size() + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
+            case Sum sum -> indices.isEmpty()
+                ? null
+                : indices.stream().mapToLong(i -> toLong(data.evaluate(sum.field(), activeBug).values.get(i))).sum();
+            case Min min -> indices.isEmpty()
+                ? null
+                : indices.stream().mapToLong(i -> toLong(data.evaluate(min.field(), activeBug).values.get(i))).min().orElseThrow();
+            case Max max -> indices.isEmpty()
+                ? null
+                : indices.stream().mapToLong(i -> toLong(data.evaluate(max.field(), activeBug).values.get(i))).max().orElseThrow();
             default -> throw new UnsupportedOperationException(Strings.format("Unsupported aggregate function: %s", aggFunc.getClass()));
         };
     }
 
     public record Result(List<Column> columns) {
+        int numRows() {
+            return columns.isEmpty() ? 0 : columns.getFirst().values.size();
+        }
+
         public Result append(List<Column> newColumns) {
             return new Result(CollectionUtils.concatLists(columns, newColumns));
         }
@@ -364,13 +360,12 @@ public class Simulator {
                 .orElseThrow(() -> new IllegalArgumentException("Column not found: " + name));
         }
 
-        @SuppressWarnings("unchecked")
         public UnnamedColumn evaluate(Expression expression, SimBug activeBug) {
             return switch (expression) {
                 case Attribute attr -> new UnnamedColumn(getColumn(attr.name()));
                 case Literal literal -> new UnnamedColumn(
                     literal.dataType(),
-                    IntStream.range(0, columns().getFirst().values.size()).mapToObj(unused -> normalizeObject(literal.value())).toList()
+                    IntStream.range(0, numRows()).mapToObj(unused -> normalizeObject(literal.value())).toList()
                 );
                 case Add add -> evalBinaryLong(
                     add.left(),
@@ -387,12 +382,7 @@ public class Simulator {
             };
         }
 
-        private UnnamedColumn evalBinaryLong(
-            Expression leftExpr,
-            Expression rightExpr,
-            SimBug activeBug,
-            java.util.function.LongBinaryOperator op
-        ) {
+        private UnnamedColumn evalBinaryLong(Expression leftExpr, Expression rightExpr, SimBug activeBug, LongBinaryOperator op) {
             var left = evaluate(leftExpr, activeBug);
             var right = evaluate(rightExpr, activeBug);
             return new UnnamedColumn(
@@ -403,19 +393,13 @@ public class Simulator {
             );
         }
 
-        @SuppressWarnings("unchecked")
-        private UnnamedColumn evalComparison(
-            Expression leftExpr,
-            Expression rightExpr,
-            SimBug activeBug,
-            java.util.function.IntPredicate test
-        ) {
+        private UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
             var left = evaluate(leftExpr, activeBug);
             var right = evaluate(rightExpr, activeBug);
             return new UnnamedColumn(
                 DataType.BOOLEAN,
                 IntStream.range(0, left.values.size())
-                    .mapToObj(i -> (Object) test.test(((Comparable<Object>) left.values.get(i)).compareTo(toLong(right.values.get(i)))))
+                    .mapToObj(i -> (Object) test.test(Long.compare(toLong(left.values.get(i)), toLong(right.values.get(i)))))
                     .toList()
             );
         }
@@ -439,10 +423,7 @@ public class Simulator {
     }
 
     private static Object normalizeObject(Object object) {
-        return switch (object) {
-            case BytesRef br -> getString(br);
-            case Object o -> o;
-        };
+        return object instanceof BytesRef br ? getString(br) : object;
     }
 
     private static String getString(BytesRef br) {

@@ -13,6 +13,7 @@ import net.jqwik.api.Combinators;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
+import net.jqwik.api.lifecycle.AddLifecycleHook;
 import net.jqwik.api.lifecycle.PerProperty;
 import net.jqwik.api.lifecycle.PropertyExecutionResult;
 
@@ -47,6 +48,7 @@ import java.util.Map;
  * Meta-tests that verify the simulator's bug injection infrastructure. Each test activates a {@link SimBug}, generates random inputs, and
  * asserts that jqwik shrinks the counter-example to a deterministic minimum.
  */
+@AddLifecycleHook(SimulatorSeedHook.class)
 public class SimulatorBugTests {
     static {
         SimulatorTestUtils.initLogging();
@@ -180,7 +182,7 @@ public class SimulatorBugTests {
 
     @Property(tries = TRIES)
     @PerProperty(StatsCountOffByOneLifecycle.class)
-    private void bugStatsCountOffByOne(@ForAll("statsCountTestCases") MetaTestCase tc) throws IOException {
+    void bugStatsCountOffByOne(@ForAll("statsCountTestCases") MetaTestCase tc) throws IOException {
         assertNoDivergence(tc, SimBug.STATS_COUNT_OFF_BY_ONE);
     }
 

@@ -199,11 +199,14 @@ public class LogicalPlanGenerator {
         if (available.size() > 1) {
             options.add(wrapDrop(current, available));
         }
+        boolean hasLimit = current.anyMatch(Limit.class::isInstance);
         if (integerAttrs.isEmpty() == false) {
             options.add(wrapEval(current));
             options.add(wrapFilter(current, integerAttrs));
             options.add(wrapStats(current, integerAttrs, available));
-            options.add(wrapInlineStats(current, integerAttrs, available));
+            if (hasLimit == false) {
+                options.add(wrapInlineStats(current, integerAttrs, available));
+            }
         }
         options.add(wrapLimit(current));
         options.add(wrapSort(current, available));

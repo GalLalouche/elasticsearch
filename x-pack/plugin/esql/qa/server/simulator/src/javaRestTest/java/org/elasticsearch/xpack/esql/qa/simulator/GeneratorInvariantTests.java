@@ -11,6 +11,7 @@ import net.jqwik.api.Arbitrary;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
+import net.jqwik.api.lifecycle.AddLifecycleHook;
 
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
@@ -33,6 +34,7 @@ import static org.elasticsearch.xpack.esql.qa.simulator.SimulatorTestUtils.colle
  * Structural invariant tests for {@link LogicalPlanGenerator}.
  * Verifies that generated plans are well-formed without requiring a running cluster.
  */
+@AddLifecycleHook(SimulatorSeedHook.class)
 public class GeneratorInvariantTests {
     static {
         SimulatorTestUtils.initLogging();
