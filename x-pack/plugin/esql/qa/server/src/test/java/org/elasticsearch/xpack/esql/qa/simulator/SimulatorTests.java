@@ -10,9 +10,11 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
+import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
@@ -21,6 +23,7 @@ import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
@@ -581,6 +584,54 @@ public class SimulatorTests extends ESTestCase {
         // The first "s1" is COUNT(b), not the grouping key — both groups yield count values
         assertThat(result.columns().get(0).values(), equalTo(List.of(2L, 1L)));
         assertThat(result.columns().get(1).values(), equalTo(List.of(2L, 1L)));
+    }
+
+    public void testChainedInlineStatsShadowingKeepsGroupingKeyValue() throws Exception {
+        // When a second INLINE STATS redefines a column from the first via an aggregate that shares
+        // its name with a grouping key, ES preserves the grouping key's (original child) value.
+        // Example: INLINE STATS s1 = MAX(b + 5) BY b | INLINE STATS s1 = COUNT(b) BY s1
+        // After the second INLINE STATS, s1 should retain the MAX result (6), not become COUNT (1).
+        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("b", DataType.INTEGER)));
+        var data = List.<Map<String, Object>>of(Map.of("b", 1));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var bAttr = from.output().get(0); // b:INTEGER
+
+        // First INLINE STATS: s1 = MAX(b + 5) BY b → s1=6
+        var add5 = new Add(Source.EMPTY, bAttr, new Literal(Source.EMPTY, 5, DataType.INTEGER), EsqlTestUtils.TEST_CFG);
+        var agg1 = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, add5)), bAttr)
+        );
+        var inline1 = new InlineStats(Source.EMPTY, agg1);
+
+        // After inline1, result should be: [b=[1], s1=[6]]
+        var sim = new Simulator(schema, data);
+        var result1 = sim.simulate(inline1);
+        assertThat(result1.columns().size(), equalTo(2));
+        assertThat(result1.getColumn("b").values(), equalTo(List.of(1L)));
+        assertThat(result1.getColumn("s1").values(), equalTo(List.of(6L)));
+
+        // Second INLINE STATS: s1 = COUNT(b) BY s1
+        // aggregates: [Alias("s1", COUNT(b)), s1Attr_from_inline1_output]
+        // The grouping key s1 has value 6; COUNT(b) = 1.
+        // ES keeps the grouping key value (s1=6), not the COUNT value (s1=1).
+        var s1Attr = result1.columns().stream().filter(c -> c.name().equals("s1")).findFirst().orElseThrow();
+        var s1Ref = new ReferenceAttribute(Source.EMPTY, "s1", s1Attr.type());
+        var bRef = new ReferenceAttribute(Source.EMPTY, "b", DataType.INTEGER);
+        var agg2 = new Aggregate(
+            Source.EMPTY,
+            inline1,
+            List.<Expression>of(s1Ref),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "s1", new Count(Source.EMPTY, bRef)), s1Ref)
+        );
+        var inline2 = new InlineStats(Source.EMPTY, agg2);
+
+        var result2 = sim.simulate(inline2);
+        // s1 should be 6 (grouping key value), not 1 (COUNT value)
+        assertThat(result2.getColumn("s1").values(), equalTo(List.of(6L)));
+        assertThat(result2.getColumn("b").values(), equalTo(List.of(1L)));
     }
 
     private Simulator.Result simulate(String statement) throws IOException {

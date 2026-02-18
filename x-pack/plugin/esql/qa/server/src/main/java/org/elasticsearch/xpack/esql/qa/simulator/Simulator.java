@@ -46,7 +46,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -222,7 +221,7 @@ public class Simulator {
         var childResult = simulate(filter.child());
         var cond = childResult.evaluate(filter.condition(), activeBug);
         var mask = IntStream.range(0, cond.values.size())
-            .filter(i -> ((boolean) cond.values.get(i)) != (activeBug == SimBug.WHERE_INVERTED))
+            .filter(i -> Boolean.TRUE.equals(cond.values.get(i)) != (activeBug == SimBug.WHERE_INVERTED))
             .toArray();
         return new Result(
             childResult.columns.stream()
@@ -272,9 +271,11 @@ public class Simulator {
         int numRows = childResult.numRows();
         var groups = buildGroups(aggregate, childResult, numRows);
         // Build aggregate columns, broadcasting per-group values to each original row.
-        // Deduplicate by name (keep first): when a grouping key shares a name with an aggregate output.
-        var seenInline = new HashSet<String>();
-        var aggColumns = aggregate.aggregates().stream().map(namedExpr -> {
+        // Deduplicate by name (keep last): matches ES mergeOutputExpressions semantics where
+        // the last entry wins. For INLINE STATS, grouping keys appear after aggregate functions
+        // in the aggregates list, so the grouping key's original child value takes precedence
+        // over an aggregate output with the same name.
+        var allAggColumns = aggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
                 Object[] broadcast = new Object[numRows];
@@ -288,7 +289,8 @@ public class Simulator {
             }
             var col = childResult.evaluate(unwrapped, activeBug);
             return new Column(namedExpr.name(), col.type(), col.values());
-        }).filter(col -> seenInline.add(col.name())).toList();
+        }).toList();
+        var aggColumns = deduplicateKeepLast(allAggColumns);
         // Merge: child columns not in aggregate output, then aggregate columns
         var aggNames = aggColumns.stream().map(Column::name).collect(Collectors.toSet());
         var kept = childResult.columns().stream().filter(c -> aggNames.contains(c.name()) == false).toList();
@@ -298,10 +300,10 @@ public class Simulator {
     private Result visit(Aggregate aggregate) throws IOException {
         var childResult = simulate(aggregate.child());
         var groups = buildGroups(aggregate, childResult, childResult.numRows());
-        // Deduplicate by name (keep first): when a grouping key has the same name as an aggregate
-        // output (e.g., STATS s1 = COUNT(...) BY s1), ES produces one column, not two.
-        var seen = new HashSet<String>();
-        return new Result(aggregate.aggregates().stream().map(namedExpr -> {
+        // Deduplicate by name (keep last): matches ES mergeOutputExpressions semantics.
+        // Grouping keys appear after aggregate functions in the aggregates list, so the
+        // grouping key value takes precedence over an aggregate output with the same name.
+        var allCols = aggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
                 return new Column(
@@ -316,7 +318,8 @@ public class Simulator {
                 col.type,
                 groups.values().stream().map(indices -> col.values.get(indices.getFirst())).toList()
             );
-        }).filter(col -> seen.add(col.name())).toList());
+        }).toList();
+        return new Result(deduplicateKeepLast(allCols));
     }
 
     private LinkedHashMap<List<Object>, List<Integer>> buildGroups(Aggregate aggregate, Result childResult, int numRows) {
@@ -333,21 +336,43 @@ public class Simulator {
         return groups;
     }
 
+    /**
+     * Keeps only the last column for each name, matching ES mergeOutputExpressions semantics.
+     */
+    private static List<Column> deduplicateKeepLast(List<Column> columns) {
+        var lastPositions = new LinkedHashMap<String, Integer>();
+        for (int i = 0; i < columns.size(); i++) {
+            lastPositions.put(columns.get(i).name(), i);
+        }
+        return IntStream.range(0, columns.size())
+            .filter(i -> lastPositions.get(columns.get(i).name()) == i)
+            .mapToObj(columns::get)
+            .toList();
+    }
+
     private Object computeAggregate(AggregateFunction aggFunc, Result data, List<Integer> indices) {
         return switch (aggFunc) {
             // COUNT returns 0 for empty groups (not null), matching ES semantics.
             case Count ignored -> (long) indices.size() + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
-            case Sum sum -> indices.isEmpty()
-                ? null
-                : indices.stream().mapToLong(i -> toLong(data.evaluate(sum.field(), activeBug).values.get(i))).sum();
-            case Min min -> indices.isEmpty()
-                ? null
-                : indices.stream().mapToLong(i -> toLong(data.evaluate(min.field(), activeBug).values.get(i))).min().orElseThrow();
-            case Max max -> indices.isEmpty()
-                ? null
-                : indices.stream().mapToLong(i -> toLong(data.evaluate(max.field(), activeBug).values.get(i))).max().orElseThrow();
+            case Sum sum -> {
+                var nonNull = nonNullValues(indices, data, sum.field(), activeBug);
+                yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).sum();
+            }
+            case Min min -> {
+                var nonNull = nonNullValues(indices, data, min.field(), activeBug);
+                yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).min().orElseThrow();
+            }
+            case Max max -> {
+                var nonNull = nonNullValues(indices, data, max.field(), activeBug);
+                yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).max().orElseThrow();
+            }
             default -> throw new UnsupportedOperationException(Strings.format("Unsupported aggregate function: %s", aggFunc.getClass()));
         };
+    }
+
+    private static List<Object> nonNullValues(List<Integer> indices, Result data, Expression field, SimBug activeBug) {
+        var col = data.evaluate(field, activeBug);
+        return indices.stream().map(i -> col.values.get(i)).filter(v -> v != null).toList();
     }
 
     public record Result(List<Column> columns) {
@@ -391,23 +416,27 @@ public class Simulator {
         private UnnamedColumn evalBinaryLong(Expression leftExpr, Expression rightExpr, SimBug activeBug, LongBinaryOperator op) {
             var left = evaluate(leftExpr, activeBug);
             var right = evaluate(rightExpr, activeBug);
-            return new UnnamedColumn(
-                left.type,
-                IntStream.range(0, left.values.size())
-                    .mapToObj(i -> (Object) op.applyAsLong(toLong(left.values.get(i)), toLong(right.values.get(i))))
-                    .toList()
-            );
+            return new UnnamedColumn(left.type, IntStream.range(0, left.values.size()).mapToObj(i -> {
+                Object l = left.values.get(i);
+                Object r = right.values.get(i);
+                if (l == null || r == null) {
+                    return null;
+                }
+                return (Object) op.applyAsLong(toLong(l), toLong(r));
+            }).toList());
         }
 
         private UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
             var left = evaluate(leftExpr, activeBug);
             var right = evaluate(rightExpr, activeBug);
-            return new UnnamedColumn(
-                DataType.BOOLEAN,
-                IntStream.range(0, left.values.size())
-                    .mapToObj(i -> (Object) test.test(Long.compare(toLong(left.values.get(i)), toLong(right.values.get(i)))))
-                    .toList()
-            );
+            return new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, left.values.size()).mapToObj(i -> {
+                Object l = left.values.get(i);
+                Object r = right.values.get(i);
+                if (l == null || r == null) {
+                    return null;
+                }
+                return (Object) test.test(Long.compare(toLong(l), toLong(r)));
+            }).toList());
         }
     }
 
