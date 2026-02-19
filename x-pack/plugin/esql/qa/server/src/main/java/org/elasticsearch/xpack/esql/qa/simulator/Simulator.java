@@ -215,7 +215,7 @@ public class Simulator {
                 );
             }
         }
-        return childResult.append(newColumns);
+        return new Result(deduplicateKeepLast(CollectionUtils.concatLists(childResult.columns, newColumns)));
     }
 
     private Result visit(Filter filter) throws IOException {

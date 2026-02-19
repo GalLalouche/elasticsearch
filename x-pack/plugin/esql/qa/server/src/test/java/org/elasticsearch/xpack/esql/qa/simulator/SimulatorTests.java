@@ -260,6 +260,22 @@ public class SimulatorTests extends ESTestCase {
         );
     }
 
+    public void testEvalShadowing() throws Exception {
+        // When multiple EVALs assign to the same column name, ES shadows (replaces) the earlier column.
+        // ROW x=1 | EVAL _col_0 = 9 | EVAL _col_0 = 4 should produce 2 columns (x, _col_0), not 3.
+        assertThat(
+            simulate("ROW x=1 | EVAL _col_0 = 9 | EVAL _col_0 = 4"),
+            equalTo(
+                new Simulator.Result(
+                    List.of(
+                        new Simulator.Column("x", DataType.INTEGER, List.of(1)),
+                        new Simulator.Column("_col_0", DataType.INTEGER, List.of(4))
+                    )
+                )
+            )
+        );
+    }
+
     public void testIntegerArithmeticOverflowReturnsNull() throws Exception {
         // 50000 * 50000 = 2,500,000,000 which exceeds Integer.MAX_VALUE (2,147,483,647).
         // ES|QL returns null for integer overflow; the simulator must match.
