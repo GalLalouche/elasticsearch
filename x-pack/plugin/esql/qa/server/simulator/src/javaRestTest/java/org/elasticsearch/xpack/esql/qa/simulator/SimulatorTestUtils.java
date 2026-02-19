@@ -7,14 +7,15 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import net.jqwik.api.Arbitrary;
+import com.pholser.junit.quickcheck.generator.GenerationStatus;
+import com.pholser.junit.quickcheck.generator.Generator;
+import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import org.elasticsearch.common.logging.LogConfigurator;
 import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
-import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
@@ -23,23 +24,18 @@ import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 
 import java.util.List;
 
-/** Shared utilities for simulator jqwik tests. */
+/** Shared utilities for simulator tests. */
 class SimulatorTestUtils {
     private SimulatorTestUtils() { /* static class */ }
 
     /**
      * Initialize ES logging and break the IndexSettings/IndexMode circular class init dependency.
-     * Must be called from a {@code static {}} block in every jqwik test class (which runs outside the ES test framework).
+     * Must be called from a {@code static {}} block in every test class (which runs outside the ES test framework).
      */
     static void initLogging() {
         LogConfigurator.configureESLogging();
         // Force IndexSettings to initialize before IndexMode to break circular class init dependency.
         assert IndexSettings.MODE != null;
-    }
-
-    /** Schemas that contain at least one INTEGER column (needed by most generators). */
-    static Arbitrary<SimSchema> schemasWithInteger() {
-        return SimSchemaGenerator.schemas().filter(s -> s.columns().stream().anyMatch(c -> c.type() == DataType.INTEGER));
     }
 
     /** Collect attribute references from a plan node's own expressions (not children). */
@@ -62,5 +58,31 @@ class SimulatorTestUtils {
             return List.of();
         }
         return expr.children().stream().flatMap(child -> collectExprAttrs(child).stream()).toList();
+    }
+
+    /** Generates resolved {@link LogicalPlan} trees for property-based tests. */
+    public static class ResolvedPlanGenerator extends Generator<LogicalPlan> {
+        public ResolvedPlanGenerator() {
+            super(LogicalPlan.class);
+        }
+
+        @Override
+        public LogicalPlan generate(SourceOfRandomness random, GenerationStatus status) {
+            SimSchema schema = SimSchemaGenerator.generateWithInteger(random, status);
+            return LogicalPlanGenerator.generate(schema, random, status);
+        }
+    }
+
+    /** Generates raw (unresolved) {@link LogicalPlan} trees for property-based tests. */
+    public static class RawPlanGenerator extends Generator<LogicalPlan> {
+        public RawPlanGenerator() {
+            super(LogicalPlan.class);
+        }
+
+        @Override
+        public LogicalPlan generate(SourceOfRandomness random, GenerationStatus status) {
+            SimSchema schema = SimSchemaGenerator.generateWithInteger(random, status);
+            return LogicalPlanGenerator.generateRaw(schema, random, status);
+        }
     }
 }

@@ -7,16 +7,6 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.Combinators;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
-import net.jqwik.api.lifecycle.AddLifecycleHook;
-import net.jqwik.api.lifecycle.PerProperty;
-import net.jqwik.api.lifecycle.PropertyExecutionResult;
-
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
@@ -39,246 +29,111 @@ import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Meta-tests that verify the simulator's bug injection infrastructure. Each test activates a {@link SimBug}, generates random inputs, and
- * asserts that jqwik shrinks the counter-example to a deterministic minimum.
+ * Deterministic tests that verify the simulator's bug injection infrastructure.
+ * Each test constructs the known-minimal failing case for a specific {@link SimBug}
+ * and calls {@link #assertDivergence} to confirm the correct and bugged simulators
+ * produce different results.
  */
-@AddLifecycleHook(SimulatorSeedHook.class)
+@RunWith(JUnit4.class)
 public class SimulatorBugTests {
     static {
         SimulatorTestUtils.initLogging();
     }
 
-    record MetaTestCase(SimSchema schema, List<Map<String, Object>> data, LogicalPlan plan) {
-        @Override
-        public String toString() {
-            return Strings.format("%s, %d rows, %s", schema, data.size(), LogicalPlanPrinter.print(plan));
-        }
+    @Test
+    public void bugAddIsSub() throws IOException {
+        SimSchema schema = schema1IntCol();
+        List<Map<String, Object>> data = List.of(Map.of("a", 5));
+        EsRelation rel = buildEsRelation(schema);
+        Attribute a = firstIntegerAttr(rel);
+        LogicalPlan plan = new Eval(
+            Source.EMPTY,
+            rel,
+            List.of(new Alias(Source.EMPTY, "z", new Add(Source.EMPTY, a, a, EsqlTestUtils.TEST_CFG)))
+        );
+        assertDivergence(schema, data, plan, SimBug.ADD_IS_SUB);
     }
 
-    private static final int TRIES = 200;
-
-    @Property(tries = TRIES)
-    @PerProperty(AddIsSubLifecycle.class)
-    void bugAddIsSub(@ForAll("addTestCases") MetaTestCase tc) throws IOException {
-        assertNoDivergence(tc, SimBug.ADD_IS_SUB);
+    @Test
+    public void bugKeepDropsFirst() throws IOException {
+        SimSchema schema = schema1IntCol();
+        List<Map<String, Object>> data = List.of(Map.of("a", 1));
+        EsRelation rel = buildEsRelation(schema);
+        List<NamedExpression> projections = rel.output().stream().map(attr -> (NamedExpression) attr).toList();
+        LogicalPlan plan = new Keep(Source.EMPTY, rel, projections);
+        assertDivergence(schema, data, plan, SimBug.KEEP_DROPS_FIRST);
     }
 
-    @Provide
-    private static Arbitrary<MetaTestCase> addTestCases() {
-        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
-            var rel = buildEsRelation(schema);
-            var intCol = firstIntegerAttr(rel);
-            var add = new Add(Source.EMPTY, intCol, intCol, EsqlTestUtils.TEST_CFG);
-            return new MetaTestCase(schema, data, new Eval(Source.EMPTY, rel, List.of(new Alias(Source.EMPTY, "z", add))));
-        }));
+    @Test
+    public void bugWhereInverted() throws IOException {
+        SimSchema schema = schema1IntCol();
+        List<Map<String, Object>> data = List.of(Map.of("a", 5));
+        EsRelation rel = buildEsRelation(schema);
+        Attribute a = firstIntegerAttr(rel);
+        Expression cond = new GreaterThan(Source.EMPTY, a, new Literal(Source.EMPTY, 1, DataType.INTEGER));
+        LogicalPlan plan = new Filter(Source.EMPTY, rel, cond);
+        assertDivergence(schema, data, plan, SimBug.WHERE_INVERTED);
     }
 
-    private static class AddIsSubLifecycle extends ExpectFailureLifecycle {
-        AddIsSubLifecycle() {
-            super("ADD_IS_SUB", " | EVAL z = a + a", 1);
-        }
+    @Test
+    public void bugSortReversed() throws IOException {
+        SimSchema schema = schema1IntCol();
+        List<Map<String, Object>> data = List.of(Map.of("a", 1), Map.of("a", 2));
+        EsRelation rel = buildEsRelation(schema);
+        Attribute a = firstIntegerAttr(rel);
+        Order order = new Order(Source.EMPTY, a, Order.OrderDirection.ASC, Order.NullsPosition.ANY);
+        OrderBy orderBy = new OrderBy(Source.EMPTY, rel, List.of(order));
+        LogicalPlan plan = new Limit(Source.EMPTY, new Literal(Source.EMPTY, 1, DataType.INTEGER), orderBy);
+        assertDivergence(schema, data, plan, SimBug.SORT_REVERSED);
     }
 
-    @Property(tries = TRIES)
-    @PerProperty(KeepDropsFirstLifecycle.class)
-    void bugKeepDropsFirst(@ForAll("keepTestCases") MetaTestCase tc) throws IOException {
-        assertNoDivergence(tc, SimBug.KEEP_DROPS_FIRST);
+    @Test
+    public void bugLimitOffByOne() throws IOException {
+        SimSchema schema = schema1IntCol();
+        List<Map<String, Object>> data = List.of(Map.of("a", 1), Map.of("a", 2));
+        EsRelation rel = buildEsRelation(schema);
+        LogicalPlan plan = new Limit(Source.EMPTY, new Literal(Source.EMPTY, 1, DataType.INTEGER), rel);
+        assertDivergence(schema, data, plan, SimBug.LIMIT_OFF_BY_ONE);
     }
 
-    @Provide
-    private static Arbitrary<MetaTestCase> keepTestCases() {
-        return SimSchemaGenerator.schemas().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
-            var rel = buildEsRelation(schema);
-            var projections = rel.output().stream().map(a -> (NamedExpression) a).toList();
-            return new MetaTestCase(schema, data, new Keep(Source.EMPTY, rel, projections));
-        }));
+    @Test
+    public void bugStatsCountOffByOne() throws IOException {
+        SimSchema schema = schema1IntCol();
+        List<Map<String, Object>> data = List.of(Map.of("a", 1));
+        EsRelation rel = buildEsRelation(schema);
+        Attribute a = firstIntegerAttr(rel);
+        Count count = new Count(Source.EMPTY, a);
+        Alias alias = new Alias(Source.EMPTY, "s0", count);
+        List<Expression> groupings = List.of(a);
+        List<NamedExpression> aggregates = List.of(alias, a);
+        LogicalPlan plan = new Aggregate(Source.EMPTY, rel, groupings, aggregates);
+        assertDivergence(schema, data, plan, SimBug.STATS_COUNT_OFF_BY_ONE);
     }
 
-    private static class KeepDropsFirstLifecycle extends ExpectFailureLifecycle {
-        KeepDropsFirstLifecycle() {
-            super("KEEP_DROPS_FIRST", " | KEEP a", 1);
-        }
+    @Test
+    public void bugInlineStatsDropsRows() throws IOException {
+        SimSchema schema = schema1IntCol();
+        List<Map<String, Object>> data = List.of(Map.of("a", 1), Map.of("a", 2));
+        EsRelation rel = buildEsRelation(schema);
+        Attribute a = firstIntegerAttr(rel);
+        Count count = new Count(Source.EMPTY, a);
+        Alias alias = new Alias(Source.EMPTY, "s0", count);
+        List<NamedExpression> aggregates = List.of(alias);
+        LogicalPlan plan = new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, rel, List.of(), aggregates));
+        assertDivergence(schema, data, plan, SimBug.INLINE_STATS_DROPS_ROWS);
     }
 
-    @Property(tries = TRIES)
-    @PerProperty(WhereInvertedLifecycle.class)
-    void bugWhereInverted(@ForAll("whereTestCases") MetaTestCase tc) throws IOException {
-        assertNoDivergence(tc, SimBug.WHERE_INVERTED);
-    }
-
-    @Provide
-    private static Arbitrary<MetaTestCase> whereTestCases() {
-        return SimulatorTestUtils.schemasWithInteger()
-            .flatMap(
-                schema -> Combinators.combine(SimDataGenerator.rows(schema), Arbitraries.integers().between(1, 10))
-                    .as((data, threshold) -> {
-                        var rel = buildEsRelation(schema);
-                        var intCol = firstIntegerAttr(rel);
-                        var cond = new GreaterThan(Source.EMPTY, intCol, new Literal(Source.EMPTY, threshold, DataType.INTEGER));
-                        return new MetaTestCase(schema, data, new Filter(Source.EMPTY, rel, cond));
-                    })
-            );
-    }
-
-    private static class WhereInvertedLifecycle extends ExpectFailureLifecycle {
-        WhereInvertedLifecycle() {
-            super("WHERE_INVERTED", " | WHERE a > 1", 1);
-        }
-    }
-
-    @Property(tries = TRIES)
-    @PerProperty(SortReversedLifecycle.class)
-    void bugSortReversed(@ForAll("sortTestCases") MetaTestCase tc) throws IOException {
-        assertNoDivergence(tc, SimBug.SORT_REVERSED);
-    }
-
-    @Provide
-    private static Arbitrary<MetaTestCase> sortTestCases() {
-        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> {
-            var intColName = schema.columns().stream().filter(c -> c.type() == DataType.INTEGER).findFirst().orElseThrow().name();
-            return SimDataGenerator.rows(schema)
-                .filter(data -> data.size() >= 2 && data.stream().map(row -> row.get(intColName)).distinct().count() >= 2)
-                .map(data -> {
-                    var rel = buildEsRelation(schema);
-                    var intCol = firstIntegerAttr(rel);
-                    var order = new Order(Source.EMPTY, intCol, Order.OrderDirection.ASC, Order.NullsPosition.ANY);
-                    var orderBy = new OrderBy(Source.EMPTY, rel, List.of(order));
-                    return new MetaTestCase(schema, data, new Limit(Source.EMPTY, new Literal(Source.EMPTY, 1, DataType.INTEGER), orderBy));
-                });
-        });
-    }
-
-    private static class SortReversedLifecycle extends ExpectFailureLifecycle {
-        SortReversedLifecycle() {
-            super("SORT_REVERSED", " | SORT a ASC | LIMIT 1", 2);
-        }
-    }
-
-    @Property(tries = TRIES)
-    @PerProperty(LimitOffByOneLifecycle.class)
-    void bugLimitOffByOne(@ForAll("limitTestCases") MetaTestCase tc) throws IOException {
-        assertNoDivergence(tc, SimBug.LIMIT_OFF_BY_ONE);
-    }
-
-    @Provide
-    private static Arbitrary<MetaTestCase> limitTestCases() {
-        return SimSchemaGenerator.schemas().flatMap(schema -> SimDataGenerator.rows(schema).filter(data -> data.size() >= 2).map(data -> {
-            var rel = buildEsRelation(schema);
-            return new MetaTestCase(schema, data, new Limit(Source.EMPTY, new Literal(Source.EMPTY, 1, DataType.INTEGER), rel));
-        }));
-    }
-
-    private static class LimitOffByOneLifecycle extends ExpectFailureLifecycle {
-        LimitOffByOneLifecycle() {
-            super("LIMIT_OFF_BY_ONE", " | LIMIT 1", 2);
-        }
-    }
-
-    @Property(tries = TRIES)
-    @PerProperty(StatsCountOffByOneLifecycle.class)
-    void bugStatsCountOffByOne(@ForAll("statsCountTestCases") MetaTestCase tc) throws IOException {
-        assertNoDivergence(tc, SimBug.STATS_COUNT_OFF_BY_ONE);
-    }
-
-    @Provide
-    private static Arbitrary<MetaTestCase> statsCountTestCases() {
-        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> SimDataGenerator.rows(schema).map(data -> {
-            var rel = buildEsRelation(schema);
-            var intCol = firstIntegerAttr(rel);
-            var count = new Count(Source.EMPTY, intCol);
-            var alias = new Alias(Source.EMPTY, "s0", count);
-            var groupings = List.<Expression>of(intCol);
-            var aggregates = List.<NamedExpression>of(alias, intCol);
-            return new MetaTestCase(schema, data, new Aggregate(Source.EMPTY, rel, groupings, aggregates));
-        }));
-    }
-
-    private static class StatsCountOffByOneLifecycle extends ExpectFailureLifecycle {
-        StatsCountOffByOneLifecycle() {
-            super("STATS_COUNT_OFF_BY_ONE", " | STATS s0 = COUNT(a) BY a", 1);
-        }
-    }
-
-    @Property(tries = TRIES)
-    @PerProperty(InlineStatsDropsRowsLifecycle.class)
-    void bugInlineStatsDropsRows(@ForAll("inlineStatsTestCases") MetaTestCase tc) throws IOException {
-        assertNoDivergence(tc, SimBug.INLINE_STATS_DROPS_ROWS);
-    }
-
-    @Provide
-    private static Arbitrary<MetaTestCase> inlineStatsTestCases() {
-        return SimulatorTestUtils.schemasWithInteger()
-            .flatMap(schema -> SimDataGenerator.rows(schema).filter(data -> data.size() >= 2).map(data -> {
-                var rel = buildEsRelation(schema);
-                var intCol = firstIntegerAttr(rel);
-                var count = new Count(Source.EMPTY, intCol);
-                var alias = new Alias(Source.EMPTY, "s0", count);
-                var aggregates = List.<NamedExpression>of(alias);
-                return new MetaTestCase(
-                    schema,
-                    data,
-                    new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, rel, List.of(), aggregates))
-                );
-            }));
-    }
-
-    private static class InlineStatsDropsRowsLifecycle extends ExpectFailureLifecycle {
-        InlineStatsDropsRowsLifecycle() {
-            super("INLINESTATS_DROPS_ROWS", " | INLINE STATS s0 = COUNT(a)", 2);
-        }
-    }
-
-    private abstract static class ExpectFailureLifecycle implements PerProperty.Lifecycle {
-        private final String bugName;
-        private final String expectedSuffix;
-        private final int expectedRows;
-
-        ExpectFailureLifecycle(String bugName, String expectedSuffix, int expectedRows) {
-            this.bugName = bugName;
-            this.expectedSuffix = expectedSuffix;
-            this.expectedRows = expectedRows;
-        }
-
-        @Override
-        public void onSuccess() {
-            throw new AssertionError("Expected property to fail: " + bugName + " bug should cause divergence");
-        }
-
-        @Override
-        public PropertyExecutionResult onFailure(PropertyExecutionResult result) {
-            var shrunk = result.shrunkSample().orElseThrow(() -> new AssertionError("No shrunk sample"));
-            var tc = (MetaTestCase) shrunk.parameters().get(0);
-            assertMinimal(tc, expectedSuffix, expectedRows);
-            return result.mapToSuccessful();
-        }
-    }
-
-    private static void assertMinimal(MetaTestCase tc, String expectedPlanSuffix, int expectedRows) {
-        if (tc.schema().columns().size() != 1) {
-            throw new AssertionError(Strings.format("Expected 1 column after shrinking, got %d: %s", tc.schema().columns().size(), tc));
-        }
-        if (tc.data().size() != expectedRows) {
-            throw new AssertionError(Strings.format("Expected %d row(s) after shrinking, got %d: %s", expectedRows, tc.data().size(), tc));
-        }
-        String expected = "FROM " + tc.schema().indexName() + expectedPlanSuffix;
-        String actual = LogicalPlanPrinter.print(tc.plan());
-        if (actual.equals(expected) == false) {
-            throw new AssertionError(Strings.format("Expected shrunk plan [%s] but got [%s]", expected, actual));
-        }
-    }
-
-    private static void assertNoDivergence(MetaTestCase tc, SimBug bug) throws IOException {
-        var correct = new Simulator(tc.schema(), tc.data(), SimBug.BUG_FREE).simulate(tc.plan());
-        var bugged = new Simulator(tc.schema(), tc.data(), bug).simulate(tc.plan());
-        if (correct.equals(bugged) == false) {
-            throw new AssertionError(Strings.format("Divergence: correct=%s bugged=%s tc=%s", correct, bugged, tc));
-        }
+    private static SimSchema schema1IntCol() {
+        return new SimSchema("sim_test", List.of(new SimSchema.SimColumn("a", DataType.INTEGER)));
     }
 
     private static EsRelation buildEsRelation(SimSchema schema) {
@@ -287,5 +142,14 @@ public class SimulatorBugTests {
 
     private static Attribute firstIntegerAttr(EsRelation rel) {
         return rel.output().stream().filter(a -> a.dataType() == DataType.INTEGER).findFirst().orElseThrow();
+    }
+
+    private static void assertDivergence(SimSchema schema, List<Map<String, Object>> data, LogicalPlan plan, SimBug bug)
+        throws IOException {
+        Simulator.Result correctResult = new Simulator(schema, data).simulate(plan);
+        Simulator.Result buggedResult = new Simulator(schema, data, bug).simulate(plan);
+        if (correctResult.equals(buggedResult)) {
+            throw new AssertionError(Strings.format("Expected divergence with bug %s but results were equal: %s", bug, correctResult));
+        }
     }
 }

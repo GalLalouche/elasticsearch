@@ -7,16 +7,15 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
-import net.jqwik.api.lifecycle.AddLifecycleHook;
+import com.pholser.junit.quickcheck.From;
+import com.pholser.junit.quickcheck.Property;
+import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
+import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,27 +24,22 @@ import static java.util.stream.Collectors.toMap;
 import static org.elasticsearch.xpack.esql.qa.simulator.SimulatorTestUtils.collectAttributeReferences;
 
 /**
- * Regression test: raw plans (without {@link LogicalPlanGenerator#resolveReferences}) must have
- * no stale NameId references. The tuple-wrapping fix in {@code arbitraryAttribute()} prevents
- * jqwik's {@code FlatMappedShrinkable} from silently substituting attributes across re-evaluations.
+ * Verifies that generated raw plans have no stale NameId references.
  */
-@AddLifecycleHook(SimulatorSeedHook.class)
+@RunWith(JUnitQuickcheck.class)
 public class ShrinkingValidityTests {
     static {
         SimulatorTestUtils.initLogging();
     }
 
-    @Property(tries = 1000)
-    void rawPlansHaveNoStaleReferences(@ForAll("rawPlans") LogicalPlan plan) {
+    private static final int TRIES = 1000;
+
+    @Property(trials = TRIES)
+    public void rawPlansHaveNoStaleReferences(@From(SimulatorTestUtils.RawPlanGenerator.class) LogicalPlan plan) {
         var issues = validateReferences(plan);
         if (issues.isEmpty() == false) {
             throw new AssertionError("Stale NameId in raw plan: " + issues + "\n" + LogicalPlanPrinter.print(plan));
         }
-    }
-
-    @Provide
-    private static Arbitrary<LogicalPlan> rawPlans() {
-        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
     }
 
     private static List<String> validateReferences(LogicalPlan plan) {

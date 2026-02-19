@@ -3,13 +3,8 @@ apply plugin: 'elasticsearch.internal-java-rest-test'
 dependencies {
   javaRestTestImplementation project(xpackModule('esql:qa:server'))
   javaRestTestImplementation project(xpackModule('esql'))
-  javaRestTestImplementation('net.jqwik:jqwik-api:1.9.3')
-  javaRestTestRuntimeOnly('net.jqwik:jqwik-engine:1.9.3')
-  javaRestTestRuntimeOnly('org.junit.platform:junit-platform-launcher:1.12.1')
-  javaRestTestRuntimeOnly('org.junit.platform:junit-platform-engine:1.12.1')
-  javaRestTestRuntimeOnly('org.junit.platform:junit-platform-commons:1.12.1')
-  javaRestTestRuntimeOnly('org.opentest4j:opentest4j:1.3.0')
-  // Needed so useJUnitPlatform() discovers JUnit 4 tests (ESRestTestCase) alongside jqwik tests
+  javaRestTestImplementation('com.pholser:junit-quickcheck:1.0')
+  // Needed so useJUnitPlatform() discovers JUnit 4 tests (ESRestTestCase and JUnitQuickcheck) alongside each other
   javaRestTestRuntimeOnly('org.junit.vintage:junit-vintage-engine:5.12.1')
 
   clusterPlugins project(':plugins:mapper-size')
@@ -23,38 +18,11 @@ restResources {
   }
 }
 
-// Generate junit-platform.properties with configurable jqwik settings:
-//   -Dsimulator.shrinking=FULL       -> shrinking.default=FULL
-//   -Dsimulator.shrinkSeconds=30     -> shrinking.bounded.seconds=30
-def jqwikPropsDir = layout.buildDirectory.dir('generated-jqwik-resources')
-def generateJqwikProps = tasks.register('generateJqwikProperties') {
-  def shrinkingMode = providers.systemProperty('simulator.shrinking').getOrElse('')
-  def shrinkSeconds = providers.systemProperty('simulator.shrinkSeconds').getOrElse('')
-  def tries = providers.systemProperty('simulator.tries').getOrElse('50')
-  inputs.property('shrinkingMode', shrinkingMode)
-  inputs.property('shrinkSeconds', shrinkSeconds)
-  inputs.property('tries', tries)
-  outputs.dir(jqwikPropsDir)
-  doLast {
-    def dir = jqwikPropsDir.get().asFile
-    dir.mkdirs()
-    def props = []
-    props << "jqwik.tries.default=${tries}"
-    if (!shrinkingMode.isEmpty()) props << "jqwik.shrinking.default=${shrinkingMode}"
-    if (!shrinkSeconds.isEmpty()) props << "jqwik.shrinking.bounded.seconds=${shrinkSeconds}"
-    new File(dir, 'junit-platform.properties').text = props.join('\n') + '\n'
-  }
-}
-sourceSets.javaRestTest.output.dir(jqwikPropsDir, builtBy: generateJqwikProps)
-
 tasks.named('javaRestTest') {
   usesDefaultDistribution("to be triaged")
   useJUnitPlatform()
   maxParallelForks = 1
   systemProperty 'simulator.planDepth', providers.systemProperty('simulator.planDepth').getOrElse('5')
-  providers.systemProperty('simulator.seed').orElse('').get().with { seed ->
-    if (!seed.isEmpty()) systemProperty 'simulator.seed', seed
-  }
   providers.systemProperty('simulator.query').orElse('').get().with { query ->
     if (!query.isEmpty()) systemProperty 'simulator.query', query
   }

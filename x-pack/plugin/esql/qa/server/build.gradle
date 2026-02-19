@@ -50,8 +50,8 @@ dependencies {
   // Access to test utilities including IcebergS3FixtureUtils
   api(project(path: xpackModule('esql'), configuration: 'testRuntimeElements'))
 
-  api('net.jqwik:jqwik-api:1.9.3')
-  api('org.apiguardian:apiguardian-api:1.1.2')
+  api('com.pholser:junit-quickcheck-core:1.0')
+  api('com.pholser:junit-quickcheck-generators:1.0')
 
   // Compression libs for generating .gz, .zst, .bz2 fixtures on the fly
   implementation "com.github.luben:zstd-jni:${versions.zstdJni}"

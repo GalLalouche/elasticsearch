@@ -7,14 +7,12 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.Combinators;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
-import net.jqwik.api.lifecycle.AddLifecycleHook;
-import net.jqwik.api.lifecycle.AfterContainer;
-import net.jqwik.api.lifecycle.BeforeContainer;
+import com.pholser.junit.quickcheck.From;
+import com.pholser.junit.quickcheck.Property;
+import com.pholser.junit.quickcheck.generator.GenerationStatus;
+import com.pholser.junit.quickcheck.generator.Generator;
+import com.pholser.junit.quickcheck.random.SourceOfRandomness;
+import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 
 import org.apache.http.HttpHost;
 import org.elasticsearch.client.Request;
@@ -32,6 +30,10 @@ import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
+import org.junit.ClassRule;
+import org.junit.runner.RunWith;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,33 +42,26 @@ import java.util.List;
 import java.util.Map;
 
 /** Integration property test: generates random plans and data, then compares simulator results against a real ES cluster. */
-@AddLifecycleHook(SimulatorSeedHook.class)
+@RunWith(JUnitQuickcheck.class)
 public class SimulatorPropertyIT {
     static {
         SimulatorTestUtils.initLogging();
     }
 
-    private static ElasticsearchCluster cluster;
+    @ClassRule
+    public static ElasticsearchCluster cluster = ElasticsearchCluster.local()
+        .distribution(DistributionType.DEFAULT)
+        .setting("xpack.security.enabled", "false")
+        .setting("xpack.license.self_generated.type", "trial")
+        .shared(true)
+        .build();
+
     private static RestClient restClient;
 
-    @BeforeContainer
-    static void startCluster() throws Throwable {
-        cluster = ElasticsearchCluster.local()
-            .distribution(DistributionType.DEFAULT)
-            .setting("xpack.security.enabled", "false")
-            .setting("xpack.license.self_generated.type", "trial")
-            .shared(true)
-            .build();
+    private static final int TRIES = 50;
 
-        // Trigger the JUnit 4 TestRule to initialize the cluster handle.
-        // ElasticsearchCluster requires this mechanism to create and start the cluster.
-        cluster.apply(new org.junit.runners.model.Statement() {
-            @Override
-            public void evaluate() {
-                // no-op: cluster is started by apply(); since shared=true it won't close
-            }
-        }, org.junit.runner.Description.createSuiteDescription(SimulatorPropertyIT.class)).evaluate();
-
+    @BeforeClass
+    public static void connectClient() throws Throwable {
         String[] addresses = cluster.getHttpAddresses().split(",");
         HttpHost[] hosts = new HttpHost[addresses.length];
         for (int i = 0; i < addresses.length; i++) {
@@ -79,15 +74,11 @@ public class SimulatorPropertyIT {
         restClient = RestClient.builder(hosts).build();
     }
 
-    @AfterContainer
-    static void stopCluster() throws Exception {
+    @AfterClass
+    public static void disconnectClient() throws Exception {
         if (restClient != null) {
             restClient.close();
             restClient = null;
-        }
-        if (cluster != null) {
-            cluster.close();
-            cluster = null;
         }
     }
 
@@ -98,8 +89,8 @@ public class SimulatorPropertyIT {
         }
     }
 
-    @Property
-    void simulatorMatchesEs(@ForAll("testCases") TestCase tc) throws Exception {
+    @Property(trials = TRIES)
+    public void simulatorMatchesEs(@From(TestCaseGenerator.class) TestCase tc) throws Exception {
         // Clean up any stale index from a previous run, then set up fresh
         deleteIndex(tc.schema().indexName());
         createIndex(tc.schema());
@@ -183,13 +174,35 @@ public class SimulatorPropertyIT {
         }
     }
 
-    @Provide
-    private static Arbitrary<TestCase> testCases() {
-        return SimSchemaGenerator.schemas()
-            .flatMap(
-                schema -> Combinators.combine(SimDataGenerator.rows(schema), LogicalPlanGenerator.plansFor(schema))
-                    .as((data, plan) -> new TestCase(schema, data, plan, LogicalPlanPrinter.print(plan)))
-            );
+    public static class TestCaseGenerator extends Generator<TestCase> {
+        public TestCaseGenerator() {
+            super(TestCase.class);
+        }
+
+        @Override
+        public TestCase generate(SourceOfRandomness random, GenerationStatus status) {
+            SimSchema schema = SimSchemaGenerator.generate(random, status);
+            List<Map<String, Object>> data = SimDataGenerator.generate(schema, random, status);
+            LogicalPlan plan = LogicalPlanGenerator.generate(schema, random, status);
+            return new TestCase(schema, data, plan, LogicalPlanPrinter.print(plan));
+        }
+
+        @Override
+        public List<TestCase> doShrink(SourceOfRandomness random, TestCase larger) {
+            List<TestCase> candidates = new ArrayList<>();
+            // Shrink plan: drop outermost layer
+            if (larger.plan() instanceof UnaryPlan unary) {
+                LogicalPlan simpler = LogicalPlanGenerator.resolveReferences(unary.child());
+                candidates.add(new TestCase(larger.schema(), larger.data(), simpler, LogicalPlanPrinter.print(simpler)));
+            }
+            // Shrink data: remove last row
+            if (larger.data().size() > 1) {
+                List<Map<String, Object>> smaller = new ArrayList<>(larger.data());
+                smaller.remove(smaller.size() - 1);
+                candidates.add(new TestCase(larger.schema(), smaller, larger.plan(), larger.query()));
+            }
+            return candidates;
+        }
     }
 
     private static void createIndex(SimSchema schema) throws IOException {

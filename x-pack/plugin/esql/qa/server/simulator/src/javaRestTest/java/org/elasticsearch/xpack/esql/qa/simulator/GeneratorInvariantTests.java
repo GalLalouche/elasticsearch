@@ -7,11 +7,9 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
-import net.jqwik.api.lifecycle.AddLifecycleHook;
+import com.pholser.junit.quickcheck.From;
+import com.pholser.junit.quickcheck.Property;
+import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
@@ -21,6 +19,7 @@ import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
+import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,24 +33,16 @@ import static org.elasticsearch.xpack.esql.qa.simulator.SimulatorTestUtils.colle
  * Structural invariant tests for {@link LogicalPlanGenerator}.
  * Verifies that generated plans are well-formed without requiring a running cluster.
  */
-@AddLifecycleHook(SimulatorSeedHook.class)
+@RunWith(JUnitQuickcheck.class)
 public class GeneratorInvariantTests {
     static {
         SimulatorTestUtils.initLogging();
     }
 
-    @Provide
-    private static Arbitrary<LogicalPlan> resolvedPlans() {
-        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.plansFor(schema, 5));
-    }
+    private static final int TRIES = 1000;
 
-    @Provide
-    private static Arbitrary<LogicalPlan> rawPlans() {
-        return SimulatorTestUtils.schemasWithInteger().flatMap(schema -> LogicalPlanGenerator.rawPlansFor(schema, 5));
-    }
-
-    @Property(tries = 1000)
-    void allColumnReferencesExistInChildOutput(@ForAll("resolvedPlans") LogicalPlan plan) {
+    @Property(trials = TRIES)
+    public void allColumnReferencesExistInChildOutput(@From(SimulatorTestUtils.ResolvedPlanGenerator.class) LogicalPlan plan) {
         var issues = checkColumnReferences(plan);
         if (issues.isEmpty() == false) {
             throw new AssertionError(
@@ -81,7 +72,6 @@ public class GeneratorInvariantTests {
      */
     private static List<Attribute> collectAllAttributeReferences(LogicalPlan plan) {
         return switch (plan) {
-            // InlineStats has no direct attribute references; its inner Aggregate is visited separately by forEachDown
             case InlineStats ignored -> List.of();
             case Aggregate agg -> {
                 var refs = new ArrayList<Attribute>();
@@ -101,8 +91,8 @@ public class GeneratorInvariantTests {
         };
     }
 
-    @Property(tries = 1000)
-    void resolveReferencesIsIdempotent(@ForAll("rawPlans") LogicalPlan plan) {
+    @Property(trials = TRIES)
+    public void resolveReferencesIsIdempotent(@From(SimulatorTestUtils.RawPlanGenerator.class) LogicalPlan plan) {
         var plan1 = LogicalPlanGenerator.resolveReferences(plan);
         var plan2 = LogicalPlanGenerator.resolveReferences(plan1);
         var printed1 = LogicalPlanPrinter.print(plan1);
@@ -112,8 +102,8 @@ public class GeneratorInvariantTests {
         }
     }
 
-    @Property(tries = 1000)
-    void everyPlanPrintsToParseableEsql(@ForAll("resolvedPlans") LogicalPlan plan) {
+    @Property(trials = TRIES)
+    public void everyPlanPrintsToParseableEsql(@From(SimulatorTestUtils.ResolvedPlanGenerator.class) LogicalPlan plan) {
         var query = LogicalPlanPrinter.print(plan);
         try {
             EsqlParser.INSTANCE.createStatement(query);
@@ -122,8 +112,8 @@ public class GeneratorInvariantTests {
         }
     }
 
-    @Property(tries = 1000)
-    void noPlanNodeHasZeroOutputColumns(@ForAll("resolvedPlans") LogicalPlan plan) {
+    @Property(trials = TRIES)
+    public void noPlanNodeHasZeroOutputColumns(@From(SimulatorTestUtils.ResolvedPlanGenerator.class) LogicalPlan plan) {
         plan.forEachDown(node -> {
             if (node.output().isEmpty()) {
                 throw new AssertionError(
@@ -132,4 +122,5 @@ public class GeneratorInvariantTests {
             }
         });
     }
+
 }

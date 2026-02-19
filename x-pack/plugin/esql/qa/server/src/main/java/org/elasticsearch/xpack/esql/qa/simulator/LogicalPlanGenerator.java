@@ -7,11 +7,9 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.Combinators;
+import com.pholser.junit.quickcheck.generator.GenerationStatus;
+import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
-import org.elasticsearch.core.Tuple;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
@@ -45,16 +43,17 @@ import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /**
- * Generates random {@link LogicalPlan} trees using jqwik's {@link Arbitraries#recursive} combinator.
- * Plans are built bottom-up: an {@link org.elasticsearch.xpack.esql.plan.logical.EsRelation} base
- * is wrapped in randomly chosen layers (KEEP, DROP, EVAL) up to a configurable depth.
+ * Generates random {@link LogicalPlan} trees. Plans are built bottom-up: an {@link EsRelation} base
+ * is wrapped in randomly chosen layers (KEEP, DROP, EVAL, FILTER, LIMIT, SORT, STATS, INLINE STATS)
+ * up to a configurable depth.
  */
 public class LogicalPlanGenerator {
     private LogicalPlanGenerator() { /* static class */ }
@@ -64,40 +63,34 @@ public class LogicalPlanGenerator {
 
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
     private static final List<String> STATS_ALIAS_POOL = List.of("s0", "s1");
+    private static final List<String> AGG_FUNC_POOL = List.of("COUNT", "SUM", "MIN", "MAX");
 
-    static Arbitrary<LogicalPlan> plansFor(SimSchema schema) {
-        return plansFor(schema, PLAN_DEPTH);
+    static LogicalPlan generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
+        return resolveReferences(generateRaw(schema, random, status));
     }
 
-    static Arbitrary<LogicalPlan> plansFor(SimSchema schema, int depth) {
-        return rawPlansFor(schema, depth).map(LogicalPlanGenerator::resolveReferences);
+    /** Returns a plan WITHOUT {@link #resolveReferences} — for testing shrinking validity. */
+    public static LogicalPlan generateRaw(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
+        return generateRaw(schema, PLAN_DEPTH, random, status);
     }
 
-    /** Returns plans WITHOUT {@link #resolveReferences} — for testing shrinking validity. */
-    static Arbitrary<LogicalPlan> rawPlansFor(SimSchema schema, int depth) {
-        return Arbitraries.recursive(
-            () -> Arbitraries.just(buildEsRelation(schema)),
-            childArb -> childArb.flatMap(LogicalPlanGenerator::wrapLayer),
-            depth
-        );
+    private static LogicalPlan generateRaw(SimSchema schema, int depth, SourceOfRandomness random, GenerationStatus status) {
+        LogicalPlan plan = buildEsRelation(schema);
+        for (int i = 0; i < depth; i++) {
+            plan = wrapLayer(plan, random, status);
+        }
+        return plan;
     }
 
     /**
      * Walks the plan bottom-up, replacing stale attribute references with canonical ones from
      * each node's child output. This is required for binary plan serialization — do NOT remove.
      * <p>
-     * The {@code Arbitraries.recursive} base supplier {@code () -> Arbitraries.just(buildEsRelation(schema))}
-     * is invoked multiple times by jqwik (for generation, shrinking, and reporting). Each invocation
-     * calls {@code buildEsRelation}, creating new {@code ReferenceAttribute} objects with fresh
-     * NameIds. But outer flatMap layers may retain closures referencing attributes from a previous
-     * invocation. This produces plans where outer nodes hold attribute references with stale NameIds.
-     * The ES|QL optimizer validates NameId consistency and rejects such plans with "optimized
-     * incorrectly due to missing references" errors.
+     * When generating plans iteratively, outer nodes may hold attribute references that become
+     * stale if earlier layers are modified. The ES|QL optimizer validates NameId consistency and
+     * rejects such plans with "optimized incorrectly due to missing references" errors.
      * <p>
-     * See {@code ShrinkingValidityTests} for empirical proof that raw plans have stale NameIds.
-     * Staleness affects NameIds at ALL plan levels — not just the base EsRelation, but also
-     * EVAL-created columns and other derived attributes. The exact jqwik mechanism is unknown,
-     * but occurs during both generation and shrinking, regardless of edge-case mode.
+     * See {@code ShrinkingValidityTests} for empirical proof that raw plans can have stale NameIds.
      */
     static LogicalPlan resolveReferences(LogicalPlan plan) {
         if (plan instanceof EsRelation) {
@@ -197,138 +190,135 @@ public class LogicalPlanGenerator {
         return new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
     }
 
-    /** Randomly wraps the given plan in one additional operator or returns it unchanged. */
-    static Arbitrary<LogicalPlan> wrapLayer(LogicalPlan current) {
+    /** Randomly wraps the given plan in one additional operator, or returns it unchanged (identity). */
+    static LogicalPlan wrapLayer(LogicalPlan current, SourceOfRandomness random, GenerationStatus status) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
 
-        var options = new ArrayList<Arbitrary<LogicalPlan>>();
-        options.add(Arbitraries.just(current)); // identity — allows shrinking layers away
-        options.add(wrapKeep(current));
+        List<Supplier<LogicalPlan>> options = new ArrayList<>();
+        options.add(() -> current); // identity — allows shrinking layers away
+        options.add(() -> wrapKeep(current, random));
         if (available.size() > 1) {
-            options.add(wrapDrop(current, available));
+            options.add(() -> wrapDrop(current, available, random));
         }
         if (integerAttrs.isEmpty() == false) {
-            options.add(wrapEval(current));
-            options.add(wrapFilter(current, integerAttrs));
-            options.add(wrapStats(current, integerAttrs, available));
+            options.add(() -> wrapEval(current, random, status));
+            options.add(() -> wrapFilter(current, integerAttrs, random, status));
+            options.add(() -> generateAggregate(current, integerAttrs, available, random, status));
             // INLINE STATS after LIMIT is not supported by the ES|QL engine
             if (current.anyMatch(Limit.class::isInstance) == false) {
-                options.add(wrapInlineStats(current, integerAttrs, available));
+                options.add(() -> wrapInlineStats(current, integerAttrs, available, random, status));
             }
         }
-        options.add(wrapLimit(current));
-        options.add(wrapSort(current, available));
-        return Arbitraries.oneOf(options);
+        options.add(() -> wrapLimit(current, random));
+        options.add(() -> wrapSort(current, available, random, status));
+        return random.choose(options).get();
     }
 
-    private static Arbitrary<LogicalPlan> wrapKeep(LogicalPlan current) {
-        return arbitrarySubset(current.output(), 1, current.output().size()).map(kept -> {
-            var projections = kept.stream().map(a -> (NamedExpression) a).toList();
-            return new Keep(Source.EMPTY, current, projections);
-        });
+    private static LogicalPlan wrapKeep(LogicalPlan current, SourceOfRandomness random) {
+        List<Attribute> kept = generateSubset(random, current.output(), 1, current.output().size());
+        var projections = kept.stream().map(a -> (NamedExpression) a).toList();
+        return new Keep(Source.EMPTY, current, projections);
     }
 
-    private static Arbitrary<LogicalPlan> wrapDrop(LogicalPlan current, List<Attribute> available) {
-        return arbitrarySubset(available, 1, available.size() - 1).map(dropped -> {
-            var dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
-            var kept = available.stream().filter(a -> dropNames.contains(a.name()) == false).map(a -> (NamedExpression) a).toList();
-            return new Keep(Source.EMPTY, current, kept);
-        });
+    private static LogicalPlan wrapDrop(LogicalPlan current, List<Attribute> available, SourceOfRandomness random) {
+        List<Attribute> dropped = generateSubset(random, available, 1, available.size() - 1);
+        var dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
+        var kept = available.stream().filter(a -> dropNames.contains(a.name()) == false).map(a -> (NamedExpression) a).toList();
+        return new Keep(Source.EMPTY, current, kept);
     }
 
-    private static Arbitrary<LogicalPlan> wrapEval(LogicalPlan current) {
-        var available = current.output();
-        var integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
+    private static LogicalPlan wrapEval(LogicalPlan current, SourceOfRandomness random, GenerationStatus status) {
+        List<Attribute> available = current.output();
+        List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
         var existingNames = available.stream().map(Attribute::name).collect(Collectors.toSet());
         List<String> availableAliases = EVAL_ALIAS_POOL.stream().filter(n -> existingNames.contains(n) == false).toList();
         if (availableAliases.isEmpty()) {
             availableAliases = List.of("_col_0", "_col_1");
         }
         int maxAliases = Math.min(availableAliases.size(), 3);
-        return Arbitraries.of(availableAliases).set().ofMinSize(1).ofMaxSize(maxAliases).flatMap(nameSet -> {
-            var names = List.copyOf(nameSet);
-            return arbitraryExpression(integerAttrs).list()
-                .ofSize(names.size())
-                .map(
-                    exprs -> new Eval(
-                        Source.EMPTY,
-                        current,
-                        IntStream.range(0, names.size()).mapToObj(i -> new Alias(Source.EMPTY, names.get(i), exprs.get(i))).toList()
-                    )
-                );
-        });
+        int nAliases = random.nextInt(1, maxAliases + 1);
+        List<String> shuffled = new ArrayList<>(availableAliases);
+        Collections.shuffle(shuffled, random.toJDKRandom());
+        List<Alias> fields = new ArrayList<>(nAliases);
+        for (int i = 0; i < nAliases; i++) {
+            fields.add(new Alias(Source.EMPTY, shuffled.get(i), generateExpression(integerAttrs, random, status)));
+        }
+        return new Eval(Source.EMPTY, current, fields);
     }
 
-    private static Arbitrary<LogicalPlan> wrapFilter(LogicalPlan current, List<Attribute> integerAttrs) {
-        return Combinators.combine(
-            arbitraryExpression(integerAttrs),
-            Arbitraries.oneOf(
-                arbitraryExpression(integerAttrs),
-                Arbitraries.integers().between(1, 10).map(i -> (Expression) new Literal(Source.EMPTY, i, DataType.INTEGER))
-            ),
-            Arbitraries.of(true, false)
-        ).as((left, right, useGt) -> {
-            Expression cond = useGt ? new GreaterThan(Source.EMPTY, left, right) : new LessThan(Source.EMPTY, left, right);
-            return new Filter(Source.EMPTY, current, cond);
-        });
+    private static LogicalPlan wrapFilter(
+        LogicalPlan current,
+        List<Attribute> integerAttrs,
+        SourceOfRandomness random,
+        GenerationStatus status
+    ) {
+        Expression left = generateExpression(integerAttrs, random, status);
+        Expression right = random.nextBoolean()
+            ? generateExpression(integerAttrs, random, status)
+            : new Literal(Source.EMPTY, random.nextInt(1, 11), DataType.INTEGER);
+        Expression cond = random.nextBoolean() ? new GreaterThan(Source.EMPTY, left, right) : new LessThan(Source.EMPTY, left, right);
+        return new Filter(Source.EMPTY, current, cond);
     }
 
-    private static Arbitrary<LogicalPlan> wrapLimit(LogicalPlan current) {
-        return Arbitraries.integers()
-            .between(1, 10)
-            .map(n -> new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), current));
+    private static LogicalPlan wrapLimit(LogicalPlan current, SourceOfRandomness random) {
+        int n = random.nextInt(1, 11); // 1–10 inclusive
+        return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), current);
     }
 
-    private static Arbitrary<LogicalPlan> wrapSort(LogicalPlan current, List<Attribute> available) {
+    private static LogicalPlan wrapSort(
+        LogicalPlan current,
+        List<Attribute> available,
+        SourceOfRandomness random,
+        GenerationStatus status
+    ) {
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
-        Arbitrary<Expression> sortExpr = integerAttrs.isEmpty()
-            ? arbitraryAttribute(available).map(a -> (Expression) a)
-            : Arbitraries.oneOf(arbitraryAttribute(available).map(a -> (Expression) a), arbitraryExpression(integerAttrs));
         int maxOrders = Math.min(available.size(), 3);
-        return Combinators.combine(
-            sortExpr.list().ofMinSize(1).ofMaxSize(maxOrders),
-            Arbitraries.of(Order.OrderDirection.values()).list().ofMinSize(1).ofMaxSize(maxOrders),
-            Arbitraries.integers().between(1, 10)
-        ).as((exprs, dirs, n) -> {
-            int size = Math.min(exprs.size(), dirs.size());
-            var orders = IntStream.range(0, size)
-                .mapToObj(i -> new Order(Source.EMPTY, exprs.get(i), dirs.get(i), Order.NullsPosition.ANY))
-                .toList();
-            var orderBy = new OrderBy(Source.EMPTY, current, orders);
-            return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), orderBy);
-        });
+        int nOrders = random.nextInt(1, maxOrders + 1);
+        List<Order> orders = new ArrayList<>(nOrders);
+        for (int i = 0; i < nOrders; i++) {
+            Expression expr = (integerAttrs.isEmpty() || random.nextBoolean())
+                ? random.choose(available)
+                : generateExpression(integerAttrs, random, status);
+            Order.OrderDirection dir = random.choose(Order.OrderDirection.values());
+            orders.add(new Order(Source.EMPTY, expr, dir, Order.NullsPosition.ANY));
+        }
+        int n = random.nextInt(1, 11);
+        return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), new OrderBy(Source.EMPTY, current, orders));
     }
 
-    private static Arbitrary<LogicalPlan> wrapStats(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
-        return arbitraryAggregate(current, integerAttrs, available).map(agg -> (LogicalPlan) agg);
+    private static LogicalPlan wrapInlineStats(
+        LogicalPlan current,
+        List<Attribute> integerAttrs,
+        List<Attribute> available,
+        SourceOfRandomness random,
+        GenerationStatus status
+    ) {
+        return new InlineStats(Source.EMPTY, generateAggregate(current, integerAttrs, available, random, status));
     }
 
-    private static Arbitrary<LogicalPlan> wrapInlineStats(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
-        return arbitraryAggregate(current, integerAttrs, available).map(agg -> new InlineStats(Source.EMPTY, agg));
-    }
-
-    private static Arbitrary<Aggregate> arbitraryAggregate(LogicalPlan current, List<Attribute> integerAttrs, List<Attribute> available) {
+    private static Aggregate generateAggregate(
+        LogicalPlan current,
+        List<Attribute> integerAttrs,
+        List<Attribute> available,
+        SourceOfRandomness random,
+        GenerationStatus status
+    ) {
         int maxGroups = Math.min(available.size(), 2);
-        Arbitrary<List<Attribute>> groupsArb = maxGroups > 0
-            ? Arbitraries.oneOf(Arbitraries.just(List.of()), arbitrarySubset(available, 1, maxGroups))
-            : Arbitraries.just(List.of());
-        return Arbitraries.of(STATS_ALIAS_POOL).set().ofMinSize(1).ofMaxSize(STATS_ALIAS_POOL.size()).flatMap(aliasNames -> {
-            var names = List.copyOf(aliasNames);
-            return Combinators.combine(
-                arbitraryExpression(integerAttrs).list().ofSize(names.size()),
-                Arbitraries.of("COUNT", "SUM", "MIN", "MAX").list().ofSize(names.size()),
-                groupsArb
-            ).as((fields, funcs, groupKeys) -> {
-                var aggregates = new ArrayList<NamedExpression>(
-                    IntStream.range(0, names.size())
-                        .mapToObj(i -> (NamedExpression) new Alias(Source.EMPTY, names.get(i), buildAggFunc(funcs.get(i), fields.get(i))))
-                        .toList()
-                );
-                aggregates.addAll(groupKeys);
-                return new Aggregate(Source.EMPTY, current, List.copyOf(groupKeys), aggregates);
-            });
-        });
+        List<Attribute> groupKeys = (maxGroups > 0 && random.nextBoolean()) ? generateSubset(random, available, 1, maxGroups) : List.of();
+
+        List<String> shuffledNames = new ArrayList<>(STATS_ALIAS_POOL);
+        Collections.shuffle(shuffledNames, random.toJDKRandom());
+        int nNames = random.nextInt(1, STATS_ALIAS_POOL.size() + 1);
+
+        List<NamedExpression> aggregates = new ArrayList<>();
+        for (int i = 0; i < nNames; i++) {
+            Expression field = generateExpression(integerAttrs, random, status);
+            String funcName = random.choose(AGG_FUNC_POOL);
+            aggregates.add(new Alias(Source.EMPTY, shuffledNames.get(i), buildAggFunc(funcName, field)));
+        }
+        aggregates.addAll(groupKeys);
+        return new Aggregate(Source.EMPTY, current, List.copyOf(groupKeys), List.copyOf(aggregates));
     }
 
     private static AggregateFunction buildAggFunc(String funcName, Expression field) {
@@ -341,34 +331,35 @@ public class LogicalPlanGenerator {
         };
     }
 
-    private static Arbitrary<List<Attribute>> arbitrarySubset(List<Attribute> attrs, int minSize, int maxSize) {
-        return arbitraryAttribute(attrs).set().ofMinSize(minSize).ofMaxSize(maxSize).map(List::copyOf);
+    private static Expression generateExpression(List<Attribute> integerAttrs, SourceOfRandomness random, GenerationStatus status) {
+        return generateExpression(integerAttrs, EXPR_DEPTH, random);
     }
 
-    private static Arbitrary<Expression> arbitraryExpression(List<Attribute> integerAttrs) {
-        return Arbitraries.recursive(
-            () -> arbitraryLeaf(integerAttrs),
-            child -> Combinators.combine(child, child)
-                .flatAs(
-                    (left, right) -> Arbitraries.<Expression>oneOf(
-                        Arbitraries.just(new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG)),
-                        Arbitraries.just(new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG)),
-                        Arbitraries.just(new Mul(Source.EMPTY, left, right))
-                    )
-                ),
-            EXPR_DEPTH
-        );
+    private static Expression generateExpression(List<Attribute> integerAttrs, int depth, SourceOfRandomness random) {
+        if (depth == 0 || random.nextBoolean()) {
+            return generateLeaf(integerAttrs, random);
+        }
+        Expression left = generateExpression(integerAttrs, depth - 1, random);
+        Expression right = generateExpression(integerAttrs, depth - 1, random);
+        return switch (random.nextInt(0, 3)) {
+            case 0 -> new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
+            case 1 -> new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
+            case 2 -> new Mul(Source.EMPTY, left, right);
+            default -> throw new IllegalStateException();
+        };
     }
 
-    private static Arbitrary<Expression> arbitraryLeaf(List<Attribute> integerAttrs) {
-        return Arbitraries.oneOf(
-            arbitraryAttribute(integerAttrs),
-            Arbitraries.integers().between(1, 10).map(i -> new Literal(Source.EMPTY, i, DataType.INTEGER))
-        );
+    private static Expression generateLeaf(List<Attribute> integerAttrs, SourceOfRandomness random) {
+        if (random.nextBoolean()) {
+            return random.choose(integerAttrs);
+        }
+        return new Literal(Source.EMPTY, random.nextInt(1, 11), DataType.INTEGER);
     }
 
-    /** Wraps attributes in {@link Tuple} to work around jqwik's equals/hashCode dedup, which ignores NameId. */
-    private static Arbitrary<Attribute> arbitraryAttribute(List<Attribute> available) {
-        return Arbitraries.of(available.stream().map(a -> Tuple.tuple(a, a.id())).toList()).map(Tuple::v1);
+    private static List<Attribute> generateSubset(SourceOfRandomness random, List<Attribute> attrs, int min, int max) {
+        List<Attribute> shuffled = new ArrayList<>(attrs);
+        Collections.shuffle(shuffled, random.toJDKRandom());
+        int size = random.nextInt(min, max + 1);
+        return List.copyOf(shuffled.subList(0, Math.min(size, shuffled.size())));
     }
 }

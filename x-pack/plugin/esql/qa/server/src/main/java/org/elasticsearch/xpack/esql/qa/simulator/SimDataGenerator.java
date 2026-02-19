@@ -7,16 +7,15 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.Combinators;
+import com.pholser.junit.quickcheck.generator.GenerationStatus;
+import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import org.elasticsearch.xpack.esql.core.type.DataType;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /**
  * Generates random row data conforming to a {@link SimSchema}.
@@ -27,25 +26,27 @@ class SimDataGenerator {
 
     private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz");
 
-    static Arbitrary<List<Map<String, Object>>> rows(SimSchema schema) {
-        return arbitraryRow(schema).list().ofMinSize(1).ofMaxSize(5);
-    }
-
-    private static Arbitrary<Map<String, Object>> arbitraryRow(SimSchema schema) {
-        List<SimSchema.SimColumn> columns = schema.columns();
-        if (columns.size() == 1) {
-            return arbitraryValue(columns.get(0).type()).map(v -> Map.of(columns.get(0).name(), v));
+    static List<Map<String, Object>> generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
+        int nRows = random.nextInt(1, 6); // 1–5 inclusive
+        List<Map<String, Object>> rows = new ArrayList<>(nRows);
+        for (int i = 0; i < nRows; i++) {
+            rows.add(generateRow(schema, random));
         }
-
-        List<Arbitrary<Object>> valueArbitraries = columns.stream().map(col -> arbitraryValue(col.type())).toList();
-        return Combinators.combine(valueArbitraries)
-            .as(values -> IntStream.range(0, columns.size()).boxed().collect(Collectors.toMap(i -> columns.get(i).name(), values::get)));
+        return rows;
     }
 
-    private static Arbitrary<Object> arbitraryValue(DataType type) {
+    private static Map<String, Object> generateRow(SimSchema schema, SourceOfRandomness random) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        for (SimSchema.SimColumn col : schema.columns()) {
+            row.put(col.name(), generateValue(col.type(), random));
+        }
+        return row;
+    }
+
+    private static Object generateValue(DataType type, SourceOfRandomness random) {
         return switch (type) {
-            case INTEGER -> Arbitraries.integers().between(1, 10).map(i -> (Object) i);
-            case KEYWORD -> Arbitraries.of(KEYWORD_POOL).map(s -> (Object) s);
+            case INTEGER -> random.nextInt(1, 11); // 1–10 inclusive
+            case KEYWORD -> random.choose(KEYWORD_POOL);
             default -> throw new UnsupportedOperationException("Unsupported data type for data generation: " + type);
         };
     }
