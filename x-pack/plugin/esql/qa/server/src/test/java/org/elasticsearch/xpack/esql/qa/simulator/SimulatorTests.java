@@ -262,7 +262,6 @@ public class SimulatorTests extends ESTestCase {
 
     public void testEvalShadowing() throws Exception {
         // When multiple EVALs assign to the same column name, ES shadows (replaces) the earlier column.
-        // ROW x=1 | EVAL _col_0 = 9 | EVAL _col_0 = 4 should produce 2 columns (x, _col_0), not 3.
         assertThat(
             simulate("ROW x=1 | EVAL _col_0 = 9 | EVAL _col_0 = 4"),
             equalTo(

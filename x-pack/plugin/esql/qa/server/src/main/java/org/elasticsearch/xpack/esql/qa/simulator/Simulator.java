@@ -408,10 +408,6 @@ public class Simulator {
             return columns.isEmpty() ? 0 : columns.getFirst().values.size();
         }
 
-        public Result append(List<Column> newColumns) {
-            return new Result(CollectionUtils.concatLists(columns, newColumns));
-        }
-
         public Column getColumn(String name) {
             // Last match wins, respecting column shadowing
             return columns.stream()

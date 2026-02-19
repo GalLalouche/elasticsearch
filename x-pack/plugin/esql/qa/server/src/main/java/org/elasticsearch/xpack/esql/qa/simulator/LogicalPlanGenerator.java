@@ -210,11 +210,9 @@ public class LogicalPlanGenerator {
                 options.add(() -> wrapInlineStats(current, integerAttrs, available, random, status));
             }
         }
-        // LIMIT and SORT disabled: SORT always wraps in LIMIT, and when LIMIT cuts within a group of
+        // LIMIT and SORT are excluded: SORT always wraps in LIMIT, and when LIMIT cuts within a group of
         // rows with equal sort keys, simulator and ES pick different rows (nondeterministic tie-breaking),
-        // causing false failures. Standalone LIMIT also causes nondeterministic row selection. See TODO.
-        // options.add(() -> wrapLimit(current, random));
-        // options.add(() -> wrapSort(current, available, random, status));
+        // causing false failures. Standalone LIMIT has the same problem. See TODO.
         return random.choose(options).get();
     }
 
