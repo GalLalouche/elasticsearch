@@ -415,13 +415,20 @@ public class Simulator {
         private UnnamedColumn evalBinaryLong(Expression leftExpr, Expression rightExpr, SimBug activeBug, LongBinaryOperator op) {
             var left = evaluate(leftExpr, activeBug);
             var right = evaluate(rightExpr, activeBug);
+            // ES|QL uses 32-bit integer arithmetic and returns null on overflow; LONG arithmetic can overflow too but is
+            // extremely unlikely with the small values in our generated data, so we only check for INTEGER overflow here.
+            boolean integerArithmetic = left.type == DataType.INTEGER && right.type == DataType.INTEGER;
             return new UnnamedColumn(left.type, IntStream.range(0, left.values.size()).mapToObj(i -> {
                 Object l = left.values.get(i);
                 Object r = right.values.get(i);
                 if (l == null || r == null) {
                     return null;
                 }
-                return (Object) op.applyAsLong(toLong(l), toLong(r));
+                long result = op.applyAsLong(toLong(l), toLong(r));
+                if (integerArithmetic && (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE)) {
+                    return null;
+                }
+                return (Object) result;
             }).toList());
         }
 

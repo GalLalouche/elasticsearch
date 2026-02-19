@@ -260,6 +260,15 @@ public class SimulatorTests extends ESTestCase {
         );
     }
 
+    public void testIntegerArithmeticOverflowReturnsNull() throws Exception {
+        // 50000 * 50000 = 2,500,000,000 which exceeds Integer.MAX_VALUE (2,147,483,647).
+        // ES|QL returns null for integer overflow; the simulator must match.
+        Simulator.Result result = simulate("ROW x=50000 | EVAL z = x * x");
+        assertThat(result.columns().get(1).name(), equalTo("z"));
+        assertThat(result.columns().get(1).type(), equalTo(DataType.INTEGER));
+        assertNull(result.columns().get(1).values().get(0));
+    }
+
     public void testEsRelationInMemory() throws Exception {
         var schema = new SimSchema(
             "test_idx",
