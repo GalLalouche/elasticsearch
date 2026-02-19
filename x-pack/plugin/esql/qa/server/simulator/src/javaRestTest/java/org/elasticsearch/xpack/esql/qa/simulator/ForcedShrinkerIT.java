@@ -50,6 +50,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Takes a known-failing query + data and shrinks them to the minimal reproduction.
@@ -58,7 +59,6 @@ import java.util.Map;
  */
 @ThreadLeakFilters(filters = TestClustersThreadFilter.class)
 public class ForcedShrinkerIT extends ESRestTestCase {
-
     @ClassRule
     public static ElasticsearchCluster cluster = ElasticsearchCluster.local()
         .distribution(DistributionType.DEFAULT)
@@ -242,8 +242,6 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         System.out.println("Data: " + toDataJson(schema, rows));
     }
 
-    // --- Parsing helpers ---
-
     @SuppressWarnings("unchecked")
     private static SimSchema parseSchema(String dataJson) {
         Map<String, Object> dataMap = XContentHelper.convertToMap(JsonXContent.jsonXContent, dataJson, false);
@@ -259,11 +257,7 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     private static List<Map<String, Object>> parseRows(String dataJson) {
         Map<String, Object> dataMap = XContentHelper.convertToMap(JsonXContent.jsonXContent, dataJson, false);
         List<Map<String, Object>> rowsList = (List<Map<String, Object>>) dataMap.get("rows");
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Map<String, Object> row : rowsList) {
-            result.add(new LinkedHashMap<>(row));
-        }
-        return result;
+        return rowsList.stream().map(LinkedHashMap::new).collect(Collectors.toCollection(ArrayList::new));
     }
 
     private static String toDataJson(SimSchema schema, List<Map<String, Object>> rows) {
@@ -302,8 +296,6 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         return sb.toString();
     }
 
-    // --- Query parsing and function resolution ---
-
     private static LogicalPlan parseAndResolve(String query) {
         LogicalPlan plan = EsqlParser.INSTANCE.parseQuery(query);
         return resolveUnresolvedFunctions(plan);
@@ -313,23 +305,17 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     private static LogicalPlan resolveUnresolvedFunctions(LogicalPlan plan) {
         return switch (plan) {
             case Eval eval -> {
-                List<Alias> resolvedFields = eval.fields().stream()
+                List<Alias> resolvedFields = eval.fields()
+                    .stream()
                     .map(a -> new Alias(a.source(), a.name(), resolveExpr(a.child())))
                     .toList();
                 yield new Eval(eval.source(), resolveUnresolvedFunctions(eval.child()), resolvedFields);
             }
-            case Filter filter -> new Filter(
-                filter.source(),
-                resolveUnresolvedFunctions(filter.child()),
-                resolveExpr(filter.condition())
-            );
+            case Filter filter -> new Filter(filter.source(), resolveUnresolvedFunctions(filter.child()), resolveExpr(filter.condition()));
             case OrderBy orderBy -> new OrderBy(
                 orderBy.source(),
                 resolveUnresolvedFunctions(orderBy.child()),
-                orderBy.order()
-                    .stream()
-                    .map(o -> new Order(o.source(), resolveExpr(o.child()), o.direction(), o.nullsPosition()))
-                    .toList()
+                orderBy.order().stream().map(o -> new Order(o.source(), resolveExpr(o.child()), o.direction(), o.nullsPosition())).toList()
             );
             case InlineStats is -> {
                 Aggregate resolved = resolveAggregate(is.aggregate());
@@ -342,14 +328,10 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     }
 
     private static Aggregate resolveAggregate(Aggregate agg) {
-        List<NamedExpression> resolvedAggs = new ArrayList<>();
-        for (NamedExpression ne : agg.aggregates()) {
-            if (ne instanceof Alias alias) {
-                resolvedAggs.add(new Alias(alias.source(), alias.name(), resolveExpr(alias.child())));
-            } else {
-                resolvedAggs.add(ne);
-            }
-        }
+        List<NamedExpression> resolvedAggs = agg.aggregates()
+            .stream()
+            .map(ne -> ne instanceof Alias alias ? new Alias(alias.source(), alias.name(), resolveExpr(alias.child())) : ne)
+            .toList();
         List<Expression> resolvedGroupings = agg.groupings().stream().map(ForcedShrinkerIT::resolveExpr).toList();
         return new Aggregate(agg.source(), resolveUnresolvedFunctions(agg.child()), resolvedGroupings, resolvedAggs);
     }
@@ -368,8 +350,6 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         }
         return expr;
     }
-
-    // --- Plan tree flattening and rebuilding ---
 
     /** Flattens the plan into pipeline stages (root first, FROM last). InlineStats skips its inner Aggregate. */
     private static List<LogicalPlan> flattenStages(LogicalPlan plan) {
@@ -412,8 +392,6 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         return rebuildFromStages(newStages);
     }
 
-    // --- Expression shrinking ---
-
     /** Returns all possible single-expression-shrink variants of a plan stage. */
     private static List<LogicalPlan> shrinkExpressions(LogicalPlan stage) {
         List<LogicalPlan> results = new ArrayList<>();
@@ -449,7 +427,8 @@ public class ForcedShrinkerIT extends ESRestTestCase {
             case Aggregate agg -> {
                 results.addAll(shrinkAggregateExprs(agg));
             }
-            default -> { /* no expressions to shrink */ }
+            default -> {
+                /* no expressions to shrink */ }
         }
         return results;
     }
@@ -493,10 +472,7 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         };
     }
 
-    // --- Failure checking ---
-
-    private boolean stillFails(SimSchema schema, List<Map<String, Object>> rows, LogicalPlan plan, String failureMode)
-        throws Exception {
+    private boolean stillFails(SimSchema schema, List<Map<String, Object>> rows, LogicalPlan plan, String failureMode) throws Exception {
         String query = LogicalPlanPrinter.print(plan);
         deleteIndexBestEffort(schema.indexName());
         createIndex(schema);
@@ -559,25 +535,15 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         return simRows.equals(esRows);
     }
 
-    // --- Logging ---
-
-    private void log(int step, String what, LogicalPlan plan, SimSchema schema, List<Map<String, Object>> rows) {
+    private static void log(int step, String what, LogicalPlan plan, SimSchema schema, List<Map<String, Object>> rows) {
         System.out.println("[Step " + step + "] " + what);
         System.out.println("  Query: " + LogicalPlanPrinter.print(plan));
         System.out.println("  Data: " + toDataJson(schema, rows));
     }
 
-    // --- Data helpers ---
-
     private static List<Map<String, Object>> deepCopyRows(List<Map<String, Object>> rows) {
-        List<Map<String, Object>> copy = new ArrayList<>(rows.size());
-        for (Map<String, Object> row : rows) {
-            copy.add(new LinkedHashMap<>(row));
-        }
-        return copy;
+        return rows.stream().map(LinkedHashMap::new).collect(Collectors.toCollection(ArrayList::new));
     }
-
-    // --- ES helpers ---
 
     private void createIndex(SimSchema schema) throws IOException {
         Request createIndex = new Request("PUT", "/" + schema.indexName());

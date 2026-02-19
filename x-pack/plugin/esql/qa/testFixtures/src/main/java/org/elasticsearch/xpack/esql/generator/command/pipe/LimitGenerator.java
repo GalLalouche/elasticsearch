@@ -34,7 +34,6 @@ public class LimitGenerator implements CommandGenerator {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public ValidationResult validateOutput(
         List<CommandDescription> previousCommands,
         CommandDescription commandDescription,

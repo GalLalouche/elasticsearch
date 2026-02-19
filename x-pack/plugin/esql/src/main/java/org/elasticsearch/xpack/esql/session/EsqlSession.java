@@ -28,6 +28,7 @@ import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.operator.DriverCompletionInfo;
 import org.elasticsearch.compute.operator.FailureCollector;
 import org.elasticsearch.compute.operator.PlanTimeProfile;
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.mapper.IndexModeFieldMapper;
@@ -498,7 +499,7 @@ public class EsqlSession {
 
     private LogicalPlan deserializePlan(byte[] planBytes, Configuration configuration) {
         try (
-            var bytesIn = StreamInput.wrap(planBytes);
+            StreamInput bytesIn = StreamInput.wrap(planBytes);
             var namedIn = new NamedWriteableAwareStreamInput(bytesIn, planWriteableRegistry());
             var planIn = new PlanStreamInput(namedIn, namedIn.namedWriteableRegistry(), configuration)
         ) {
@@ -508,6 +509,7 @@ public class EsqlSession {
         }
     }
 
+    @Nullable
     private static volatile NamedWriteableRegistry planRegistry;
 
     /** Lazily-built registry for deserializing binary plans. */
@@ -515,7 +517,7 @@ public class EsqlSession {
         if (planRegistry == null) {
             synchronized (EsqlSession.class) {
                 if (planRegistry == null) {
-                    var entries = new ArrayList<NamedWriteableRegistry.Entry>();
+                    List<NamedWriteableRegistry.Entry> entries = new ArrayList<>();
                     entries.addAll(ExpressionWritables.getNamedWriteables());
                     entries.addAll(PlanWritables.getNamedWriteables());
                     planRegistry = new NamedWriteableRegistry(entries);

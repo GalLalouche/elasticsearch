@@ -26,6 +26,7 @@ import static org.elasticsearch.test.ESTestCase.randomInt;
 
 public class LookupJoinGenerator implements CommandGenerator {
 
+    private static final String N_KEYS = "nKeys";
     public static final String LOOKUP_JOIN = "lookup join";
     public static final CommandGenerator INSTANCE = new LookupJoinGenerator();
 
@@ -94,7 +95,7 @@ public class LookupJoinGenerator implements CommandGenerator {
             }
         }
         String cmdString = stringBuilder.toString();
-        return new CommandDescription(LOOKUP_JOIN, this, cmdString, Map.of("nKeys", keyNames.size()));
+        return new CommandDescription(LOOKUP_JOIN, this, cmdString, Map.of(N_KEYS, keyNames.size()));
     }
 
     @Override
@@ -111,7 +112,7 @@ public class LookupJoinGenerator implements CommandGenerator {
         }
 
         // this is for the additional RENAME, that could drop columns
-        int prevCols = previousColumns.size() - (Integer) commandDescription.context().get("nKeys");
+        int prevCols = previousColumns.size() - (Integer) commandDescription.context().get(N_KEYS);
 
         if (previousColumns.stream().anyMatch(x -> x.name().equals("<all-fields-projected>"))) {
             // known bug https://github.com/elastic/elasticsearch/issues/121741

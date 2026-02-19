@@ -502,7 +502,8 @@ public abstract class GenerativeRestTest extends ESRestTestCase implements Query
             return UNMAPPED_NAMES.stream().anyMatch(name -> functionExpression.contains(name) || foundValue.contains(name));
         }
 
-        return false;
+        // https://github.com/elastic/elasticsearch/issues/142390
+        return errorWithoutLineBreaks.contains("Rule execution limit [100] reached");
     }
 
     /**

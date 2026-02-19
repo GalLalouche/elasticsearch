@@ -50,8 +50,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.IntPredicate;
-import java.util.function.LongBinaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -183,7 +183,7 @@ public class Simulator {
     }
 
     private Result visit(Keep keep) throws IOException {
-        var childResult = simulate(keep.child());
+        Result childResult = simulate(keep.child());
         var newColumns = new ArrayList<Column>();
         for (var projection : keep.projections()) {
             newColumns.add(childResult.getColumn(projection.name()));
@@ -195,7 +195,7 @@ public class Simulator {
     }
 
     private Result visit(Drop drop) throws IOException {
-        var childResult = simulate(drop.child());
+        Result childResult = simulate(drop.child());
         var newColumns = new ArrayList<>(childResult.columns);
         Set<String> names = drop.removals().stream().map(NamedExpression::name).collect(Collectors.toSet());
         newColumns.removeIf(column -> names.contains(column.name));
@@ -203,7 +203,7 @@ public class Simulator {
     }
 
     private Result visit(Eval eval) throws IOException {
-        var childResult = simulate(eval.child());
+        Result childResult = simulate(eval.child());
         var newColumns = new ArrayList<Column>();
         for (var expression : eval.expressions()) {
             if (expression instanceof Alias alias) {
@@ -218,7 +218,7 @@ public class Simulator {
     }
 
     private Result visit(Filter filter) throws IOException {
-        var childResult = simulate(filter.child());
+        Result childResult = simulate(filter.child());
         UnnamedColumn cond = childResult.evaluate(filter.condition(), activeBug);
         var mask = IntStream.range(0, cond.values.size())
             .filter(i -> Boolean.TRUE.equals(cond.values.get(i)) != (activeBug == SimBug.WHERE_INVERTED))
@@ -231,7 +231,7 @@ public class Simulator {
     }
 
     private Result visit(Limit limit) throws IOException {
-        var childResult = simulate(limit.child());
+        Result childResult = simulate(limit.child());
         int n = ((Number) ((Literal) limit.limit()).value()).intValue() + (activeBug == SimBug.LIMIT_OFF_BY_ONE ? 1 : 0);
         int actual = Math.min(n, childResult.numRows());
         return new Result(childResult.columns.stream().map(c -> new Column(c.name, c.type, c.values.subList(0, actual))).toList());
@@ -239,7 +239,7 @@ public class Simulator {
 
     @SuppressWarnings("unchecked")
     private Result visit(OrderBy orderBy) throws IOException {
-        var childResult = simulate(orderBy.child());
+        Result childResult = simulate(orderBy.child());
         int numRows = childResult.numRows();
         Integer[] indices = IntStream.range(0, numRows).boxed().toArray(Integer[]::new);
         // Pre-evaluate order expressions to column values
@@ -267,7 +267,7 @@ public class Simulator {
             return visit(inlineStats.aggregate());
         }
         var aggregate = inlineStats.aggregate();
-        var childResult = simulate(aggregate.child());
+        Result childResult = simulate(aggregate.child());
         int numRows = childResult.numRows();
         var groups = buildGroups(aggregate, childResult, numRows);
         // Build aggregate columns, broadcasting per-group values to each original row.
@@ -298,7 +298,7 @@ public class Simulator {
     }
 
     private Result visit(Aggregate aggregate) throws IOException {
-        var childResult = simulate(aggregate.child());
+        Result childResult = simulate(aggregate.child());
         var groups = buildGroups(aggregate, childResult, childResult.numRows());
         // Deduplicate by name (keep last): matches ES mergeOutputExpressions semantics.
         // Grouping keys appear after aggregate functions in the aggregates list, so the
@@ -405,14 +405,19 @@ public class Simulator {
                 );
                 case Sub sub -> evalBinaryLong(sub.left(), sub.right(), activeBug, (l, r) -> l - r);
                 case Mul mul -> evalBinaryLong(mul.left(), mul.right(), activeBug, (l, r) -> l * r);
-                case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r) -> l / r);
+                case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r) -> r == 0 ? null : l / r);
                 case GreaterThan gt -> evalComparison(gt.left(), gt.right(), activeBug, cmp -> cmp > 0);
                 case LessThan lt -> evalComparison(lt.left(), lt.right(), activeBug, cmp -> cmp < 0);
                 default -> throw new UnsupportedOperationException(Strings.format("Unsupported Expression in evaluate: [%s]", expression));
             };
         }
 
-        private UnnamedColumn evalBinaryLong(Expression leftExpr, Expression rightExpr, SimBug activeBug, LongBinaryOperator op) {
+        private UnnamedColumn evalBinaryLong(
+            Expression leftExpr,
+            Expression rightExpr,
+            SimBug activeBug,
+            BiFunction<Long, Long, Object> op
+        ) {
             var left = evaluate(leftExpr, activeBug);
             var right = evaluate(rightExpr, activeBug);
             // ES|QL uses 32-bit integer arithmetic and returns null on overflow; LONG arithmetic can overflow too but is
@@ -424,11 +429,15 @@ public class Simulator {
                 if (l == null || r == null) {
                     return null;
                 }
-                long result = op.applyAsLong(toLong(l), toLong(r));
-                if (integerArithmetic && (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE)) {
+                Object result = op.apply(toLong(l), toLong(r));
+                if (result == null) {
                     return null;
                 }
-                return (Object) result;
+                long longResult = ((Number) result).longValue();
+                if (integerArithmetic && (longResult < Integer.MIN_VALUE || longResult > Integer.MAX_VALUE)) {
+                    return null;
+                }
+                return (Object) longResult;
             }).toList());
         }
 

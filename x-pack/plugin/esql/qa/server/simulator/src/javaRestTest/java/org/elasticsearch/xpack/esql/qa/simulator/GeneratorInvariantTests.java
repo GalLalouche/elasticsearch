@@ -81,6 +81,7 @@ public class GeneratorInvariantTests {
      */
     private static List<Attribute> collectAllAttributeReferences(LogicalPlan plan) {
         return switch (plan) {
+            // InlineStats has no direct attribute references; its inner Aggregate is visited separately by forEachDown
             case InlineStats ignored -> List.of();
             case Aggregate agg -> {
                 var refs = new ArrayList<Attribute>();

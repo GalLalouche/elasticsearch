@@ -137,7 +137,7 @@ public final class CsvTestUtils {
     /** Bootstrap resource: directory for data files. Fallback to a known file if directory is null (e.g. in JAR). */
     private static final String DATA_DIR_RESOURCE = "/data/";
 
-    private CsvTestUtils() {}
+    private CsvTestUtils() { /* static class */ }
 
     /**
      * Creates and returns the CSV data directory path. For file protocol, returns the data directory.
