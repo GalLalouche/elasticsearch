@@ -9,6 +9,8 @@ dependencies {
   javaRestTestRuntimeOnly('org.junit.platform:junit-platform-engine:1.12.1')
   javaRestTestRuntimeOnly('org.junit.platform:junit-platform-commons:1.12.1')
   javaRestTestRuntimeOnly('org.opentest4j:opentest4j:1.3.0')
+  // Needed so useJUnitPlatform() discovers JUnit 4 tests (ESRestTestCase) alongside jqwik tests
+  javaRestTestRuntimeOnly('org.junit.vintage:junit-vintage-engine:5.12.1')
 
   clusterPlugins project(':plugins:mapper-size')
   clusterPlugins project(':plugins:mapper-murmur3')
@@ -52,5 +54,20 @@ tasks.named('javaRestTest') {
   systemProperty 'simulator.planDepth', providers.systemProperty('simulator.planDepth').getOrElse('5')
   providers.systemProperty('simulator.seed').orElse('').get().with { seed ->
     if (!seed.isEmpty()) systemProperty 'simulator.seed', seed
+  }
+  providers.systemProperty('simulator.query').orElse('').get().with { query ->
+    if (!query.isEmpty()) systemProperty 'simulator.query', query
+  }
+  providers.systemProperty('simulator.data').orElse('').get().with { data ->
+    if (!data.isEmpty()) systemProperty 'simulator.data', data
+  }
+  providers.systemProperty('simulator.failureMode').orElse('').get().with { mode ->
+    if (!mode.isEmpty()) systemProperty 'simulator.failureMode', mode
+  }
+  providers.systemProperty('simulator.queryFile').orElse('').get().with { f ->
+    if (!f.isEmpty()) systemProperty 'simulator.queryFile', f
+  }
+  providers.systemProperty('simulator.dataFile').orElse('').get().with { f ->
+    if (!f.isEmpty()) systemProperty 'simulator.dataFile', f
   }
 }
