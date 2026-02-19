@@ -314,6 +314,10 @@ public class LogicalPlanGenerator {
         List<NamedExpression> aggregates = new ArrayList<>();
         for (int i = 0; i < nNames; i++) {
             Expression field = generateExpression(integerAttrs, random, status);
+            // Constant-only aggregate expressions crash INLINE STATS (ES planner bug)
+            if (field.references().isEmpty()) {
+                field = random.choose(integerAttrs);
+            }
             String funcName = random.choose(AGG_FUNC_POOL);
             aggregates.add(new Alias(Source.EMPTY, shuffledNames.get(i), buildAggFunc(funcName, field)));
         }
