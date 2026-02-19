@@ -367,9 +367,7 @@ public class LogicalPlanGenerator {
         );
     }
 
-    /**
-     * Wraps attributes in {@link Tuple} to work around jqwik's equals/hashCode dedup, which ignores NameId.
-     */
+    /** Wraps attributes in {@link Tuple} to work around jqwik's equals/hashCode dedup, which ignores NameId. */
     private static Arbitrary<Attribute> arbitraryAttribute(List<Attribute> available) {
         return Arbitraries.of(available.stream().map(a -> Tuple.tuple(a, a.id())).toList()).map(Tuple::v1);
     }

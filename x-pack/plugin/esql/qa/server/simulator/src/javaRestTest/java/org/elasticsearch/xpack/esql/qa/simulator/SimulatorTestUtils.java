@@ -23,9 +23,7 @@ import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 
 import java.util.List;
 
-/**
- * Shared utilities for simulator jqwik tests.
- */
+/** Shared utilities for simulator jqwik tests. */
 class SimulatorTestUtils {
     private SimulatorTestUtils() { /* static class */ }
 

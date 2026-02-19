@@ -39,9 +39,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Integration property test: generates random plans and data, then compares simulator results against a real ES cluster.
- */
+/** Integration property test: generates random plans and data, then compares simulator results against a real ES cluster. */
 @AddLifecycleHook(SimulatorSeedHook.class)
 public class SimulatorPropertyIT {
     static {
@@ -93,10 +91,6 @@ public class SimulatorPropertyIT {
         }
     }
 
-    /**
-     * A test case containing the generated schema, data, plan, and query string.
-     * toString() returns a readable summary for jqwik's counterexample reports.
-     */
     record TestCase(SimSchema schema, List<Map<String, Object>> data, LogicalPlan plan, String query) {
         @Override
         public String toString() {
@@ -386,9 +380,7 @@ public class SimulatorPropertyIT {
         return asc ? cmp : -cmp;
     }
 
-    /**
-     * Builds rows from columnar data, normalizing values (Integer → Long).
-     */
+    /** Builds rows from columnar data, normalizing values (Integer → Long). */
     private static List<List<Object>> extractRows(List<Simulator.Column> columns) {
         int numRows = columns.isEmpty() ? 0 : columns.getFirst().values().size();
         List<List<Object>> rows = new ArrayList<>(numRows);

@@ -336,9 +336,7 @@ public class Simulator {
         return groups;
     }
 
-    /**
-     * Keeps only the last column for each name, matching ES mergeOutputExpressions semantics.
-     */
+    /** Keeps only the last column for each name, matching ES mergeOutputExpressions semantics. */
     private static List<Column> deduplicateKeepLast(List<Column> columns) {
         var lastPositions = new LinkedHashMap<String, Integer>();
         for (int i = 0; i < columns.size(); i++) {

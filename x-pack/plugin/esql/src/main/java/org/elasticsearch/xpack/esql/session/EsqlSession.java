@@ -288,9 +288,9 @@ public class EsqlSession {
             );
             LogicalPlan plan = deserializePlan(request.planBytes(), binaryPlanConfig);
             // Add implicit limit (normally done by Analyzer.AddImplicitLimit)
-            int limit = plan.collectFirstChildren(Limit.class::isInstance).isEmpty() == false
-                ? analyzerSettings.resultTruncationMaxSize()
-                : analyzerSettings.resultTruncationDefaultSize();
+            int limit = plan.collectFirstChildren(Limit.class::isInstance).isEmpty()
+                ? analyzerSettings.resultTruncationDefaultSize()
+                : analyzerSettings.resultTruncationMaxSize();
             plan = new Limit(EMPTY, new Literal(EMPTY, limit, DataType.INTEGER), plan);
             plan.setAnalyzed();
             PlanTimeProfile planTimeProfile = request.profile() ? new PlanTimeProfile() : null;
@@ -455,9 +455,7 @@ public class EsqlSession {
         return settings;
     }
 
-    /**
-     * Executes a pre-serialized logical plan, skipping parsing and analysis.
-     */
+    /** Executes a pre-serialized logical plan, skipping parsing and analysis. */
     private void executeBinaryPlan(
         LogicalPlan plan,
         EsqlQueryRequest request,
