@@ -617,8 +617,8 @@ public class SimulatorTests extends ESTestCase {
         // aggregates: [Alias("s1", COUNT(b)), s1Attr_from_inline1_output]
         // The grouping key s1 has value 6; COUNT(b) = 1.
         // ES keeps the grouping key value (s1=6), not the COUNT value (s1=1).
-        Simulator.Column s1Attr = result1.columns().stream().filter(c -> c.name().equals("s1")).findFirst().orElseThrow();
-        var s1Ref = new ReferenceAttribute(Source.EMPTY, "s1", s1Attr.type());
+        Simulator.Column s1Column = result1.columns().stream().filter(c -> c.name().equals("s1")).findFirst().orElseThrow();
+        var s1Ref = new ReferenceAttribute(Source.EMPTY, "s1", s1Column.type());
         var bRef = new ReferenceAttribute(Source.EMPTY, "b", DataType.INTEGER);
         var agg2 = new Aggregate(
             Source.EMPTY,

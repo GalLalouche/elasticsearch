@@ -174,10 +174,18 @@ public class LogicalPlanGenerator {
         if (expr instanceof LessThan e) {
             return new LessThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
         }
-        if (expr instanceof Count e) return new Count(e.source(), resolveExpr(e.field(), canonical));
-        if (expr instanceof Sum e) return new Sum(e.source(), resolveExpr(e.field(), canonical));
-        if (expr instanceof Min e) return new Min(e.source(), resolveExpr(e.field(), canonical));
-        if (expr instanceof Max e) return new Max(e.source(), resolveExpr(e.field(), canonical));
+        if (expr instanceof Count e) {
+            return new Count(e.source(), resolveExpr(e.field(), canonical));
+        }
+        if (expr instanceof Sum e) {
+            return new Sum(e.source(), resolveExpr(e.field(), canonical));
+        }
+        if (expr instanceof Min e) {
+            return new Min(e.source(), resolveExpr(e.field(), canonical));
+        }
+        if (expr instanceof Max e) {
+            return new Max(e.source(), resolveExpr(e.field(), canonical));
+        }
         return expr;
     }
 
@@ -189,6 +197,7 @@ public class LogicalPlanGenerator {
         return new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
     }
 
+    /** Randomly wraps the given plan in one additional operator or returns it unchanged. */
     static Arbitrary<LogicalPlan> wrapLayer(LogicalPlan current) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
@@ -203,6 +212,7 @@ public class LogicalPlanGenerator {
             options.add(wrapEval(current));
             options.add(wrapFilter(current, integerAttrs));
             options.add(wrapStats(current, integerAttrs, available));
+            // INLINE STATS after LIMIT is not supported by the ES|QL engine
             if (current.anyMatch(Limit.class::isInstance) == false) {
                 options.add(wrapInlineStats(current, integerAttrs, available));
             }
@@ -327,7 +337,7 @@ public class LogicalPlanGenerator {
             case "SUM" -> new Sum(Source.EMPTY, field);
             case "MIN" -> new Min(Source.EMPTY, field);
             case "MAX" -> new Max(Source.EMPTY, field);
-            default -> throw new IllegalStateException();
+            default -> throw new IllegalStateException("Unknown aggregate function: " + funcName);
         };
     }
 
@@ -357,8 +367,10 @@ public class LogicalPlanGenerator {
         );
     }
 
+    /**
+     * Wraps attributes in {@link Tuple} to work around jqwik's equals/hashCode dedup, which ignores NameId.
+     */
     private static Arbitrary<Attribute> arbitraryAttribute(List<Attribute> available) {
-        // Getting around the fact that Arbitraries.of(List) doesn't work well with equals/hashCode since it doesn't consider NameId.
         return Arbitraries.of(available.stream().map(a -> Tuple.tuple(a, a.id())).toList()).map(Tuple::v1);
     }
 }

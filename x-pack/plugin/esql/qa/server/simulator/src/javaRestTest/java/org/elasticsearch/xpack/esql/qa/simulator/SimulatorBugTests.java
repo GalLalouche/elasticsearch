@@ -54,6 +54,7 @@ public class SimulatorBugTests {
         SimulatorTestUtils.initLogging();
     }
 
+    /** Bundles schema + data + plan for jqwik. toString() produces readable shrunk counterexample output. */
     record MetaTestCase(SimSchema schema, List<Map<String, Object>> data, LogicalPlan plan) {
         @Override
         public String toString() {

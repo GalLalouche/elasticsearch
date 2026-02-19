@@ -135,7 +135,6 @@ public class Simulator {
             line = reader.readLine();
             assert line != null : "File is empty: " + file;
             String[] entries = multiValuesAwareCsvToStringArray(line, lineNumber);
-            // the schema row
             var columns = new ArrayList<Column>(entries.length);
             for (String entry : entries) {
                 int split = entry.indexOf(':');
@@ -168,6 +167,7 @@ public class Simulator {
     }
 
     private static Result buildResultFromMemory(SimSchema schema, List<Map<String, Object>> data) {
+        // ES|QL returns integers as Long internally, so promote Integer values to match
         return new Result(schema.columns().stream().map(col -> new Column(col.name(), col.type(), data.stream().map(row -> {
             Object v = row.get(col.name());
             return v instanceof Integer i ? i.longValue() : v;
@@ -219,7 +219,7 @@ public class Simulator {
 
     private Result visit(Filter filter) throws IOException {
         var childResult = simulate(filter.child());
-        var cond = childResult.evaluate(filter.condition(), activeBug);
+        UnnamedColumn cond = childResult.evaluate(filter.condition(), activeBug);
         var mask = IntStream.range(0, cond.values.size())
             .filter(i -> Boolean.TRUE.equals(cond.values.get(i)) != (activeBug == SimBug.WHERE_INVERTED))
             .toArray();
@@ -287,7 +287,7 @@ public class Simulator {
                 }
                 return new Column(namedExpr.name(), aggFunc.dataType(), Arrays.asList(broadcast));
             }
-            var col = childResult.evaluate(unwrapped, activeBug);
+            UnnamedColumn col = childResult.evaluate(unwrapped, activeBug);
             return new Column(namedExpr.name(), col.type(), col.values());
         }).toList();
         List<Column> aggColumns = deduplicateKeepLast(allAggColumns);
@@ -312,7 +312,7 @@ public class Simulator {
                     groups.values().stream().map(indices -> computeAggregate(aggFunc, childResult, indices)).toList()
                 );
             }
-            var col = childResult.evaluate(unwrapped, activeBug);
+            UnnamedColumn col = childResult.evaluate(unwrapped, activeBug);
             return new Column(
                 namedExpr.name(),
                 col.type,
@@ -350,28 +350,28 @@ public class Simulator {
             .toList();
     }
 
-    private Object computeAggregate(AggregateFunction aggFunc, Result data, List<Integer> indices) {
+    private Object computeAggregate(AggregateFunction aggFunc, Result childResult, List<Integer> indices) {
         return switch (aggFunc) {
             // COUNT returns 0 for empty groups (not null), matching ES semantics.
             case Count ignored -> (long) indices.size() + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
             case Sum sum -> {
-                List<Object> nonNull = nonNullValues(indices, data, sum.field(), activeBug);
+                List<Object> nonNull = nonNullValues(indices, childResult, sum.field(), activeBug);
                 yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).sum();
             }
             case Min min -> {
-                List<Object> nonNull = nonNullValues(indices, data, min.field(), activeBug);
+                List<Object> nonNull = nonNullValues(indices, childResult, min.field(), activeBug);
                 yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).min().orElseThrow();
             }
             case Max max -> {
-                List<Object> nonNull = nonNullValues(indices, data, max.field(), activeBug);
+                List<Object> nonNull = nonNullValues(indices, childResult, max.field(), activeBug);
                 yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).max().orElseThrow();
             }
             default -> throw new UnsupportedOperationException(Strings.format("Unsupported aggregate function: %s", aggFunc.getClass()));
         };
     }
 
-    private static List<Object> nonNullValues(List<Integer> indices, Result data, Expression field, SimBug activeBug) {
-        UnnamedColumn col = data.evaluate(field, activeBug);
+    private static List<Object> nonNullValues(List<Integer> indices, Result childResult, Expression field, SimBug activeBug) {
+        UnnamedColumn col = childResult.evaluate(field, activeBug);
         return indices.stream().map(i -> col.values.get(i)).filter(v -> v != null).toList();
     }
 
@@ -385,9 +385,10 @@ public class Simulator {
         }
 
         public Column getColumn(String name) {
+            // Last match wins, respecting column shadowing
             return columns.stream()
                 .filter(c -> c.name().equals(name))
-                .findFirst()
+                .reduce((first, second) -> second)
                 .orElseThrow(() -> new IllegalArgumentException("Column not found: " + name));
         }
 
@@ -426,6 +427,7 @@ public class Simulator {
             }).toList());
         }
 
+        /** Evaluates a numeric comparison expression (both sides must be convertible to long). */
         private UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
             var left = evaluate(leftExpr, activeBug);
             var right = evaluate(rightExpr, activeBug);
@@ -446,7 +448,7 @@ public class Simulator {
 
     public record Column(String name, DataType type, List<Object> values) {}
 
-    // E.g., for literals or inline expressions.
+    /** An unnamed column of values, e.g. for literals or inline expressions. */
     public record UnnamedColumn(DataType type, List<Object> values) {
         public UnnamedColumn(Column column) {
             this(column.type, column.values);

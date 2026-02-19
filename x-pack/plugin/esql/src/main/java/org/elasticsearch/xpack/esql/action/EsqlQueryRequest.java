@@ -65,6 +65,9 @@ public class EsqlQueryRequest extends org.elasticsearch.xpack.core.esql.action.E
     private boolean keepOnCompletion;
     private boolean onSnapshotBuild = Build.current().isSnapshot();
     private boolean acceptedPragmaRisks = false;
+    /**
+     * Optional serialized binary logical plan that bypasses parsing and analysis. Only available on snapshot builds.
+     */
     @Nullable
     private byte[] planBytes;
     private Boolean allowPartialResults = null;

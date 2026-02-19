@@ -108,6 +108,7 @@ public class LogicalPlanPrinter {
 
     private static void printAggregate(Aggregate aggregate, String keyword, StringBuilder sb) {
         printCommon(aggregate.child(), sb);
+        // aggregates() contains agg functions followed by grouping key references, so subtract groupings to get only agg functions
         int numAggs = aggregate.aggregates().size() - aggregate.groupings().size();
         sb.append(" | ")
             .append(keyword)

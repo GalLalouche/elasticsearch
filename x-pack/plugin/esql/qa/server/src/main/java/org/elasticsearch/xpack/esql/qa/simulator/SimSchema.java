@@ -12,6 +12,7 @@ import org.elasticsearch.xpack.esql.core.type.DataType;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/** Schema for a simulated index: an index name and its column definitions. */
 record SimSchema(String indexName, List<SimColumn> columns) {
     record SimColumn(String name, DataType type) {
         @Override

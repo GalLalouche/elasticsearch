@@ -266,11 +266,12 @@ public class EsqlSession {
         assert executionInfo != null : "Null EsqlExecutionInfo";
         if (request.planBytes() != null) {
             LOGGER.debug("ESQL binary plan ({} bytes)", request.planBytes().length);
+            ZoneId timeZone = request.timeZone() != null ? request.timeZone() : ZoneId.of("Z");
             Configuration binaryPlanConfig = new Configuration(
-                request.timeZone() != null ? request.timeZone() : ZoneId.of("Z"),
-                Instant.now(Clock.tick(Clock.system(ZoneId.of("Z")), Duration.ofNanos(1))),
+                timeZone,
+                Instant.now(Clock.tick(Clock.system(timeZone), Duration.ofNanos(1))),
                 request.locale() != null ? request.locale() : Locale.US,
-                null,
+                null, // username
                 clusterName,
                 request.pragmas(),
                 analyzerSettings.resultTruncationMaxSize(),
@@ -282,13 +283,14 @@ public class EsqlSession {
                 request.allowPartialResults(),
                 analyzerSettings.timeseriesResultTruncationMaxSize(),
                 analyzerSettings.timeseriesResultTruncationDefaultSize(),
-                null,
-                Map.of()
+                null, // projectRouting
+                Map.of() // viewQueries
             );
             LogicalPlan plan = deserializePlan(request.planBytes(), binaryPlanConfig);
             // Add implicit limit (normally done by Analyzer.AddImplicitLimit)
-            boolean hasLimit = plan.collectFirstChildren(Limit.class::isInstance).isEmpty() == false;
-            int limit = hasLimit ? analyzerSettings.resultTruncationMaxSize() : analyzerSettings.resultTruncationDefaultSize();
+            int limit = plan.collectFirstChildren(Limit.class::isInstance).isEmpty() == false
+                ? analyzerSettings.resultTruncationMaxSize()
+                : analyzerSettings.resultTruncationDefaultSize();
             plan = new Limit(EMPTY, new Literal(EMPTY, limit, DataType.INTEGER), plan);
             plan.setAnalyzed();
             PlanTimeProfile planTimeProfile = request.profile() ? new PlanTimeProfile() : null;
@@ -453,6 +455,9 @@ public class EsqlSession {
         return settings;
     }
 
+    /**
+     * Executes a pre-serialized logical plan, skipping parsing and analysis.
+     */
     private void executeBinaryPlan(
         LogicalPlan plan,
         EsqlQueryRequest request,
@@ -507,6 +512,7 @@ public class EsqlSession {
 
     private static volatile NamedWriteableRegistry planRegistry;
 
+    /** Lazily-built registry for deserializing binary plans. */
     private static NamedWriteableRegistry planWriteableRegistry() {
         if (planRegistry == null) {
             synchronized (EsqlSession.class) {

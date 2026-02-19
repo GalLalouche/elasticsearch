@@ -20,11 +20,13 @@ import org.apache.http.HttpHost;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.WarningsHandler;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.test.cluster.ElasticsearchCluster;
 import org.elasticsearch.test.cluster.local.distribution.DistributionType;
 import org.elasticsearch.xcontent.json.JsonXContent;
+import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
@@ -37,6 +39,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Integration property test: generates random plans and data, then compares simulator results against a real ES cluster.
+ */
 @AddLifecycleHook(SimulatorSeedHook.class)
 public class SimulatorPropertyIT {
     static {
@@ -107,11 +112,9 @@ public class SimulatorPropertyIT {
         try {
             indexData(tc.schema(), tc.data());
 
-            // Run through simulator (with in-memory data)
             Simulator simulator = new Simulator(tc.schema(), tc.data());
             Simulator.Result simResult = simulator.simulate(tc.plan());
 
-            // Run through ES REST API
             Map<String, Object> esResponse = runEsqlQuery(tc.query());
             Simulator.Result esResult = responseToResult(esResponse);
 
@@ -149,7 +152,6 @@ public class SimulatorPropertyIT {
                 }
             }
 
-            // Verify sort order if the plan has an effective SORT
             List<Order> effectiveSort = findEffectiveSort(tc.plan());
             if (effectiveSort.isEmpty() == false) {
                 try {
@@ -262,7 +264,7 @@ public class SimulatorPropertyIT {
     private static Map<String, Object> runEsqlQuery(String query) throws IOException {
         Request request = new Request("POST", "/_query");
         request.setJsonEntity("{\"query\": \"" + query.replace("\"", "\\\"") + "\"}");
-        request.setOptions(request.getOptions().toBuilder().setWarningsHandler(org.elasticsearch.client.WarningsHandler.PERMISSIVE));
+        request.setOptions(request.getOptions().toBuilder().setWarningsHandler(WarningsHandler.PERMISSIVE));
         Response response = restClient.performRequest(request);
         assertStatusCode(200, response);
         return XContentHelper.convertToMap(JsonXContent.jsonXContent, response.getEntity().getContent(), false);
@@ -277,7 +279,7 @@ public class SimulatorPropertyIT {
         for (int c = 0; c < columns.size(); c++) {
             Map<String, String> colMeta = columns.get(c);
             String name = colMeta.get("name");
-            var type = org.elasticsearch.xpack.esql.core.type.DataType.fromTypeName(colMeta.get("type"));
+            DataType type = DataType.fromTypeName(colMeta.get("type"));
             List<Object> colValues = new ArrayList<>();
             if (values != null) {
                 for (List<Object> row : values) {
