@@ -30,7 +30,7 @@ class SimSchemaGenerator {
         String indexName = "sim_" + randomAlpha(random, 3, 6);
         List<String> shuffledNames = new ArrayList<>(COLUMN_NAME_POOL);
         Collections.shuffle(shuffledNames, random.toJDKRandom());
-        int nCols = random.nextInt(1, 4); // 1–4 inclusive
+        int nCols = random.nextInt(1, 4);
         List<SimSchema.SimColumn> columns = new ArrayList<>(nCols);
         for (int i = 0; i < nCols; i++) {
             DataType type = random.choose(TYPE_POOL);

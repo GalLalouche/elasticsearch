@@ -262,7 +262,7 @@ public class LogicalPlanGenerator {
     }
 
     private static LogicalPlan wrapLimit(LogicalPlan current, SourceOfRandomness random) {
-        int n = random.nextInt(1, 10); // 1–10 inclusive
+        int n = random.nextInt(1, 10);
         return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), current);
     }
 
