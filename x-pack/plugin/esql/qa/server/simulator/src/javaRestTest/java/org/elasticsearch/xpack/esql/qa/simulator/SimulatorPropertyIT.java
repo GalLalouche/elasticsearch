@@ -25,7 +25,11 @@ import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.test.cluster.ElasticsearchCluster;
 import org.elasticsearch.test.cluster.local.distribution.DistributionType;
 import org.elasticsearch.xcontent.json.JsonXContent;
+import org.elasticsearch.xpack.esql.expression.Order;
+import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
+import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
+import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -145,10 +149,26 @@ public class SimulatorPropertyIT {
                 }
             }
 
-            // Compare rows order-insensitively: sort both sides before comparing.
-            // Row order is nondeterministic when sort keys are tied or when there is no SORT.
-            List<List<Object>> simRows = extractSortedRows(simColumns);
-            List<List<Object>> esRows = extractSortedRows(esCols);
+            // Verify sort order if the plan has an effective SORT
+            List<Order> effectiveSort = findEffectiveSort(tc.plan());
+            if (effectiveSort.isEmpty() == false) {
+                try {
+                    verifySortOrder(effectiveSort, simResult, "simulator", tc.query());
+                    verifySortOrder(effectiveSort, esResult, "ES", tc.query());
+                } catch (IllegalArgumentException e) {
+                    // Sort key column not in final output (dropped by KEEP/DROP after SORT) — can't verify order
+                    if (e.getMessage() == null || e.getMessage().startsWith("Column not found:") == false) {
+                        throw e;
+                    }
+                }
+            }
+
+            // Compare rows as multisets: sort both sides by all columns to handle
+            // tied sort keys and no-SORT cases where row order is nondeterministic.
+            List<List<Object>> simRows = extractRows(simColumns);
+            List<List<Object>> esRows = extractRows(esCols);
+            simRows.sort(SimulatorPropertyIT::compareRows);
+            esRows.sort(SimulatorPropertyIT::compareRows);
 
             if (simRows.equals(esRows) == false) {
                 throw new AssertionError(
@@ -285,15 +305,89 @@ public class SimulatorPropertyIT {
     }
 
     private static Object normalizeValue(Object v) {
-        return v instanceof Number n ? n.longValue() : v;
+        return v instanceof Integer n ? n.longValue() : v;
     }
 
     /**
-     * Builds rows from columnar data, normalizes values, and sorts the rows lexicographically.
-     * This makes the comparison order-insensitive, which is correct because row order is
-     * nondeterministic when sort keys are tied or when there is no SORT.
+     * Finds the effective sort order by walking the plan from root toward leaves.
+     * Returns the sort keys of the first {@link OrderBy} encountered, or empty if
+     * an {@link Aggregate} (STATS) is reached first (which destroys row order).
      */
-    private static List<List<Object>> extractSortedRows(List<Simulator.Column> columns) {
+    private static List<Order> findEffectiveSort(LogicalPlan plan) {
+        LogicalPlan current = plan;
+        while (current instanceof UnaryPlan unary) {
+            if (current instanceof OrderBy orderBy) {
+                return orderBy.order();
+            }
+            if (current instanceof Aggregate) {
+                return List.of();
+            }
+            current = unary.child();
+        }
+        return List.of();
+    }
+
+    /**
+     * Verifies that the result rows are sorted according to the given sort keys.
+     * Rows with equal sort key values (ties) may appear in any relative order.
+     * Assumes ES default null ordering (nulls last for ASC, first for DESC);
+     * the generator always uses {@link Order.NullsPosition#ANY}.
+     */
+    private static void verifySortOrder(List<Order> orders, Simulator.Result result, String label, String query) {
+        int numRows = result.numRows();
+        if (numRows <= 1) {
+            return;
+        }
+        List<List<Object>> sortKeyValues = orders.stream().map(o -> result.evaluate(o.child(), SimBug.BUG_FREE).values()).toList();
+        for (int r = 0; r < numRows - 1; r++) {
+            for (int k = 0; k < orders.size(); k++) {
+                Object curr = normalizeValue(sortKeyValues.get(k).get(r));
+                Object next = normalizeValue(sortKeyValues.get(k).get(r + 1));
+                boolean asc = orders.get(k).direction() == Order.OrderDirection.ASC;
+                int cmp = compareSortValues(curr, next, asc);
+                if (cmp > 0) {
+                    throw new AssertionError(
+                        Strings.format(
+                            "%s result not sorted correctly at rows %d-%d for query [%s]: values [%s, %s] (expected %s)",
+                            label,
+                            r,
+                            r + 1,
+                            query,
+                            curr,
+                            next,
+                            asc ? "ASC" : "DESC"
+                        )
+                    );
+                }
+                if (cmp != 0) {
+                    break; // This key determined the order, skip remaining keys
+                }
+            }
+        }
+    }
+
+    /**
+     * Compares two sort key values respecting null ordering: nulls last for ASC, nulls first for DESC.
+     * Returns negative if a should come before b, positive if after, zero if equal.
+     */
+    private static int compareSortValues(Object a, Object b, boolean asc) {
+        if (a == null && b == null) {
+            return 0;
+        }
+        if (a == null) {
+            return asc ? 1 : -1;  // null last for ASC, first for DESC
+        }
+        if (b == null) {
+            return asc ? -1 : 1;
+        }
+        int cmp = compareValues(a, b);
+        return asc ? cmp : -cmp;
+    }
+
+    /**
+     * Builds rows from columnar data, normalizing values (Integer → Long).
+     */
+    private static List<List<Object>> extractRows(List<Simulator.Column> columns) {
         int numRows = columns.isEmpty() ? 0 : columns.getFirst().values().size();
         List<List<Object>> rows = new ArrayList<>(numRows);
         for (int r = 0; r < numRows; r++) {
@@ -303,7 +397,6 @@ public class SimulatorPropertyIT {
             }
             rows.add(row);
         }
-        rows.sort(SimulatorPropertyIT::compareRows);
         return rows;
     }
 
