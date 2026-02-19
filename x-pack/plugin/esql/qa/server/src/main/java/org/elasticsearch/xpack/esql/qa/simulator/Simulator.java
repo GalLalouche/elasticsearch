@@ -25,6 +25,7 @@ import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
@@ -350,7 +351,6 @@ public class Simulator {
 
     private Object computeAggregate(AggregateFunction aggFunc, Result childResult, List<Integer> indices) {
         return switch (aggFunc) {
-            // COUNT(field) counts non-null evaluations of the field expression, matching ES semantics.
             case Count count -> {
                 long nonNullCount = nonNullValues(indices, childResult, count.field(), activeBug).size();
                 yield nonNullCount + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
@@ -378,38 +378,29 @@ public class Simulator {
         return indices.stream().map(i -> col.values.get(i)).filter(v -> v != null).toList();
     }
 
-    /**
-     * Evaluates a constant expression (one with no {@link Attribute} references), returning {@code null}
-     * if the expression contains any attribute references. Mirrors ES's constant-folding of MIN/MAX
-     * over empty groups: {@code MIN(9)} over zero rows returns {@code 9}, not {@code null}.
-     */
+    /** Evaluates a constant expression (no {@link Attribute} refs), returning {@code null} for non-constant expressions. Mirrors ES constant-folding: {@code MIN(9)} over zero rows returns {@code 9}. */
     @Nullable
     private static Object evaluateConstant(Expression expr) {
-        if (expr instanceof Literal lit) {
-            return normalizeObject(lit.value());
-        }
-        if (expr instanceof Add add) {
-            Object l = evaluateConstant(add.left());
-            Object r = evaluateConstant(add.right());
-            if (l == null || r == null) return null;
-            long result = toLong(l) + toLong(r);
-            return result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
-        }
-        if (expr instanceof Sub sub) {
-            Object l = evaluateConstant(sub.left());
-            Object r = evaluateConstant(sub.right());
-            if (l == null || r == null) return null;
-            long result = toLong(l) - toLong(r);
-            return result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
-        }
-        if (expr instanceof Mul mul) {
-            Object l = evaluateConstant(mul.left());
-            Object r = evaluateConstant(mul.right());
-            if (l == null || r == null) return null;
-            long result = toLong(l) * toLong(r);
-            return result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
-        }
-        return null; // Attribute or other non-constant expression
+        return switch (expr) {
+            case Literal lit -> normalizeObject(lit.value());
+            case ArithmeticOperation op -> {
+                Object l = evaluateConstant(op.left());
+                Object r = evaluateConstant(op.right());
+                if (l == null || r == null) {
+                    yield null;
+                }
+                long result = switch (op) {
+                    case Add ignored -> toLong(l) + toLong(r);
+                    case Sub ignored -> toLong(l) - toLong(r);
+                    case Mul ignored -> toLong(l) * toLong(r);
+                    default -> throw new UnsupportedOperationException(
+                        Strings.format("Unsupported arithmetic in evaluateConstant: %s", op.getClass())
+                    );
+                };
+                yield result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
+            }
+            default -> null;
+        };
     }
 
     public record Result(List<Column> columns) {
