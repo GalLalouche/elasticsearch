@@ -27,7 +27,7 @@ class SimDataGenerator {
     private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz");
 
     static List<Map<String, Object>> generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
-        int nRows = random.nextInt(1, 6); // 1–5 inclusive
+        int nRows = random.nextInt(1, 5); // 1–5 inclusive
         List<Map<String, Object>> rows = new ArrayList<>(nRows);
         for (int i = 0; i < nRows; i++) {
             rows.add(generateRow(schema, random));
@@ -45,7 +45,7 @@ class SimDataGenerator {
 
     private static Object generateValue(DataType type, SourceOfRandomness random) {
         return switch (type) {
-            case INTEGER -> random.nextInt(1, 11); // 1–10 inclusive
+            case INTEGER -> random.nextInt(1, 10); // 1–10 inclusive
             case KEYWORD -> random.choose(KEYWORD_POOL);
             default -> throw new UnsupportedOperationException("Unsupported data type for data generation: " + type);
         };

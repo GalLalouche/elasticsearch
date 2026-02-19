@@ -237,7 +237,7 @@ public class LogicalPlanGenerator {
             availableAliases = List.of("_col_0", "_col_1");
         }
         int maxAliases = Math.min(availableAliases.size(), 3);
-        int nAliases = random.nextInt(1, maxAliases + 1);
+        int nAliases = random.nextInt(1, maxAliases);
         List<String> shuffled = new ArrayList<>(availableAliases);
         Collections.shuffle(shuffled, random.toJDKRandom());
         List<Alias> fields = new ArrayList<>(nAliases);
@@ -256,13 +256,13 @@ public class LogicalPlanGenerator {
         Expression left = generateExpression(integerAttrs, random, status);
         Expression right = random.nextBoolean()
             ? generateExpression(integerAttrs, random, status)
-            : new Literal(Source.EMPTY, random.nextInt(1, 11), DataType.INTEGER);
+            : new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
         Expression cond = random.nextBoolean() ? new GreaterThan(Source.EMPTY, left, right) : new LessThan(Source.EMPTY, left, right);
         return new Filter(Source.EMPTY, current, cond);
     }
 
     private static LogicalPlan wrapLimit(LogicalPlan current, SourceOfRandomness random) {
-        int n = random.nextInt(1, 11); // 1–10 inclusive
+        int n = random.nextInt(1, 10); // 1–10 inclusive
         return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), current);
     }
 
@@ -274,7 +274,7 @@ public class LogicalPlanGenerator {
     ) {
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
         int maxOrders = Math.min(available.size(), 3);
-        int nOrders = random.nextInt(1, maxOrders + 1);
+        int nOrders = random.nextInt(1, maxOrders);
         List<Order> orders = new ArrayList<>(nOrders);
         for (int i = 0; i < nOrders; i++) {
             Expression expr = (integerAttrs.isEmpty() || random.nextBoolean())
@@ -283,7 +283,7 @@ public class LogicalPlanGenerator {
             Order.OrderDirection dir = random.choose(Order.OrderDirection.values());
             orders.add(new Order(Source.EMPTY, expr, dir, Order.NullsPosition.ANY));
         }
-        int n = random.nextInt(1, 11);
+        int n = random.nextInt(1, 10);
         return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), new OrderBy(Source.EMPTY, current, orders));
     }
 
@@ -309,7 +309,7 @@ public class LogicalPlanGenerator {
 
         List<String> shuffledNames = new ArrayList<>(STATS_ALIAS_POOL);
         Collections.shuffle(shuffledNames, random.toJDKRandom());
-        int nNames = random.nextInt(1, STATS_ALIAS_POOL.size() + 1);
+        int nNames = random.nextInt(1, STATS_ALIAS_POOL.size());
 
         List<NamedExpression> aggregates = new ArrayList<>();
         for (int i = 0; i < nNames; i++) {
@@ -341,7 +341,7 @@ public class LogicalPlanGenerator {
         }
         Expression left = generateExpression(integerAttrs, depth - 1, random);
         Expression right = generateExpression(integerAttrs, depth - 1, random);
-        return switch (random.nextInt(0, 3)) {
+        return switch (random.nextInt(0, 2)) {
             case 0 -> new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
             case 1 -> new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
             case 2 -> new Mul(Source.EMPTY, left, right);
@@ -353,13 +353,13 @@ public class LogicalPlanGenerator {
         if (random.nextBoolean()) {
             return random.choose(integerAttrs);
         }
-        return new Literal(Source.EMPTY, random.nextInt(1, 11), DataType.INTEGER);
+        return new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
     }
 
     private static List<Attribute> generateSubset(SourceOfRandomness random, List<Attribute> attrs, int min, int max) {
         List<Attribute> shuffled = new ArrayList<>(attrs);
         Collections.shuffle(shuffled, random.toJDKRandom());
-        int size = random.nextInt(min, max + 1);
+        int size = random.nextInt(min, max);
         return List.copyOf(shuffled.subList(0, Math.min(size, shuffled.size())));
     }
 }

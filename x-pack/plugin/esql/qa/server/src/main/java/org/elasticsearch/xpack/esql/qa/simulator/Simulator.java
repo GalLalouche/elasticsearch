@@ -350,19 +350,24 @@ public class Simulator {
 
     private Object computeAggregate(AggregateFunction aggFunc, Result childResult, List<Integer> indices) {
         return switch (aggFunc) {
-            // COUNT returns 0 for empty groups (not null), matching ES semantics.
-            case Count ignored -> (long) indices.size() + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
+            // COUNT(field) counts non-null evaluations of the field expression, matching ES semantics.
+            case Count count -> {
+                long nonNullCount = nonNullValues(indices, childResult, count.field(), activeBug).size();
+                yield nonNullCount + (activeBug == SimBug.STATS_COUNT_OFF_BY_ONE ? 1 : 0);
+            }
             case Sum sum -> {
                 List<Object> nonNull = nonNullValues(indices, childResult, sum.field(), activeBug);
                 yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).sum();
             }
             case Min min -> {
                 List<Object> nonNull = nonNullValues(indices, childResult, min.field(), activeBug);
-                yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).min().orElseThrow();
+                // ES constant-folds MIN(constant) to the constant — return it even for empty groups.
+                yield nonNull.isEmpty() ? evaluateConstant(min.field()) : nonNull.stream().mapToLong(Simulator::toLong).min().orElseThrow();
             }
             case Max max -> {
                 List<Object> nonNull = nonNullValues(indices, childResult, max.field(), activeBug);
-                yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).max().orElseThrow();
+                // ES constant-folds MAX(constant) to the constant — return it even for empty groups.
+                yield nonNull.isEmpty() ? evaluateConstant(max.field()) : nonNull.stream().mapToLong(Simulator::toLong).max().orElseThrow();
             }
             default -> throw new UnsupportedOperationException(Strings.format("Unsupported aggregate function: %s", aggFunc.getClass()));
         };
@@ -371,6 +376,40 @@ public class Simulator {
     private static List<Object> nonNullValues(List<Integer> indices, Result childResult, Expression field, SimBug activeBug) {
         UnnamedColumn col = childResult.evaluate(field, activeBug);
         return indices.stream().map(i -> col.values.get(i)).filter(v -> v != null).toList();
+    }
+
+    /**
+     * Evaluates a constant expression (one with no {@link Attribute} references), returning {@code null}
+     * if the expression contains any attribute references. Mirrors ES's constant-folding of MIN/MAX
+     * over empty groups: {@code MIN(9)} over zero rows returns {@code 9}, not {@code null}.
+     */
+    @Nullable
+    private static Object evaluateConstant(Expression expr) {
+        if (expr instanceof Literal lit) {
+            return normalizeObject(lit.value());
+        }
+        if (expr instanceof Add add) {
+            Object l = evaluateConstant(add.left());
+            Object r = evaluateConstant(add.right());
+            if (l == null || r == null) return null;
+            long result = toLong(l) + toLong(r);
+            return result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
+        }
+        if (expr instanceof Sub sub) {
+            Object l = evaluateConstant(sub.left());
+            Object r = evaluateConstant(sub.right());
+            if (l == null || r == null) return null;
+            long result = toLong(l) - toLong(r);
+            return result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
+        }
+        if (expr instanceof Mul mul) {
+            Object l = evaluateConstant(mul.left());
+            Object r = evaluateConstant(mul.right());
+            if (l == null || r == null) return null;
+            long result = toLong(l) * toLong(r);
+            return result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
+        }
+        return null; // Attribute or other non-constant expression
     }
 
     public record Result(List<Column> columns) {
