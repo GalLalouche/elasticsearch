@@ -9,6 +9,8 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
@@ -59,6 +61,8 @@ import java.util.stream.Collectors;
  */
 @ThreadLeakFilters(filters = TestClustersThreadFilter.class)
 public class ForcedShrinkerIT extends ESRestTestCase {
+    private static final Logger logger = LogManager.getLogger(ForcedShrinkerIT.class);
+
     @ClassRule
     public static ElasticsearchCluster cluster = ElasticsearchCluster.local()
         .distribution(DistributionType.DEFAULT)
@@ -101,9 +105,9 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         if (stillFails(schema, rows, plan, failureMode) == false) {
             throw new AssertionError("Initial query+data does not reproduce the failure. Query: " + queryStr);
         }
-        System.out.println("=== Initial failure confirmed ===");
-        System.out.println("Query: " + LogicalPlanPrinter.print(plan));
-        System.out.println("Data: " + toDataJson(schema, rows));
+        logger.info("=== Initial failure confirmed ===");
+        logger.info("Query: {}", LogicalPlanPrinter.print(plan));
+        logger.info("Data: {}", toDataJson(schema, rows));
 
         // Greedy shrinking loop — restart from step 1 on any successful shrink
         int step = 0;
@@ -237,9 +241,9 @@ public class ForcedShrinkerIT extends ESRestTestCase {
             }
         }
 
-        System.out.println("=== SHRUNK RESULT (after " + step + " steps) ===");
-        System.out.println("Query: " + LogicalPlanPrinter.print(plan));
-        System.out.println("Data: " + toDataJson(schema, rows));
+        logger.info("=== SHRUNK RESULT (after {} steps) ===", step);
+        logger.info("Query: {}", LogicalPlanPrinter.print(plan));
+        logger.info("Data: {}", toDataJson(schema, rows));
     }
 
     @SuppressWarnings("unchecked")
@@ -536,9 +540,9 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     }
 
     private static void log(int step, String what, LogicalPlan plan, SimSchema schema, List<Map<String, Object>> rows) {
-        System.out.println("[Step " + step + "] " + what);
-        System.out.println("  Query: " + LogicalPlanPrinter.print(plan));
-        System.out.println("  Data: " + toDataJson(schema, rows));
+        logger.info("[Step {}] {}", step, what);
+        logger.info("  Query: {}", LogicalPlanPrinter.print(plan));
+        logger.info("  Data: {}", toDataJson(schema, rows));
     }
 
     private static List<Map<String, Object>> deepCopyRows(List<Map<String, Object>> rows) {

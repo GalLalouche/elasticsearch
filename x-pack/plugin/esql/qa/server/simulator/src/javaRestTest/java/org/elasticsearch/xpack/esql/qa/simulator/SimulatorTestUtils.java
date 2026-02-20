@@ -11,8 +11,12 @@ import com.pholser.junit.quickcheck.generator.GenerationStatus;
 import com.pholser.junit.quickcheck.generator.Generator;
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
 import org.elasticsearch.common.logging.LogConfigurator;
+import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.index.IndexSettings;
+import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
@@ -33,9 +37,30 @@ class SimulatorTestUtils {
      * Must be called from a {@code static {}} block in every test class (which runs outside the ES test framework).
      */
     static void initLogging() {
+        // Match ESTestCase's logging init: log4j2-test.properties on the classpath sets rootLogger.level = info.
+        LogConfigurator.loadLog4jPlugins();
         LogConfigurator.configureESLogging();
+        // Log4j2 may have already initialized before plugins were loaded (e.g. JUnitQuickcheck triggers
+        // class loading that calls LogManager.getLogger()). Reconfigure so it re-reads log4j2-test.properties
+        // with the plugins now available — this creates the console appender that uses %test_thread_info.
+        ((LoggerContext) LogManager.getContext(false)).reconfigure();
         // Force IndexSettings to initialize before IndexMode to break circular class init dependency.
         assert IndexSettings.MODE != null;
+    }
+
+    /**
+     * Process {@link TestLogging} on the given class, applying log levels via {@link Loggers#setLevel}.
+     * JUnitQuickcheck doesn't register {@link org.elasticsearch.test.junit.listeners.LoggingListener},
+     * so we replicate its behavior here for classes that use {@code @RunWith(JUnitQuickcheck.class)}.
+     */
+    static void applyTestLogging(Class<?> testClass) {
+        TestLogging annotation = testClass.getAnnotation(TestLogging.class);
+        if (annotation != null) {
+            for (String pair : annotation.value().split(",")) {
+                String[] kv = pair.split(":");
+                Loggers.setLevel(LogManager.getLogger(kv[0].trim()), kv[1].trim());
+            }
+        }
     }
 
     /** Collect attribute references from a plan node's own expressions (not children). */

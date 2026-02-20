@@ -15,6 +15,8 @@ import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 
 import org.apache.http.HttpHost;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
@@ -24,10 +26,16 @@ import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.test.cluster.ElasticsearchCluster;
 import org.elasticsearch.test.cluster.local.distribution.DistributionType;
+import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.xcontent.json.JsonXContent;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.core.expression.Alias;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
+import org.elasticsearch.xpack.esql.plan.logical.Eval;
+import org.elasticsearch.xpack.esql.plan.logical.Filter;
+import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.Row;
@@ -46,10 +54,16 @@ import java.util.Map;
 
 /** Integration property test: generates random plans and data, then compares simulator results against a real ES cluster. */
 @RunWith(JUnitQuickcheck.class)
+@TestLogging(value = "org.elasticsearch.xpack.esql:TRACE", reason = "debug")
 public class SimulatorPropertyIT {
+    // initLogging() must run before any LogManager.getLogger() call — it loads Log4j2 plugins
+    // needed by the log4j2-test.properties pattern (e.g. %test_thread_info).
     static {
         SimulatorTestUtils.initLogging();
+        SimulatorTestUtils.applyTestLogging(SimulatorPropertyIT.class);
     }
+
+    private static final Logger logger = LogManager.getLogger(SimulatorPropertyIT.class);
 
     @ClassRule
     public static ElasticsearchCluster cluster = ElasticsearchCluster.local()
@@ -98,8 +112,12 @@ public class SimulatorPropertyIT {
         }
     }
 
-    @Property(trials = 50)
+    private static int trialCount = 0;
+
+    @Property(trials = 50, maxShrinkDepth = 100, maxShrinkTime = 120000)
     public void simulatorMatchesEs(@From(TestCaseGenerator.class) TestCase tc) throws Exception {
+        trialCount++;
+        logger.info("[Trial {}] {}", trialCount, tc);
         boolean needsIndex = tc.schema() != null;
 
         if (needsIndex) {
@@ -209,19 +227,42 @@ public class SimulatorPropertyIT {
 
         @Override
         public List<TestCase> doShrink(SourceOfRandomness random, TestCase larger) {
+            logger.info("[Shrink] current failing case: {}", larger);
             List<TestCase> candidates = new ArrayList<>();
-            // Shrink plan: drop outermost layer
-            if (larger.plan() instanceof UnaryPlan unary) {
-                LogicalPlan simpler = LogicalPlanGenerator.resolveReferences(unary.child());
-                candidates.add(new TestCase(larger.schema(), larger.data(), simpler, LogicalPlanPrinter.print(simpler)));
+
+            // Strategy 1: Drop outermost pipeline layer
+            // InlineStats wraps an Aggregate as its child — the actual plan below is aggregate.child().
+            if (larger.plan() instanceof InlineStats is) {
+                addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(is.aggregate().child()));
+            } else if (larger.plan() instanceof UnaryPlan unary) {
+                addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(unary.child()));
             }
-            // Shrink data: remove last row (only for FROM plans with data)
+
+            // TODO: try removing operators in the MIDDLE of the pipeline (not just the outermost)
+
+            // Strategy 2: Remove individual EVAL fields (keep N-1)
+            if (larger.plan() instanceof Eval eval && eval.fields().size() > 1) {
+                for (int f = 0; f < eval.fields().size(); f++) {
+                    List<Alias> reduced = new ArrayList<>(eval.fields());
+                    reduced.remove(f);
+                    addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(
+                        new Eval(eval.source(), eval.child(), reduced)));
+                }
+            }
+
+            // Strategy 4: Simplify expressions to sub-expressions
+            addExpressionShrinks(candidates, larger);
+
+            // Strategy 5: Remove any data row (not just last)
             if (larger.data() != null && larger.data().size() > 1) {
-                List<Map<String, Object>> smaller = new ArrayList<>(larger.data());
-                smaller.remove(smaller.size() - 1);
-                candidates.add(new TestCase(larger.schema(), smaller, larger.plan(), larger.query()));
+                for (int r = 0; r < larger.data().size(); r++) {
+                    List<Map<String, Object>> smaller = new ArrayList<>(larger.data());
+                    smaller.remove(r);
+                    candidates.add(new TestCase(larger.schema(), smaller, larger.plan(), larger.query()));
+                }
             }
-            // Shrink data: fill in a null (absent) field with a non-null value
+
+            // Strategy 6: Fill in a null (absent) field with a non-null value
             if (larger.data() != null) {
                 for (int r = 0; r < larger.data().size(); r++) {
                     Map<String, Object> row = larger.data().get(r);
@@ -245,6 +286,57 @@ public class SimulatorPropertyIT {
             }
             return candidates;
         }
+
+        private void addPlanCandidate(List<TestCase> candidates, TestCase original, LogicalPlan plan) {
+            candidates.add(new TestCase(original.schema(), original.data(), plan, LogicalPlanPrinter.print(plan)));
+        }
+
+        /** Tries replacing each expression in the outermost stage with its sub-expressions. */
+        private void addExpressionShrinks(List<TestCase> candidates, TestCase larger) {
+            LogicalPlan plan = larger.plan();
+            switch (plan) {
+                case Eval eval -> {
+                    for (int f = 0; f < eval.fields().size(); f++) {
+                        Alias alias = eval.fields().get(f);
+                        for (Expression sub : collectSubExpressions(alias.child())) {
+                            List<Alias> newFields = new ArrayList<>(eval.fields());
+                            newFields.set(f, new Alias(alias.source(), alias.name(), sub));
+                            addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(
+                                new Eval(eval.source(), eval.child(), newFields)));
+                        }
+                    }
+                }
+                case Filter filter -> {
+                    for (Expression sub : collectSubExpressions(filter.condition())) {
+                        addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(
+                            new Filter(filter.source(), filter.child(), sub)));
+                    }
+                }
+                case OrderBy orderBy -> {
+                    for (int k = 0; k < orderBy.order().size(); k++) {
+                        Order order = orderBy.order().get(k);
+                        for (Expression sub : collectSubExpressions(order.child())) {
+                            List<Order> newOrders = new ArrayList<>(orderBy.order());
+                            newOrders.set(k, new Order(order.source(), sub, order.direction(), order.nullsPosition()));
+                            addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(
+                                new OrderBy(orderBy.source(), orderBy.child(), newOrders)));
+                        }
+                    }
+                }
+                default -> { /* no expressions to shrink */ }
+            }
+        }
+
+        /** Recursively collects all sub-expressions (children and their descendants). */
+        private static List<Expression> collectSubExpressions(Expression expr) {
+            List<Expression> subs = new ArrayList<>();
+            for (Expression child : expr.children()) {
+                subs.add(child);
+                subs.addAll(collectSubExpressions(child));
+            }
+            return subs;
+        }
+
     }
 
     private static boolean isRowPlan(LogicalPlan plan) {
