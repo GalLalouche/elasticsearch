@@ -63,6 +63,7 @@ import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -127,15 +128,14 @@ public class Simulator {
     }
 
     private Result visit(org.elasticsearch.xpack.esql.plan.logical.Row row) {
-        List<Column> columns = row.fields().stream().map(alias -> {
+        return new Result(row.fields().stream().map(alias -> {
             if (alias.child() instanceof Literal l) {
                 return new Column(alias.name(), alias.dataType(), List.of(normalizeObject(l.value())));
             }
             throw new UnsupportedOperationException(
                 Strings.format("Row field [%s] is not a literal, but a %s", alias.name(), alias.child().getClass())
             );
-        }).toList();
-        return new Result(columns);
+        }).toList());
     }
 
     private Result visit(UnresolvedRelation relation) throws IOException {
@@ -146,7 +146,7 @@ public class Simulator {
             return buildResultFromMemory(schema, data);
         }
 
-        var file = Simulator.class.getResource("/data/" + pattern + ".csv");
+        URL file = Simulator.class.getResource("/data/" + pattern + ".csv");
         assert file != null : "File not found for index pattern: " + pattern;
         // FIXME(gal, NOCOMMIT) Reduce duplication with CsvTestsDataLoader
         try (BufferedReader reader = reader(file)) {
@@ -179,7 +179,7 @@ public class Simulator {
                 }
                 for (int i = 0; i < entries.length; i++) {
                     Column column = columns.get(i);
-                    column.values.add(parseCsvLiteralString(column.type, entries[i]));
+                    column.values().add(parseCsvLiteralString(column.type(), entries[i]));
                 }
             }
             return new Result(columns);
@@ -216,9 +216,9 @@ public class Simulator {
 
     private Result visit(Drop drop) throws IOException {
         Result childResult = simulate(drop.child());
-        var newColumns = new ArrayList<>(childResult.columns);
+        var newColumns = new ArrayList<>(childResult.columns());
         Set<String> names = drop.removals().stream().map(NamedExpression::name).collect(Collectors.toSet());
-        newColumns.removeIf(column -> names.contains(column.name));
+        newColumns.removeIf(column -> names.contains(column.name()));
         return new Result(newColumns);
     }
 
@@ -234,17 +234,17 @@ public class Simulator {
                 );
             }
         }
-        return new Result(deduplicateKeepLast(CollectionUtils.concatLists(childResult.columns, newColumns)));
+        return new Result(deduplicateKeepLast(CollectionUtils.concatLists(childResult.columns(), newColumns)));
     }
 
     private Result visit(Filter filter) throws IOException {
         Result childResult = simulate(filter.child());
         UnnamedColumn cond = childResult.evaluate(filter.condition(), activeBug);
-        var mask = IntStream.range(0, cond.values.size())
-            .filter(i -> Boolean.TRUE.equals(cond.values.get(i)) != (activeBug == SimBug.WHERE_INVERTED))
+        int[] mask = IntStream.range(0, cond.values().size())
+            .filter(i -> Boolean.TRUE.equals(cond.values().get(i)) != (activeBug == SimBug.WHERE_INVERTED))
             .toArray();
         return new Result(
-            childResult.columns.stream().map(c -> new Column(c.name, c.type, Arrays.stream(mask).mapToObj(c.values::get).toList())).toList()
+            childResult.columns().stream().map(c -> new Column(c.name(), c.type(), Arrays.stream(mask).mapToObj(c.values()::get).toList())).toList()
         );
     }
 
@@ -252,7 +252,7 @@ public class Simulator {
         Result childResult = simulate(limit.child());
         int n = ((Number) ((Literal) limit.limit()).value()).intValue() + (activeBug == SimBug.LIMIT_OFF_BY_ONE ? 1 : 0);
         int actual = Math.min(n, childResult.numRows());
-        return new Result(childResult.columns.stream().map(c -> new Column(c.name, c.type, c.values.subList(0, actual))).toList());
+        return new Result(childResult.columns().stream().map(c -> new Column(c.name(), c.type(), c.values().subList(0, actual))).toList());
     }
 
     private Result visit(OrderBy orderBy) throws IOException {
@@ -261,7 +261,7 @@ public class Simulator {
         Integer[] indices = IntStream.range(0, numRows).boxed().toArray(Integer[]::new);
         // Pre-evaluate order expressions to column values
         List<Order> orders = orderBy.order();
-        List<List<Object>> orderValues = orders.stream().map(o -> childResult.evaluate(o.child(), activeBug).values).toList();
+        List<List<Object>> orderValues = orders.stream().map(o -> childResult.evaluate(o.child(), activeBug).values()).toList();
         Arrays.sort(indices, (a, b) -> {
             for (int i = 0; i < orders.size(); i++) {
                 Object valA = orderValues.get(i).get(a);
@@ -275,7 +275,7 @@ public class Simulator {
             return 0;
         });
         return new Result(
-            childResult.columns.stream().map(c -> new Column(c.name, c.type, Arrays.stream(indices).map(c.values::get).toList())).toList()
+            childResult.columns().stream().map(c -> new Column(c.name(), c.type(), Arrays.stream(indices).map(c.values()::get).toList())).toList()
         );
     }
 
@@ -308,8 +308,8 @@ public class Simulator {
         }).toList();
         List<Column> aggColumns = deduplicateKeepLast(allAggColumns);
         // Merge: child columns not in aggregate output, then aggregate columns
-        var aggNames = aggColumns.stream().map(Column::name).collect(Collectors.toSet());
-        var kept = childResult.columns().stream().filter(c -> aggNames.contains(c.name()) == false).toList();
+        Set<String> aggNames = aggColumns.stream().map(Column::name).collect(Collectors.toSet());
+        List<Column> kept = childResult.columns().stream().filter(c -> aggNames.contains(c.name()) == false).toList();
         return new Result(CollectionUtils.concatLists(kept, aggColumns));
     }
 
@@ -331,8 +331,8 @@ public class Simulator {
             UnnamedColumn col = childResult.evaluate(unwrapped, activeBug);
             return new Column(
                 namedExpr.name(),
-                col.type,
-                groups.values().stream().map(indices -> col.values.get(indices.getFirst())).toList()
+                col.type(),
+                groups.values().stream().map(indices -> col.values().get(indices.getFirst())).toList()
             );
         }).toList();
         return new Result(deduplicateKeepLast(allCols));
@@ -345,7 +345,7 @@ public class Simulator {
         } else {
             for (int i = 0; i < numRows; i++) {
                 int row = i;
-                var key = aggregate.groupings().stream().map(g -> childResult.evaluate(g, activeBug).values.get(row)).toList();
+                List<Object> key = aggregate.groupings().stream().map(g -> childResult.evaluate(g, activeBug).values().get(row)).toList();
                 groups.computeIfAbsent(key, k -> new ArrayList<>()).add(i);
             }
         }
@@ -390,10 +390,13 @@ public class Simulator {
 
     private static List<Object> nonNullValues(List<Integer> indices, Result childResult, Expression field, SimBug activeBug) {
         UnnamedColumn col = childResult.evaluate(field, activeBug);
-        return indices.stream().map(col.values::get).filter(Objects::nonNull).toList();
+        return indices.stream().map(col.values()::get).filter(Objects::nonNull).toList();
     }
 
-    /** Evaluates a constant expression (no {@link Attribute} refs), returning {@code null} for non-constant expressions. Mirrors ES constant-folding: {@code MIN(9)} over zero rows returns {@code 9}. */
+    /**
+     * Evaluates a constant expression (no {@link Attribute} refs), returning {@code null} for non-constant expressions.
+     * Mirrors ES constant-folding: {@code MIN(9)} over zero rows returns {@code 9}.
+     */
     @Nullable
     private static Object evaluateConstant(Expression expr) {
         return switch (expr) {
@@ -434,7 +437,7 @@ public class Simulator {
         }
 
         int numRows() {
-            return columns.isEmpty() ? 0 : columns.getFirst().values.size();
+            return columns.isEmpty() ? 0 : columns.getFirst().values().size();
         }
 
         public Column getColumn(String name) {
@@ -464,12 +467,12 @@ public class Simulator {
                 case Mod mod -> evalBinaryLong(mod.left(), mod.right(), activeBug, (l, r) -> r == 0 ? null : l % r);
                 case Neg neg -> {
                     UnnamedColumn input = evaluate(neg.field(), activeBug);
-                    yield new UnnamedColumn(input.type, input.values.stream().<Object>map(o -> {
+                    yield new UnnamedColumn(input.type(), input.values().stream().<Object>map(o -> {
                         if (o == null) {
                             return null;
                         }
                         long result = -toLong(o);
-                        return input.type == DataType.INTEGER && (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) ? null : result;
+                        return input.type() == DataType.INTEGER && (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) ? null : result;
                     }).toList());
                 }
                 case GreaterThan gt -> evalComparison(gt.left(), gt.right(), activeBug, cmp -> cmp > 0);
@@ -490,16 +493,16 @@ public class Simulator {
                     UnnamedColumn input = evaluate(length.field(), activeBug);
                     yield new UnnamedColumn(
                         DataType.INTEGER,
-                        input.values.stream().<Object>map(o -> o == null ? null : (long) o.toString().length()).toList()
+                        input.values().stream().<Object>map(o -> o == null ? null : (long) o.toString().length()).toList()
                     );
                 }
                 case Concat concat -> {
                     List<UnnamedColumn> args = concat.children().stream().map(child -> evaluate(child, activeBug)).toList();
-                    int numRows = args.getFirst().values.size();
+                    int numRows = args.getFirst().values().size();
                     yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, numRows).<Object>mapToObj(i -> {
                         StringBuilder sb = new StringBuilder();
                         for (UnnamedColumn arg : args) {
-                            Object v = arg.values.get(i);
+                            Object v = arg.values().get(i);
                             if (v == null) {
                                 return null;
                             }
@@ -511,9 +514,9 @@ public class Simulator {
                 case Left left -> {
                     UnnamedColumn strCol = evaluate(left.children().get(0), activeBug);
                     UnnamedColumn lenCol = evaluate(left.children().get(1), activeBug);
-                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object strVal = strCol.values.get(i);
-                        Object lenVal = lenCol.values.get(i);
+                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values().size()).mapToObj(i -> {
+                        Object strVal = strCol.values().get(i);
+                        Object lenVal = lenCol.values().get(i);
                         if (strVal == null || lenVal == null) {
                             return null;
                         }
@@ -525,9 +528,9 @@ public class Simulator {
                 case Right right -> {
                     UnnamedColumn strCol = evaluate(right.children().get(0), activeBug);
                     UnnamedColumn lenCol = evaluate(right.children().get(1), activeBug);
-                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object strVal = strCol.values.get(i);
-                        Object lenVal = lenCol.values.get(i);
+                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values().size()).mapToObj(i -> {
+                        Object strVal = strCol.values().get(i);
+                        Object lenVal = lenCol.values().get(i);
                         if (strVal == null || lenVal == null) {
                             return null;
                         }
@@ -539,9 +542,9 @@ public class Simulator {
                 case StartsWith sw -> {
                     UnnamedColumn strCol = evaluate(sw.children().get(0), activeBug);
                     UnnamedColumn prefixCol = evaluate(sw.children().get(1), activeBug);
-                    yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object strVal = strCol.values.get(i);
-                        Object prefixVal = prefixCol.values.get(i);
+                    yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values().size()).mapToObj(i -> {
+                        Object strVal = strCol.values().get(i);
+                        Object prefixVal = prefixCol.values().get(i);
                         if (strVal == null || prefixVal == null) {
                             return null;
                         }
@@ -551,9 +554,9 @@ public class Simulator {
                 case EndsWith ew -> {
                     UnnamedColumn strCol = evaluate(ew.children().get(0), activeBug);
                     UnnamedColumn suffixCol = evaluate(ew.children().get(1), activeBug);
-                    yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object strVal = strCol.values.get(i);
-                        Object suffixVal = suffixCol.values.get(i);
+                    yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values().size()).mapToObj(i -> {
+                        Object strVal = strCol.values().get(i);
+                        Object suffixVal = suffixCol.values().get(i);
                         return strVal == null || suffixVal == null ? null : (Object) strVal.toString().endsWith(suffixVal.toString());
                     }).toList());
                 }
@@ -561,9 +564,9 @@ public class Simulator {
                     UnnamedColumn strCol = evaluate(substring.children().get(0), activeBug);
                     UnnamedColumn startCol = evaluate(substring.children().get(1), activeBug);
                     UnnamedColumn lenCol = substring.children().size() > 2 ? evaluate(substring.children().get(2), activeBug) : null;
-                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object strVal = strCol.values.get(i);
-                        Object startVal = startCol.values.get(i);
+                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values().size()).mapToObj(i -> {
+                        Object strVal = strCol.values().get(i);
+                        Object startVal = startCol.values().get(i);
                         if (strVal == null || startVal == null) {
                             return null;
                         }
@@ -575,7 +578,7 @@ public class Simulator {
                         if (lenCol == null) {
                             return str.substring(indexStart);
                         }
-                        Object lenVal = lenCol.values.get(i);
+                        Object lenVal = lenCol.values().get(i);
                         if (lenVal == null) {
                             return null;
                         }
@@ -594,14 +597,14 @@ public class Simulator {
             SimBug activeBug,
             BiFunction<Long, Long, Object> op
         ) {
-            var left = evaluate(leftExpr, activeBug);
-            var right = evaluate(rightExpr, activeBug);
+            UnnamedColumn left = evaluate(leftExpr, activeBug);
+            UnnamedColumn right = evaluate(rightExpr, activeBug);
             // ES|QL uses 32-bit integer arithmetic and returns null on overflow; LONG arithmetic can overflow too but is
             // extremely unlikely with the small values in our generated data, so we only check for INTEGER overflow here.
-            boolean integerArithmetic = left.type == DataType.INTEGER && right.type == DataType.INTEGER;
-            return new UnnamedColumn(left.type, IntStream.range(0, left.values.size()).mapToObj(i -> {
-                Object l = left.values.get(i);
-                Object r = right.values.get(i);
+            boolean integerArithmetic = left.type() == DataType.INTEGER && right.type() == DataType.INTEGER;
+            return new UnnamedColumn(left.type(), IntStream.range(0, left.values().size()).mapToObj(i -> {
+                Object l = left.values().get(i);
+                Object r = right.values().get(i);
                 if (l == null || r == null) {
                     return null;
                 }
@@ -621,17 +624,17 @@ public class Simulator {
             UnnamedColumn input = evaluate(fieldExpr, activeBug);
             return new UnnamedColumn(
                 DataType.KEYWORD,
-                input.values.stream().<Object>map(o -> o == null ? null : op.apply(o.toString())).toList()
+                input.values().stream().<Object>map(o -> o == null ? null : op.apply(o.toString())).toList()
             );
         }
 
         // Only integer comparisons are generated, so Long.compare is sufficient for all cases.
         private UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
-            var left = evaluate(leftExpr, activeBug);
-            var right = evaluate(rightExpr, activeBug);
-            return new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, left.values.size()).mapToObj(i -> {
-                Object l = left.values.get(i);
-                Object r = right.values.get(i);
+            UnnamedColumn left = evaluate(leftExpr, activeBug);
+            UnnamedColumn right = evaluate(rightExpr, activeBug);
+            return new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, left.values().size()).mapToObj(i -> {
+                Object l = left.values().get(i);
+                Object r = right.values().get(i);
                 if (l == null || r == null) {
                     return null;
                 }
@@ -665,7 +668,7 @@ public class Simulator {
     /** An unnamed column of values, e.g. for literals or inline expressions. */
     public record UnnamedColumn(DataType type, List<Object> values) {
         public UnnamedColumn(Column column) {
-            this(column.type, column.values);
+            this(column.type(), column.values());
         }
 
         public Column toNamed(String name) {
