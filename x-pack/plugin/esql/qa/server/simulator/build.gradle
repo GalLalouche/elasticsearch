@@ -46,4 +46,7 @@ tasks.named('javaRestTest') {
   providers.systemProperty('simulator.dataFile').orElse('').get().with { f ->
     if (!f.isEmpty()) systemProperty 'simulator.dataFile', f
   }
+  providers.systemProperty('simulator.seed').orElse('').get().with { s ->
+    if (!s.isEmpty()) systemProperty 'simulator.seed', s
+  }
 }

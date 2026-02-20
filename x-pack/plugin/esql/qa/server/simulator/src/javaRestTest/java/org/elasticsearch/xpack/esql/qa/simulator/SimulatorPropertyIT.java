@@ -210,12 +210,19 @@ public class SimulatorPropertyIT {
     }
 
     public static class TestCaseGenerator extends Generator<TestCase> {
+        private boolean seedApplied;
+
         public TestCaseGenerator() {
             super(TestCase.class);
         }
 
         @Override
         public TestCase generate(SourceOfRandomness random, GenerationStatus status) {
+            String seedProp = System.getProperty("simulator.seed");
+            if (seedProp != null && seedApplied == false) {
+                random.setSeed(Long.parseLong(seedProp));
+                seedApplied = true;
+            }
             SimSchema schema = SimSchemaGenerator.generate(random, status);
             LogicalPlan plan = LogicalPlanGenerator.generate(schema, random, status);
             if (isRowPlan(plan)) {
