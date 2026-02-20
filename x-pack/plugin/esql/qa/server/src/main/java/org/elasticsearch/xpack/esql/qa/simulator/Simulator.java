@@ -62,6 +62,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.IntPredicate;
@@ -388,7 +389,7 @@ public class Simulator {
 
     private static List<Object> nonNullValues(List<Integer> indices, Result childResult, Expression field, SimBug activeBug) {
         UnnamedColumn col = childResult.evaluate(field, activeBug);
-        return indices.stream().map(i -> col.values.get(i)).filter(v -> v != null).toList();
+        return indices.stream().map(i -> col.values.get(i)).filter(Objects::nonNull).toList();
     }
 
     /** Evaluates a constant expression (no {@link Attribute} refs), returning {@code null} for non-constant expressions. Mirrors ES constant-folding: {@code MIN(9)} over zero rows returns {@code 9}. */

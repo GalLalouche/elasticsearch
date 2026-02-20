@@ -152,7 +152,7 @@ public class LogicalPlanPrinter {
         return expr instanceof ArithmeticOperation ? "(" + printExpression(expr) + ")" : printExpression(expr);
     }
 
-    static String printExpression(Expression expression) {
+    private static String printExpression(Expression expression) {
         return switch (expression) {
             case Alias alias -> Strings.format("%s = %s", alias.name(), printExpression(alias.child()));
             case Attribute attr -> attr.name();

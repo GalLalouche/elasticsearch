@@ -7,15 +7,14 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import com.pholser.junit.quickcheck.generator.GenerationStatus;
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import org.elasticsearch.xpack.esql.core.type.DataType;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 /**
  * Generates random row data conforming to a {@link SimSchema}.
@@ -25,17 +24,11 @@ class SimDataGenerator {
     private SimDataGenerator() { /* static class */ }
 
     private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz", " Hi ", "HELLO", "world");
-
-    static List<Map<String, Object>> generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
-        int nRows = random.nextInt(1, 5);
-        List<Map<String, Object>> rows = new ArrayList<>(nRows);
-        for (int i = 0; i < nRows; i++) {
-            rows.add(generateRow(schema, random));
-        }
-        return rows;
-    }
-
     private static final double NULL_PROBABILITY = 0.2;
+
+    static List<Map<String, Object>> generate(SimSchema schema, SourceOfRandomness random) {
+        return IntStream.range(0, random.nextInt(1, 5)).mapToObj(i -> generateRow(schema, random)).toList();
+    }
 
     private static Map<String, Object> generateRow(SimSchema schema, SourceOfRandomness random) {
         Map<String, Object> row = new LinkedHashMap<>();

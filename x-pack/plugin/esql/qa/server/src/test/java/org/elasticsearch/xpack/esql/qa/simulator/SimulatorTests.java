@@ -53,7 +53,6 @@ import static org.hamcrest.Matchers.equalTo;
 
 public class SimulatorTests extends ESTestCase {
     private final Simulator simulator = new Simulator();
-
     private final EsqlParser parser = EsqlParser.INSTANCE;
 
     public void testRow() throws Exception {
@@ -652,8 +651,7 @@ public class SimulatorTests extends ESTestCase {
         // aggregates: [Alias("s1", COUNT(b)), s1Attr_from_inline1_output]
         // The grouping key s1 has value 6; COUNT(b) = 1.
         // ES keeps the grouping key value (s1=6), not the COUNT value (s1=1).
-        Simulator.Column s1Column = result1.columns().stream().filter(c -> c.name().equals("s1")).findFirst().orElseThrow();
-        var s1Ref = new ReferenceAttribute(Source.EMPTY, "s1", s1Column.type());
+        var s1Ref = new ReferenceAttribute(Source.EMPTY, "s1", result1.getColumn("s1").type());
         var bRef = new ReferenceAttribute(Source.EMPTY, "b", DataType.INTEGER);
         var agg2 = new Aggregate(
             Source.EMPTY,
@@ -844,7 +842,6 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testRowKeywordOnly() throws Exception {
-        // The parser stores keyword literals as BytesRef; visit(Row) preserves them as-is.
         Simulator.Result result = simulate("ROW name = \"hello\", tag = \"world\"");
         assertThat(result.columns().size(), equalTo(2));
         assertThat(result.getColumn("name").type(), equalTo(DataType.KEYWORD));
