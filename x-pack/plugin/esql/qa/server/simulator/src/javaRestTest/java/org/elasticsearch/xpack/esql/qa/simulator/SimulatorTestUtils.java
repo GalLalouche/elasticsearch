@@ -58,7 +58,16 @@ class SimulatorTestUtils {
         if (annotation != null) {
             for (String pair : annotation.value().split(",")) {
                 String[] kv = pair.split(":");
-                Loggers.setLevel(LogManager.getLogger(kv[0].trim()), kv[1].trim());
+                if (kv.length != 2) {
+                    throw new IllegalArgumentException("Invalid @TestLogging entry: [" + pair + "], expected format 'logger:LEVEL'");
+                }
+                String loggerName = kv[0].trim();
+                String level = kv[1].trim();
+                if ("_root".equals(loggerName)) {
+                    Loggers.setLevel(LogManager.getRootLogger(), level);
+                } else {
+                    Loggers.setLevel(LogManager.getLogger(loggerName), level);
+                }
             }
         }
     }

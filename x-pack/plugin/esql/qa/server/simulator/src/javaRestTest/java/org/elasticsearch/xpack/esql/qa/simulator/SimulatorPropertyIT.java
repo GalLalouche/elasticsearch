@@ -28,12 +28,12 @@ import org.elasticsearch.test.cluster.ElasticsearchCluster;
 import org.elasticsearch.test.cluster.local.distribution.DistributionType;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.xcontent.json.JsonXContent;
-import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
-import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
+import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.Order;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
@@ -114,7 +114,7 @@ public class SimulatorPropertyIT {
         }
     }
 
-    private static int trialCount = 0;
+    private static int trialCount;
 
     @Property(trials = 50, maxShrinkDepth = 100, maxShrinkTime = 120000)
     public void simulatorMatchesEs(@From(TestCaseGenerator.class) TestCase tc) throws Exception {
@@ -212,7 +212,7 @@ public class SimulatorPropertyIT {
     }
 
     public static class TestCaseGenerator extends Generator<TestCase> {
-        private boolean seedApplied;
+        private static boolean seedApplied;
 
         public TestCaseGenerator() {
             super(TestCase.class);
@@ -254,8 +254,11 @@ public class SimulatorPropertyIT {
                 for (int f = 0; f < eval.fields().size(); f++) {
                     List<Alias> reduced = new ArrayList<>(eval.fields());
                     reduced.remove(f);
-                    addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(
-                        new Eval(eval.source(), eval.child(), reduced)));
+                    addPlanCandidate(
+                        candidates,
+                        larger,
+                        LogicalPlanGenerator.resolveReferences(new Eval(eval.source(), eval.child(), reduced))
+                    );
                 }
             }
 
@@ -299,12 +302,12 @@ public class SimulatorPropertyIT {
             return candidates;
         }
 
-        private void addPlanCandidate(List<TestCase> candidates, TestCase original, LogicalPlan plan) {
+        private static void addPlanCandidate(List<TestCase> candidates, TestCase original, LogicalPlan plan) {
             candidates.add(new TestCase(original.schema(), original.data(), plan, LogicalPlanPrinter.print(plan)));
         }
 
         /** Tries replacing each expression in the outermost stage with its sub-expressions. */
-        private void addExpressionShrinks(List<TestCase> candidates, TestCase larger) {
+        private static void addExpressionShrinks(List<TestCase> candidates, TestCase larger) {
             LogicalPlan plan = larger.plan();
             switch (plan) {
                 case Eval eval -> {
@@ -313,15 +316,21 @@ public class SimulatorPropertyIT {
                         for (Expression sub : collectSubExpressions(alias.child())) {
                             List<Alias> newFields = new ArrayList<>(eval.fields());
                             newFields.set(f, new Alias(alias.source(), alias.name(), sub));
-                            addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(
-                                new Eval(eval.source(), eval.child(), newFields)));
+                            addPlanCandidate(
+                                candidates,
+                                larger,
+                                LogicalPlanGenerator.resolveReferences(new Eval(eval.source(), eval.child(), newFields))
+                            );
                         }
                     }
                 }
                 case Filter filter -> {
                     for (Expression sub : collectSubExpressions(filter.condition())) {
-                        addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(
-                            new Filter(filter.source(), filter.child(), sub)));
+                        addPlanCandidate(
+                            candidates,
+                            larger,
+                            LogicalPlanGenerator.resolveReferences(new Filter(filter.source(), filter.child(), sub))
+                        );
                     }
                 }
                 case OrderBy orderBy -> {
@@ -330,39 +339,37 @@ public class SimulatorPropertyIT {
                         for (Expression sub : collectSubExpressions(order.child())) {
                             List<Order> newOrders = new ArrayList<>(orderBy.order());
                             newOrders.set(k, new Order(order.source(), sub, order.direction(), order.nullsPosition()));
-                            addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(
-                                new OrderBy(orderBy.source(), orderBy.child(), newOrders)));
+                            addPlanCandidate(
+                                candidates,
+                                larger,
+                                LogicalPlanGenerator.resolveReferences(new OrderBy(orderBy.source(), orderBy.child(), newOrders))
+                            );
                         }
                     }
                 }
-                case InlineStats is -> shrinkAggregateExpressions(candidates, larger, is.aggregate(), is);
-                case Aggregate agg -> shrinkAggregateExpressions(candidates, larger, agg, null);
-                default -> { /* no expressions to shrink */ }
+                case InlineStats is -> shrinkAggregateExpressions(candidates, larger, is.aggregate());
+                case Aggregate agg -> shrinkAggregateExpressions(candidates, larger, agg);
+                default -> {
+                    /* no expressions to shrink */ }
             }
         }
 
         /** Tries replacing each aggregate field expression with its sub-expressions. */
-        private void shrinkAggregateExpressions(
-            List<TestCase> candidates,
-            TestCase larger,
-            Aggregate agg,
-            InlineStats wrapper
-        ) {
+        private static void shrinkAggregateExpressions(List<TestCase> candidates, TestCase larger, Aggregate agg) {
             for (int a = 0; a < agg.aggregates().size(); a++) {
                 if (agg.aggregates().get(a) instanceof Alias alias && alias.child() instanceof AggregateFunction aggFunc) {
                     for (Expression sub : collectSubExpressions(aggFunc.field())) {
                         List<NamedExpression> newAggs = new ArrayList<>(agg.aggregates());
                         newAggs.set(a, new Alias(alias.source(), alias.name(), aggFunc.withField(sub)));
                         Aggregate newAgg = new Aggregate(agg.source(), agg.child(), agg.groupings(), newAggs);
-                        LogicalPlan candidate = wrapper != null ? new InlineStats(wrapper.source(), newAgg) : newAgg;
-                        addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(candidate));
+                        addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(wrapAggregate(larger.plan(), newAgg)));
                     }
                 }
             }
         }
 
         /** Tries removing individual aggregate aliases from INLINE STATS or STATS. */
-        private void removeIndividualAggregates(List<TestCase> candidates, TestCase larger) {
+        private static void removeIndividualAggregates(List<TestCase> candidates, TestCase larger) {
             Aggregate agg;
             if (larger.plan() instanceof InlineStats is) {
                 agg = is.aggregate();
@@ -381,23 +388,28 @@ public class SimulatorPropertyIT {
                 List<NamedExpression> reduced = new ArrayList<>(agg.aggregates());
                 reduced.remove(i);
                 Aggregate newAgg = new Aggregate(agg.source(), agg.child(), agg.groupings(), reduced);
-                LogicalPlan candidate = larger.plan() instanceof InlineStats is
-                    ? new InlineStats(is.source(), newAgg)
-                    : newAgg;
-                addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(candidate));
+                addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(wrapAggregate(larger.plan(), newAgg)));
             }
+        }
+
+        /** Wraps a new Aggregate in InlineStats if the original plan was InlineStats, otherwise returns it as-is. */
+        private static LogicalPlan wrapAggregate(LogicalPlan original, Aggregate newAgg) {
+            return original instanceof InlineStats is ? new InlineStats(is.source(), newAgg) : newAgg;
         }
 
         /** Recursively collects all sub-expressions (children and their descendants). */
         private static List<Expression> collectSubExpressions(Expression expr) {
             List<Expression> subs = new ArrayList<>();
-            for (Expression child : expr.children()) {
-                subs.add(child);
-                subs.addAll(collectSubExpressions(child));
-            }
+            collectSubExpressionsInto(subs, expr);
             return subs;
         }
 
+        private static void collectSubExpressionsInto(List<Expression> out, Expression expr) {
+            for (Expression child : expr.children()) {
+                out.add(child);
+                collectSubExpressionsInto(out, child);
+            }
+        }
     }
 
     private static boolean isRowPlan(LogicalPlan plan) {
