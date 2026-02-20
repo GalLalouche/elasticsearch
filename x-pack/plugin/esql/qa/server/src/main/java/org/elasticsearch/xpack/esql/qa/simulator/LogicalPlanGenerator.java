@@ -63,13 +63,15 @@ import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+
+import static java.util.function.Function.identity;
 
 /**
  * Generates random {@link LogicalPlan} trees. Plans are built bottom-up: an {@link EsRelation} or {@link Row} base
@@ -98,12 +100,8 @@ public class LogicalPlanGenerator {
 
     /** Returns a plan WITHOUT {@link #resolveReferences} — for testing shrinking validity. */
     static LogicalPlan generateRaw(SimSchema schema, SourceOfRandomness random) {
-        return generateRaw(schema, PLAN_DEPTH, random);
-    }
-
-    private static LogicalPlan generateRaw(SimSchema schema, int depth, SourceOfRandomness random) {
         LogicalPlan plan = random.nextInt(1, 10) <= 3 ? buildRow(schema, random) : buildEsRelation(schema);
-        for (int i = 0; i < depth; i++) {
+        for (int i = 0; i < PLAN_DEPTH; i++) {
             plan = wrapLayer(plan, random);
         }
         return plan;
@@ -120,19 +118,16 @@ public class LogicalPlanGenerator {
      * See {@code ShrinkingValidityTests} for empirical proof that raw plans can have stale NameIds.
      */
     static LogicalPlan resolveReferences(LogicalPlan plan) {
-        if (plan instanceof UnaryPlan == false) {
+        if (!(plan instanceof UnaryPlan unaryPlan)) {
             return plan;
         }
-        LogicalPlan resolvedChild = resolveReferences(((UnaryPlan) plan).child());
-        Map<String, Attribute> canonical = new HashMap<>();
-        for (Attribute attr : resolvedChild.output()) {
-            canonical.put(attr.name(), attr);
-        }
+        LogicalPlan resolvedChild = resolveReferences(unaryPlan.child());
+        Map<String, Attribute> canonical = resolvedChild.output().stream().collect(Collectors.toMap(Attribute::name, identity()));
         return switch (plan) {
             case Keep keep -> new Keep(
                 keep.source(),
                 resolvedChild,
-                keep.projections().stream().map(ne -> (NamedExpression) canonical.getOrDefault(ne.name(), (Attribute) ne)).toList()
+                keep.projections().stream().<NamedExpression>map(ne -> canonical.getOrDefault(ne.name(), (Attribute) ne)).toList()
             );
             case Filter filter -> new Filter(filter.source(), resolvedChild, resolveExpr(filter.condition(), canonical));
             case Eval eval -> new Eval(
@@ -160,8 +155,8 @@ public class LogicalPlanGenerator {
                 }).toList();
                 yield new Aggregate(agg.source(), resolvedChild, newGroupings, newAggregates);
             }
-            default -> // Limit and other pass-through nodes: just replace child
-                ((UnaryPlan) plan).replaceChild(resolvedChild);
+            // Limit and other pass-through nodes: just replace child
+            default -> unaryPlan.replaceChild(resolvedChild);
         };
     }
 
@@ -234,7 +229,7 @@ public class LogicalPlanGenerator {
     static LogicalPlan buildEsRelation(SimSchema schema) {
         List<Attribute> attrs = schema.columns()
             .stream()
-            .map(col -> (Attribute) new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
+            .<Attribute>map(col -> new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
             .toList();
         return new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
     }
@@ -264,7 +259,10 @@ public class LogicalPlanGenerator {
         };
     }
 
-    /** Randomly wraps the given plan in one additional operator, or returns it unchanged (identity). Options are lazy (Suppliers) so only the chosen branch consumes random state. */
+    /**
+     * Randomly wraps the given plan in one additional operator, or returns it unchanged (identity).
+     * Options are lazy (Suppliers) so only the chosen branch consumes random state.
+     */
     static LogicalPlan wrapLayer(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
@@ -277,14 +275,14 @@ public class LogicalPlanGenerator {
             options.add(() -> wrapDrop(current, available, random));
         }
         if (integerAttrs.isEmpty() == false || keywordAttrs.isEmpty() == false) {
-            options.add(() -> wrapEval(current, random));
-            options.add(() -> wrapFilter(current, integerAttrs, random));
+            options.add(() -> wrapEval(current, integerAttrs, keywordAttrs, random));
+            options.add(() -> wrapFilter(current, integerAttrs, keywordAttrs, random));
         }
         if (integerAttrs.isEmpty() == false) {
-            options.add(() -> generateAggregate(current, integerAttrs, available, random));
+            options.add(() -> generateAggregate(current, integerAttrs, keywordAttrs, available, random));
             // INLINE STATS after LIMIT is not supported by the ES|QL engine
             if (current.anyMatch(Limit.class::isInstance) == false) {
-                options.add(() -> wrapInlineStats(current, integerAttrs, available, random));
+                options.add(() -> new InlineStats(Source.EMPTY, generateAggregate(current, integerAttrs, keywordAttrs, available, random)));
             }
         }
         // LIMIT and SORT are excluded: SORT always wraps in LIMIT, and when LIMIT cuts within a group of
@@ -295,7 +293,7 @@ public class LogicalPlanGenerator {
 
     private static LogicalPlan wrapKeep(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> kept = generateSubset(random, current.output(), 1, current.output().size());
-        List<NamedExpression> projections = kept.stream().map(a -> (NamedExpression) a).toList();
+        List<NamedExpression> projections = kept.stream().<NamedExpression>map(Function.identity()).toList();
         return new Keep(Source.EMPTY, current, projections);
     }
 
@@ -305,20 +303,20 @@ public class LogicalPlanGenerator {
         Set<String> dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
         List<NamedExpression> kept = available.stream()
             .filter(a -> dropNames.contains(a.name()) == false)
-            .map(a -> (NamedExpression) a)
+            .<NamedExpression>map(Function.identity())
             .toList();
         return new Keep(Source.EMPTY, current, kept);
     }
 
-    private static LogicalPlan wrapEval(LogicalPlan current, SourceOfRandomness random) {
-        List<Attribute> available = current.output();
-        List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
-        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
-        Set<String> existingNames = available.stream().map(Attribute::name).collect(Collectors.toSet());
-        List<String> availableAliases = EVAL_ALIAS_POOL.stream().filter(n -> existingNames.contains(n) == false).toList();
-        if (availableAliases.isEmpty()) {
-            availableAliases = List.of("_col_0", "_col_1");
-        }
+    private static LogicalPlan wrapEval(
+        LogicalPlan current,
+        List<Attribute> integerAttrs,
+        List<Attribute> keywordAttrs,
+        SourceOfRandomness random
+    ) {
+        Set<String> existingNames = current.output().stream().map(Attribute::name).collect(Collectors.toSet());
+        List<String> pool = EVAL_ALIAS_POOL.stream().filter(n -> existingNames.contains(n) == false).toList();
+        List<String> availableAliases = pool.isEmpty() ? List.of("_col_0", "_col_1") : pool;
         int maxAliases = Math.min(availableAliases.size(), 3);
         int nAliases = random.nextInt(1, maxAliases);
         List<String> shuffled = new ArrayList<>(availableAliases);
@@ -336,9 +334,12 @@ public class LogicalPlanGenerator {
         return new Eval(Source.EMPTY, current, fields);
     }
 
-    private static LogicalPlan wrapFilter(LogicalPlan current, List<Attribute> integerAttrs, SourceOfRandomness random) {
-        List<Attribute> available = current.output();
-        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
+    private static LogicalPlan wrapFilter(
+        LogicalPlan current,
+        List<Attribute> integerAttrs,
+        List<Attribute> keywordAttrs,
+        SourceOfRandomness random
+    ) {
         // When no integer columns, or sometimes when keywords exist, generate a string predicate
         if (keywordAttrs.isEmpty() == false && (integerAttrs.isEmpty() || random.nextBoolean())) {
             Expression str = random.choose(keywordAttrs);
@@ -365,18 +366,10 @@ public class LogicalPlanGenerator {
         return new Filter(Source.EMPTY, current, cond);
     }
 
-    private static LogicalPlan wrapInlineStats(
-        LogicalPlan current,
-        List<Attribute> integerAttrs,
-        List<Attribute> available,
-        SourceOfRandomness random
-    ) {
-        return new InlineStats(Source.EMPTY, generateAggregate(current, integerAttrs, available, random));
-    }
-
     private static Aggregate generateAggregate(
         LogicalPlan current,
         List<Attribute> integerAttrs,
+        List<Attribute> keywordAttrs,
         List<Attribute> available,
         SourceOfRandomness random
     ) {
@@ -386,8 +379,6 @@ public class LogicalPlanGenerator {
         List<String> shuffledNames = new ArrayList<>(STATS_ALIAS_POOL);
         Collections.shuffle(shuffledNames, random.toJDKRandom());
         int nNames = random.nextInt(1, STATS_ALIAS_POOL.size());
-
-        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
         List<NamedExpression> aggregates = new ArrayList<>();
         for (int i = 0; i < nNames; i++) {
             Expression field = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);

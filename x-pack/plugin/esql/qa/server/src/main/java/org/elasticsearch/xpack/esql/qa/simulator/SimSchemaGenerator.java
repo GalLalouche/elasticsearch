@@ -14,6 +14,7 @@ import org.elasticsearch.xpack.esql.core.type.DataType;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
  * Generates random {@link SimSchema} instances: an index name plus a variable number of columns
@@ -30,11 +31,9 @@ class SimSchemaGenerator {
         List<String> shuffledNames = new ArrayList<>(COLUMN_NAME_POOL);
         Collections.shuffle(shuffledNames, random.toJDKRandom());
         int nCols = random.nextInt(1, 4);
-        List<SimSchema.SimColumn> columns = new ArrayList<>(nCols);
-        for (int i = 0; i < nCols; i++) {
-            DataType type = random.choose(TYPE_POOL);
-            columns.add(new SimSchema.SimColumn(shuffledNames.get(i), type));
-        }
+        List<SimSchema.SimColumn> columns = IntStream.range(0, nCols)
+            .mapToObj(i -> new SimSchema.SimColumn(shuffledNames.get(i), random.choose(TYPE_POOL)))
+            .toList();
         return new SimSchema(indexName, List.copyOf(columns));
     }
 

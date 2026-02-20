@@ -194,9 +194,7 @@ public record Result(List<Simulator.Column> columns) {
         // ES|QL uses 32-bit integer arithmetic and returns null on overflow; LONG arithmetic can overflow too but is
         // extremely unlikely with the small values in our generated data, so we only check for INTEGER overflow here.
         boolean integerArithmetic = left.type() == DataType.INTEGER && right.type() == DataType.INTEGER;
-        return new Simulator.UnnamedColumn(left.type(), IntStream.range(0, left.values().size()).mapToObj(i -> {
-            Object l = left.values().get(i);
-            Object r = right.values().get(i);
+        return new Simulator.UnnamedColumn(left.type(), zipWith(left.values(), right.values(), (l, r) -> {
             if (l == null || r == null) {
                 return null;
             }
@@ -208,8 +206,8 @@ public record Result(List<Simulator.Column> columns) {
             if (integerArithmetic && (longResult < Integer.MIN_VALUE || longResult > Integer.MAX_VALUE)) {
                 return null;
             }
-            return (Object) longResult;
-        }).toList());
+            return longResult;
+        }));
     }
 
     private Simulator.UnnamedColumn evalUnaryString(Expression fieldExpr, SimBug activeBug, UnaryOperator<String> op) {
@@ -224,14 +222,14 @@ public record Result(List<Simulator.Column> columns) {
     private Simulator.UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
         Simulator.UnnamedColumn left = evaluate(leftExpr, activeBug);
         Simulator.UnnamedColumn right = evaluate(rightExpr, activeBug);
-        return new Simulator.UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, left.values().size()).mapToObj(i -> {
-            Object l = left.values().get(i);
-            Object r = right.values().get(i);
-            if (l == null || r == null) {
-                return null;
-            }
-            return (Object) test.test(Long.compare(Simulator.toLong(l), Simulator.toLong(r)));
-        }).toList());
+        return new Simulator.UnnamedColumn(
+            DataType.BOOLEAN,
+            zipWith(
+                left.values(),
+                right.values(),
+                (l, r) -> l == null || r == null ? null : test.test(Long.compare(Simulator.toLong(l), Simulator.toLong(r)))
+            )
+        );
     }
 
     private Simulator.UnnamedColumn evalBinaryString(
@@ -243,13 +241,18 @@ public record Result(List<Simulator.Column> columns) {
     ) {
         Simulator.UnnamedColumn strCol = evaluate(strExpr, activeBug);
         Simulator.UnnamedColumn argCol = evaluate(argExpr, activeBug);
-        return new Simulator.UnnamedColumn(resultType, IntStream.range(0, strCol.values().size()).mapToObj(i -> {
-            Object strVal = strCol.values().get(i);
-            Object argVal = argCol.values().get(i);
-            if (strVal == null || argVal == null) {
-                return null;
-            }
-            return op.apply(strVal.toString(), argVal);
-        }).toList());
+        return new Simulator.UnnamedColumn(
+            resultType,
+            zipWith(
+                strCol.values(),
+                argCol.values(),
+                (strVal, argVal) -> strVal == null || argVal == null ? null : op.apply(strVal.toString(), argVal)
+            )
+        );
+    }
+
+    private static <A, B, C> List<C> zipWith(List<A> as, List<B> bs, BiFunction<A, B, C> fn) {
+        assert as.size() == bs.size();
+        return IntStream.range(0, as.size()).mapToObj(i -> fn.apply(as.get(i), bs.get(i))).toList();
     }
 }
