@@ -7,6 +7,7 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
@@ -31,6 +32,7 @@ import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
+import org.elasticsearch.xpack.esql.plan.logical.Row;
 
 import java.io.IOException;
 import java.util.List;
@@ -789,6 +791,61 @@ public class SimulatorTests extends ESTestCase {
         );
         Simulator.Result sumResult = new Simulator(schema, data).simulate(aggregateSum);
         assertNull(sumResult.getColumn("s").values().get(0));
+    }
+
+    public void testBuildRowPrints() {
+        // KEYWORD literals require BytesRef (not String) per Literal's assertion.
+        Row row = new Row(
+            Source.EMPTY,
+            List.of(
+                new Alias(Source.EMPTY, "x", new Literal(Source.EMPTY, 5, DataType.INTEGER)),
+                new Alias(Source.EMPTY, "name", new Literal(Source.EMPTY, new BytesRef("bar"), DataType.KEYWORD))
+            )
+        );
+        String printed = LogicalPlanPrinter.print(row);
+        assertTrue(printed.startsWith("ROW "));
+        assertTrue(printed.contains("x = "));
+        assertTrue(printed.contains("name = \""));
+    }
+
+    public void testRowWithStatsNoGrouping() throws Exception {
+        Simulator.Result result = simulate("ROW x = 5 | STATS s0 = COUNT(x)");
+        assertThat(result.getColumn("s0").values().get(0), equalTo(1L));
+    }
+
+    public void testRowWithWhereFiltersOut() throws Exception {
+        Simulator.Result result = simulate("ROW x = 1 | WHERE x > 5");
+        assertThat(result.numRows(), equalTo(0));
+    }
+
+    public void testRowWithWhereKeeps() throws Exception {
+        Simulator.Result result = simulate("ROW x = 10 | WHERE x > 5");
+        assertThat(result.numRows(), equalTo(1));
+        assertThat(result.getColumn("x").values().get(0), equalTo(10));
+    }
+
+    public void testRowKeywordOnly() throws Exception {
+        // The parser stores keyword literals as BytesRef; visit(Row) preserves them as-is.
+        Simulator.Result result = simulate("ROW name = \"hello\", tag = \"world\"");
+        assertThat(result.columns().size(), equalTo(2));
+        assertThat(result.getColumn("name").type(), equalTo(DataType.KEYWORD));
+        assertThat(result.getColumn("tag").type(), equalTo(DataType.KEYWORD));
+        assertThat(result.getColumn("name").values().get(0), equalTo(new BytesRef("hello")));
+        assertThat(result.getColumn("tag").values().get(0), equalTo(new BytesRef("world")));
+    }
+
+    public void testRowWithKeep() throws Exception {
+        Simulator.Result result = simulate("ROW x = 1, y = 2, z = 3 | KEEP x, z");
+        assertThat(result.columns().size(), equalTo(2));
+        assertThat(result.getColumn("x").values().get(0), equalTo(1));
+        assertThat(result.getColumn("z").values().get(0), equalTo(3));
+    }
+
+    public void testRowWithStatsGrouped() throws Exception {
+        Simulator.Result result = simulate("ROW x = 5, y = 3 | STATS s0 = SUM(x) BY y");
+        assertThat(result.numRows(), equalTo(1));
+        assertThat(result.getColumn("s0").values().get(0), equalTo(5L));
+        assertThat(result.getColumn("y").values().get(0), equalTo(3));
     }
 
     private Simulator.Result simulate(String statement) throws IOException {

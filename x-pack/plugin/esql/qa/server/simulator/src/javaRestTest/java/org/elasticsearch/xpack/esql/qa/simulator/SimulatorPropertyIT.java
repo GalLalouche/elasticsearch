@@ -21,6 +21,7 @@ import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.WarningsHandler;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.xcontent.XContentHelper;
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.test.cluster.ElasticsearchCluster;
 import org.elasticsearch.test.cluster.local.distribution.DistributionType;
 import org.elasticsearch.xcontent.json.JsonXContent;
@@ -29,6 +30,7 @@ import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
+import org.elasticsearch.xpack.esql.plan.logical.Row;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -81,22 +83,35 @@ public class SimulatorPropertyIT {
         }
     }
 
-    record TestCase(SimSchema schema, List<Map<String, Object>> data, LogicalPlan plan, String query) {
+    record TestCase(@Nullable SimSchema schema, @Nullable List<Map<String, Object>> data, LogicalPlan plan, String query) {
+        TestCase {
+            assert (schema == null) == (data == null);
+        }
+
         @Override
         public String toString() {
+            if (schema == null) {
+                return Strings.format("%s [ROW plan]", query);
+            }
             return Strings.format("%s [%s, %s rows]", query, schema, data.size());
         }
     }
 
     @Property(trials = 50)
     public void simulatorMatchesEs(@From(TestCaseGenerator.class) TestCase tc) throws Exception {
-        // Clean up any stale index from a previous run, then set up fresh
-        deleteIndex(tc.schema().indexName());
-        createIndex(tc.schema());
-        try {
-            indexData(tc.schema(), tc.data());
+        boolean needsIndex = tc.schema() != null;
 
-            Simulator simulator = new Simulator(tc.schema(), tc.data());
+        if (needsIndex) {
+            // Clean up any stale index from a previous run, then set up fresh
+            deleteIndex(tc.schema().indexName());
+            createIndex(tc.schema());
+        }
+        try {
+            if (needsIndex) {
+                indexData(tc.schema(), tc.data());
+            }
+
+            Simulator simulator = needsIndex ? new Simulator(tc.schema(), tc.data()) : new Simulator();
             Simulator.Result simResult = simulator.simulate(tc.plan());
 
             Map<String, Object> esResponse = runEsqlQuery(tc.query());
@@ -169,7 +184,9 @@ public class SimulatorPropertyIT {
                 );
             }
         } finally {
-            deleteIndex(tc.schema().indexName());
+            if (needsIndex) {
+                deleteIndex(tc.schema().indexName());
+            }
         }
     }
 
@@ -181,8 +198,11 @@ public class SimulatorPropertyIT {
         @Override
         public TestCase generate(SourceOfRandomness random, GenerationStatus status) {
             SimSchema schema = SimSchemaGenerator.generate(random, status);
-            List<Map<String, Object>> data = SimDataGenerator.generate(schema, random, status);
             LogicalPlan plan = LogicalPlanGenerator.generate(schema, random, status);
+            if (isRowPlan(plan)) {
+                return new TestCase(null, null, plan, LogicalPlanPrinter.print(plan));
+            }
+            List<Map<String, Object>> data = SimDataGenerator.generate(schema, random, status);
             return new TestCase(schema, data, plan, LogicalPlanPrinter.print(plan));
         }
 
@@ -194,33 +214,44 @@ public class SimulatorPropertyIT {
                 LogicalPlan simpler = LogicalPlanGenerator.resolveReferences(unary.child());
                 candidates.add(new TestCase(larger.schema(), larger.data(), simpler, LogicalPlanPrinter.print(simpler)));
             }
-            // Shrink data: remove last row
-            if (larger.data().size() > 1) {
+            // Shrink data: remove last row (only for FROM plans with data)
+            if (larger.data() != null && larger.data().size() > 1) {
                 List<Map<String, Object>> smaller = new ArrayList<>(larger.data());
                 smaller.remove(smaller.size() - 1);
                 candidates.add(new TestCase(larger.schema(), smaller, larger.plan(), larger.query()));
             }
             // Shrink data: fill in a null (absent) field with a non-null value
-            for (int r = 0; r < larger.data().size(); r++) {
-                Map<String, Object> row = larger.data().get(r);
-                for (SimSchema.SimColumn col : larger.schema().columns()) {
-                    if (row.containsKey(col.name()) == false) {
-                        List<Map<String, Object>> filledData = larger.data().stream()
-                            .<Map<String, Object>>map(LinkedHashMap::new)
-                            .toList();
-                        Object fillValue = switch (col.type()) {
-                            case INTEGER -> 1;
-                            case KEYWORD -> "foo";
-                            default -> throw new UnsupportedOperationException("Unsupported type: " + col.type());
-                        };
-                        filledData.get(r).put(col.name(), fillValue);
-                        candidates.add(new TestCase(larger.schema(), filledData, larger.plan(), larger.query()));
-                        break; // Only try the first null per row to limit candidate explosion
+            if (larger.data() != null) {
+                for (int r = 0; r < larger.data().size(); r++) {
+                    Map<String, Object> row = larger.data().get(r);
+                    for (SimSchema.SimColumn col : larger.schema().columns()) {
+                        if (row.containsKey(col.name()) == false) {
+                            List<Map<String, Object>> filledData = larger.data()
+                                .stream()
+                                .<Map<String, Object>>map(LinkedHashMap::new)
+                                .toList();
+                            Object fillValue = switch (col.type()) {
+                                case INTEGER -> 1;
+                                case KEYWORD -> "foo";
+                                default -> throw new UnsupportedOperationException("Unsupported type: " + col.type());
+                            };
+                            filledData.get(r).put(col.name(), fillValue);
+                            candidates.add(new TestCase(larger.schema(), filledData, larger.plan(), larger.query()));
+                            break; // Only try the first null per row to limit candidate explosion
+                        }
                     }
                 }
             }
             return candidates;
         }
+    }
+
+    private static boolean isRowPlan(LogicalPlan plan) {
+        LogicalPlan current = plan;
+        while (current instanceof UnaryPlan unary) {
+            current = unary.child();
+        }
+        return current instanceof Row;
     }
 
     private static void createIndex(SimSchema schema) throws IOException {

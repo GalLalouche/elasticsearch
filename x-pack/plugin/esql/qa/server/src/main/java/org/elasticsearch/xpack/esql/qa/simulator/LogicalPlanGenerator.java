@@ -10,6 +10,7 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 import com.pholser.junit.quickcheck.generator.GenerationStatus;
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
@@ -40,6 +41,7 @@ import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
+import org.elasticsearch.xpack.esql.plan.logical.Row;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 
 import java.util.ArrayList;
@@ -51,7 +53,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
- * Generates random {@link LogicalPlan} trees. Plans are built bottom-up: an {@link EsRelation} base
+ * Generates random {@link LogicalPlan} trees. Plans are built bottom-up: an {@link EsRelation} or {@link Row} base
  * is wrapped in randomly chosen layers (KEEP, DROP, EVAL, FILTER, LIMIT, SORT, STATS, INLINE STATS)
  * up to a configurable depth.
  */
@@ -63,6 +65,7 @@ public class LogicalPlanGenerator {
 
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
     private static final List<String> STATS_ALIAS_POOL = List.of("s0", "s1");
+    private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz");
     private static final List<String> AGG_FUNC_POOL = List.of("COUNT", "SUM", "MIN", "MAX");
 
     static LogicalPlan generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
@@ -75,7 +78,7 @@ public class LogicalPlanGenerator {
     }
 
     private static LogicalPlan generateRaw(SimSchema schema, int depth, SourceOfRandomness random, GenerationStatus status) {
-        LogicalPlan plan = buildEsRelation(schema);
+        LogicalPlan plan = random.nextInt(1, 10) <= 3 ? buildRow(schema, random) : buildEsRelation(schema);
         for (int i = 0; i < depth; i++) {
             plan = wrapLayer(plan, random, status);
         }
@@ -93,7 +96,7 @@ public class LogicalPlanGenerator {
      * See {@code ShrinkingValidityTests} for empirical proof that raw plans can have stale NameIds.
      */
     static LogicalPlan resolveReferences(LogicalPlan plan) {
-        if (plan instanceof EsRelation) {
+        if (plan instanceof EsRelation || plan instanceof Row) {
             return plan;
         }
         if (plan instanceof UnaryPlan == false) {
@@ -188,6 +191,31 @@ public class LogicalPlanGenerator {
             .map(col -> (Attribute) new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
             .toList();
         return new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
+    }
+
+    static Row buildRow(SimSchema schema, SourceOfRandomness random) {
+        return new Row(
+            Source.EMPTY,
+            schema.columns()
+                .stream()
+                .map(
+                    col -> new Alias(
+                        Source.EMPTY,
+                        col.name(),
+                        new Literal(Source.EMPTY, generateLiteralValue(col.type(), random), col.type())
+                    )
+                )
+                .toList()
+        );
+    }
+
+    private static Object generateLiteralValue(DataType type, SourceOfRandomness random) {
+        return switch (type) {
+            case INTEGER -> random.nextInt(1, 10);
+            // Literal requires BytesRef (not String) for KEYWORD values
+            case KEYWORD -> new BytesRef(random.choose(KEYWORD_POOL));
+            default -> throw new UnsupportedOperationException("Unsupported type for ROW literal: " + type);
+        };
     }
 
     /** Randomly wraps the given plan in one additional operator, or returns it unchanged (identity). */

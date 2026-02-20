@@ -7,6 +7,7 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
@@ -30,6 +31,7 @@ import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
+import org.elasticsearch.xpack.esql.plan.logical.Row;
 import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
 
 import static java.util.stream.Collectors.joining;
@@ -51,6 +53,7 @@ public class LogicalPlanPrinter {
         switch (plan) {
             case UnresolvedRelation relation -> printSpecific(relation, sb);
             case EsRelation relation -> printSpecific(relation, sb);
+            case Row row -> printSpecific(row, sb);
             case Keep keep -> printSpecific(keep, sb);
             case Drop drop -> printSpecific(drop, sb);
             case Eval eval -> printSpecific(eval, sb);
@@ -71,6 +74,10 @@ public class LogicalPlanPrinter {
 
     private static void printSpecific(EsRelation relation, StringBuilder sb) {
         sb.append("FROM ").append(relation.indexPattern());
+    }
+
+    private static void printSpecific(Row row, StringBuilder sb) {
+        sb.append("ROW ").append(row.fields().stream().map(LogicalPlanPrinter::printExpression).collect(joining(", ")));
     }
 
     private static void printSpecific(Keep keep, StringBuilder sb) {
@@ -138,7 +145,9 @@ public class LogicalPlanPrinter {
         return switch (expression) {
             case Alias alias -> Strings.format("%s = %s", alias.name(), printExpression(alias.child()));
             case Attribute attr -> attr.name();
-            case Literal literal -> literal.value() instanceof String s ? Strings.format("\"%s\"", s) : literal.value().toString();
+            case Literal literal -> literal.value() instanceof String s ? Strings.format("\"%s\"", s)
+                : literal.value() instanceof BytesRef br ? Strings.format("\"%s\"", br.utf8ToString())
+                : literal.value().toString();
             case ArithmeticOperation op -> Strings.format(
                 "%s %s %s",
                 parenthesizeArithmetic(op.left()),
