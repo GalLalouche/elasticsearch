@@ -38,10 +38,16 @@ import org.elasticsearch.xpack.esql.expression.function.scalar.string.Trim;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mod;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Neg;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.Equals;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThanOrEqual;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThanOrEqual;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.NotEquals;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
@@ -403,14 +409,24 @@ public class Simulator {
                 if (l == null || r == null) {
                     yield null;
                 }
-                long result = switch (op) {
+                Long result = switch (op) {
                     case Add ignored -> toLong(l) + toLong(r);
                     case Sub ignored -> toLong(l) - toLong(r);
                     case Mul ignored -> toLong(l) * toLong(r);
+                    case Div ignored -> toLong(r) == 0 ? null : toLong(l) / toLong(r);
+                    case Mod ignored -> toLong(r) == 0 ? null : toLong(l) % toLong(r);
                     default -> throw new UnsupportedOperationException(
                         Strings.format("Unsupported arithmetic in evaluateConstant: %s", op.getClass())
                     );
                 };
+                yield result == null || result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
+            }
+            case Neg neg -> {
+                Object v = evaluateConstant(neg.field());
+                if (v == null) {
+                    yield null;
+                }
+                long result = -toLong(v);
                 yield result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
             }
             default -> null;
@@ -418,6 +434,10 @@ public class Simulator {
     }
 
     public record Result(List<Column> columns) {
+        public Result(Column first, Column... rest) {
+            this(Arrays.asList(ArrayUtils.prepend(first, rest)));
+        }
+
         int numRows() {
             return columns.isEmpty() ? 0 : columns.getFirst().values.size();
         }
@@ -446,8 +466,23 @@ public class Simulator {
                 case Sub sub -> evalBinaryLong(sub.left(), sub.right(), activeBug, (l, r) -> l - r);
                 case Mul mul -> evalBinaryLong(mul.left(), mul.right(), activeBug, (l, r) -> l * r);
                 case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r) -> r == 0 ? null : l / r);
+                case Mod mod -> evalBinaryLong(mod.left(), mod.right(), activeBug, (l, r) -> r == 0 ? null : l % r);
+                case Neg neg -> {
+                    UnnamedColumn input = evaluate(neg.field(), activeBug);
+                    yield new UnnamedColumn(input.type, input.values.stream().<Object>map(o -> {
+                        if (o == null) {
+                            return null;
+                        }
+                        long result = -toLong(o);
+                        return input.type == DataType.INTEGER && (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) ? null : result;
+                    }).toList());
+                }
                 case GreaterThan gt -> evalComparison(gt.left(), gt.right(), activeBug, cmp -> cmp > 0);
                 case LessThan lt -> evalComparison(lt.left(), lt.right(), activeBug, cmp -> cmp < 0);
+                case GreaterThanOrEqual gte -> evalComparison(gte.left(), gte.right(), activeBug, cmp -> cmp >= 0);
+                case LessThanOrEqual lte -> evalComparison(lte.left(), lte.right(), activeBug, cmp -> cmp <= 0);
+                case Equals eq -> evalComparison(eq.left(), eq.right(), activeBug, cmp -> cmp == 0);
+                case NotEquals neq -> evalComparison(neq.left(), neq.right(), activeBug, cmp -> cmp != 0);
                 case Trim trim -> evalUnaryString(trim.field(), activeBug, String::trim);
                 case ToUpper toUpper -> evalUnaryString(
                     toUpper.field(),

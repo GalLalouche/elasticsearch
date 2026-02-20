@@ -55,7 +55,7 @@
 - [x] `WHERE` / `FILTER` — filters rows by condition (GreaterThan)
 - [x] `ROW` — literal row construction
 - [x] Sub, Mul expression support
-- [ ] Support more expression types beyond Add, Sub, Mul, Div, GreaterThan, LessThan
+- [x] Support more expression types beyond Add, Sub, Mul, Div, GreaterThan, LessThan (added Mod, Neg, GreaterThanOrEqual, LessThanOrEqual, Equals, NotEquals)
 - [x] `SORT` + `LIMIT` — sort by column(s) ASC/DESC, take first N rows
 - [x] `LIMIT` — take first N rows
 - [x] Support `STATS` (Aggregate with COUNT, SUM, MIN, MAX; grouping + no-grouping)

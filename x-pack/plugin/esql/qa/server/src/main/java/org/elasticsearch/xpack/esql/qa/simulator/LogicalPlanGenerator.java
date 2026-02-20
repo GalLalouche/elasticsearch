@@ -7,7 +7,6 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import com.pholser.junit.quickcheck.generator.GenerationStatus;
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import org.apache.lucene.util.BytesRef;
@@ -39,10 +38,17 @@ import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToLower;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToUpper;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.Trim;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mod;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Neg;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.Equals;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThanOrEqual;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThanOrEqual;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.NotEquals;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
@@ -182,11 +188,32 @@ public class LogicalPlanGenerator {
         if (expr instanceof Mul e) {
             return new Mul(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
         }
+        if (expr instanceof Div e) {
+            return new Div(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
+        }
+        if (expr instanceof Mod e) {
+            return new Mod(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
+        }
+        if (expr instanceof Neg e) {
+            return new Neg(e.source(), resolveExpr(e.field(), canonical));
+        }
         if (expr instanceof GreaterThan e) {
             return new GreaterThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
         }
         if (expr instanceof LessThan e) {
             return new LessThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+        }
+        if (expr instanceof GreaterThanOrEqual e) {
+            return new GreaterThanOrEqual(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+        }
+        if (expr instanceof LessThanOrEqual e) {
+            return new LessThanOrEqual(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+        }
+        if (expr instanceof Equals e) {
+            return new Equals(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+        }
+        if (expr instanceof NotEquals e) {
+            return new NotEquals(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
         }
         if (expr instanceof Count e) {
             return new Count(e.source(), resolveExpr(e.field(), canonical));
@@ -361,7 +388,15 @@ public class LogicalPlanGenerator {
         Expression right = random.nextBoolean()
             ? generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random)
             : new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
-        Expression cond = random.nextBoolean() ? new GreaterThan(Source.EMPTY, left, right) : new LessThan(Source.EMPTY, left, right);
+        Expression cond = switch (random.nextInt(0, 5)) {
+            case 0 -> new GreaterThan(Source.EMPTY, left, right);
+            case 1 -> new LessThan(Source.EMPTY, left, right);
+            case 2 -> new GreaterThanOrEqual(Source.EMPTY, left, right);
+            case 3 -> new LessThanOrEqual(Source.EMPTY, left, right);
+            case 4 -> new Equals(Source.EMPTY, left, right);
+            case 5 -> new NotEquals(Source.EMPTY, left, right);
+            default -> throw new IllegalStateException();
+        };
         return new Filter(Source.EMPTY, current, cond);
     }
 
@@ -413,12 +448,19 @@ public class LogicalPlanGenerator {
         Expression left = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
         Expression right = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
         // nextInt is inclusive on both bounds
-        return switch (random.nextInt(0, 2)) {
+        Expression result = switch (random.nextInt(0, 4)) {
             case 0 -> new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
             case 1 -> new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
             case 2 -> new Mul(Source.EMPTY, left, right);
+            case 3 -> new Div(Source.EMPTY, left, right);
+            case 4 -> new Mod(Source.EMPTY, left, right);
             default -> throw new IllegalStateException();
         };
+        // ~20% chance of wrapping in negation
+        if (random.nextInt(0, 4) == 0) {
+            result = new Neg(Source.EMPTY, result);
+        }
+        return result;
     }
 
     private static Expression generateLeaf(List<Attribute> integerAttrs, List<Attribute> keywordAttrs, SourceOfRandomness random) {

@@ -31,6 +31,7 @@ import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToLower;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToUpper;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.Trim;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Neg;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.EsqlBinaryComparison;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Drop;
@@ -159,6 +160,7 @@ public class LogicalPlanPrinter {
             case Literal literal -> literal.value() instanceof String s ? Strings.format("\"%s\"", s)
                 : literal.value() instanceof BytesRef br ? Strings.format("\"%s\"", br.utf8ToString())
                 : literal.value().toString();
+            case Neg neg -> Strings.format("-(%s)", printExpression(neg.field()));
             case ArithmeticOperation op -> Strings.format(
                 "%s %s %s",
                 parenthesizeArithmetic(op.left()),
