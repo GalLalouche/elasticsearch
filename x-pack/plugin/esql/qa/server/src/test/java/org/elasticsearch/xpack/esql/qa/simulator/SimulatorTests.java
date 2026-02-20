@@ -8,12 +8,10 @@
 package org.elasticsearch.xpack.esql.qa.simulator;
 
 import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
-import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
@@ -36,12 +34,10 @@ import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToLower;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToUpper;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.Trim;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
-import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mod;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Neg;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.NotEquals;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
-import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
@@ -105,15 +101,7 @@ public class SimulatorTests extends ESTestCase {
                     new Simulator.Column(
                         "client_ip",
                         DataType.IP,
-                        List.of(
-                            "172.21.3.15",
-                            "172.21.3.15",
-                            "172.21.3.15",
-                            "172.21.3.15",
-                            "172.21.0.5",
-                            "172.21.2.113",
-                            "172.21.2.162"
-                        )
+                        List.of("172.21.3.15", "172.21.3.15", "172.21.3.15", "172.21.3.15", "172.21.0.5", "172.21.2.113", "172.21.2.162")
                     ),
                     new Simulator.Column(
                         "event_duration",
@@ -298,11 +286,7 @@ public class SimulatorTests extends ESTestCase {
             List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
         );
         var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "foo"), Map.of("a", 2, "b", "bar"));
-        List<Attribute> attrs = schema.columns()
-            .stream()
-            .map(col -> (Attribute) new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
-            .toList();
-        var plan = new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
+        var plan = LogicalPlanGenerator.buildEsRelation(schema);
 
         assertThat(
             new Simulator(schema, data).simulate(plan),
@@ -343,11 +327,7 @@ public class SimulatorTests extends ESTestCase {
                     ),
                     new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.0.5", "172.21.3.15")),
                     new Simulator.Column("event_duration", DataType.LONG, List.of(725448L, 1232382L, 1756467L)),
-                    new Simulator.Column(
-                        "message",
-                        DataType.KEYWORD,
-                        List.of("Connection error", "Disconnected", "Connected to 10.1.0.1")
-                    )
+                    new Simulator.Column("message", DataType.KEYWORD, List.of("Connection error", "Disconnected", "Connected to 10.1.0.1"))
                 )
             )
         );
@@ -390,11 +370,7 @@ public class SimulatorTests extends ESTestCase {
                     ),
                     new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.3.15", "172.21.0.5")),
                     new Simulator.Column("event_duration", DataType.LONG, List.of(1756467L, 725448L, 1232382L)),
-                    new Simulator.Column(
-                        "message",
-                        DataType.KEYWORD,
-                        List.of("Connected to 10.1.0.1", "Connection error", "Disconnected")
-                    )
+                    new Simulator.Column("message", DataType.KEYWORD, List.of("Connected to 10.1.0.1", "Connection error", "Disconnected"))
                 )
             )
         );
@@ -637,7 +613,6 @@ public class SimulatorTests extends ESTestCase {
         assertThat(result2.getColumn("s1").values(), equalTo(List.of(6L)));
         assertThat(result2.getColumn("b").values(), equalTo(List.of(1L)));
     }
-
 
     public void testBuildRowPrints() {
         // KEYWORD literals require BytesRef (not String) per Literal's assertion.
@@ -922,7 +897,6 @@ public class SimulatorTests extends ESTestCase {
             )
         );
     }
-
 
     public void testNegOverflow() throws Exception {
         // -Integer.MIN_VALUE overflows 32-bit; ES|QL returns null

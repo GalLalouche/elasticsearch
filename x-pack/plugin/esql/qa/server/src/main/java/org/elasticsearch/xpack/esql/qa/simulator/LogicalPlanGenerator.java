@@ -120,9 +120,6 @@ public class LogicalPlanGenerator {
      * See {@code ShrinkingValidityTests} for empirical proof that raw plans can have stale NameIds.
      */
     static LogicalPlan resolveReferences(LogicalPlan plan) {
-        if (plan instanceof EsRelation || plan instanceof Row) {
-            return plan;
-        }
         if (plan instanceof UnaryPlan == false) {
             return plan;
         }
@@ -171,98 +168,69 @@ public class LogicalPlanGenerator {
     }
 
     private static Expression resolveExpr(Expression expr, Map<String, Attribute> canonical) {
-        if (expr instanceof Attribute a) {
-            return canonical.getOrDefault(a.name(), a);
-        }
-        if (expr instanceof Literal) {
-            return expr;
-        }
-        if (expr instanceof Add e) {
-            return new Add(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.configuration());
-        }
-        if (expr instanceof Sub e) {
-            return new Sub(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.configuration());
-        }
-        if (expr instanceof Mul e) {
-            return new Mul(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
-        }
-        if (expr instanceof Div e) {
-            return new Div(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
-        }
-        if (expr instanceof Mod e) {
-            return new Mod(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
-        }
-        if (expr instanceof Neg e) {
-            return new Neg(e.source(), resolveExpr(e.field(), canonical));
-        }
-        if (expr instanceof GreaterThan e) {
-            return new GreaterThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-        }
-        if (expr instanceof LessThan e) {
-            return new LessThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-        }
-        if (expr instanceof GreaterThanOrEqual e) {
-            return new GreaterThanOrEqual(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-        }
-        if (expr instanceof LessThanOrEqual e) {
-            return new LessThanOrEqual(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-        }
-        if (expr instanceof Equals e) {
-            return new Equals(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-        }
-        if (expr instanceof NotEquals e) {
-            return new NotEquals(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-        }
-        if (expr instanceof Count e) {
-            return new Count(e.source(), resolveExpr(e.field(), canonical));
-        }
-        if (expr instanceof Sum e) {
-            return new Sum(e.source(), resolveExpr(e.field(), canonical));
-        }
-        if (expr instanceof Min e) {
-            return new Min(e.source(), resolveExpr(e.field(), canonical));
-        }
-        if (expr instanceof Max e) {
-            return new Max(e.source(), resolveExpr(e.field(), canonical));
-        }
-        if (expr instanceof Trim e) {
-            return new Trim(e.source(), resolveExpr(e.field(), canonical));
-        }
-        if (expr instanceof ToUpper e) {
-            return new ToUpper(e.source(), resolveExpr(e.field(), canonical), e.configuration());
-        }
-        if (expr instanceof ToLower e) {
-            return new ToLower(e.source(), resolveExpr(e.field(), canonical), e.configuration());
-        }
-        if (expr instanceof Reverse e) {
-            return new Reverse(e.source(), resolveExpr(e.field(), canonical));
-        }
-        if (expr instanceof Length e) {
-            return new Length(e.source(), resolveExpr(e.field(), canonical));
-        }
-        if (expr instanceof Concat e) {
-            List<Expression> resolved = e.children().stream().map(c -> resolveExpr(c, canonical)).toList();
-            return new Concat(e.source(), resolved.getFirst(), resolved.subList(1, resolved.size()));
-        }
-        if (expr instanceof Left e) {
-            return new Left(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
-        }
-        if (expr instanceof Right e) {
-            return new Right(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
-        }
-        if (expr instanceof StartsWith e) {
-            return new StartsWith(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
-        }
-        if (expr instanceof EndsWith e) {
-            return new EndsWith(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
-        }
-        if (expr instanceof Substring e) {
-            Expression resolvedStr = resolveExpr(e.children().get(0), canonical);
-            Expression resolvedStart = resolveExpr(e.children().get(1), canonical);
-            Expression resolvedLen = e.children().size() > 2 ? resolveExpr(e.children().get(2), canonical) : null;
-            return new Substring(e.source(), resolvedStr, resolvedStart, resolvedLen);
-        }
-        return expr;
+        return switch (expr) {
+            case Attribute a -> canonical.getOrDefault(a.name(), a);
+            case Literal l -> l;
+            case Add e -> new Add(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.configuration());
+            case Sub e -> new Sub(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.configuration());
+            case Mul e -> new Mul(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
+            case Div e -> new Div(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
+            case Mod e -> new Mod(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
+            case Neg e -> new Neg(e.source(), resolveExpr(e.field(), canonical));
+            case GreaterThan e -> new GreaterThan(
+                e.source(),
+                resolveExpr(e.left(), canonical),
+                resolveExpr(e.right(), canonical),
+                e.zoneId()
+            );
+            case LessThan e -> new LessThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+            case GreaterThanOrEqual e -> new GreaterThanOrEqual(
+                e.source(),
+                resolveExpr(e.left(), canonical),
+                resolveExpr(e.right(), canonical),
+                e.zoneId()
+            );
+            case LessThanOrEqual e -> new LessThanOrEqual(
+                e.source(),
+                resolveExpr(e.left(), canonical),
+                resolveExpr(e.right(), canonical),
+                e.zoneId()
+            );
+            case Equals e -> new Equals(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+            case NotEquals e -> new NotEquals(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
+            case Count e -> new Count(e.source(), resolveExpr(e.field(), canonical));
+            case Sum e -> new Sum(e.source(), resolveExpr(e.field(), canonical));
+            case Min e -> new Min(e.source(), resolveExpr(e.field(), canonical));
+            case Max e -> new Max(e.source(), resolveExpr(e.field(), canonical));
+            case Trim e -> new Trim(e.source(), resolveExpr(e.field(), canonical));
+            case ToUpper e -> new ToUpper(e.source(), resolveExpr(e.field(), canonical), e.configuration());
+            case ToLower e -> new ToLower(e.source(), resolveExpr(e.field(), canonical), e.configuration());
+            case Reverse e -> new Reverse(e.source(), resolveExpr(e.field(), canonical));
+            case Length e -> new Length(e.source(), resolveExpr(e.field(), canonical));
+            case Concat e -> {
+                List<Expression> resolved = e.children().stream().map(c -> resolveExpr(c, canonical)).toList();
+                yield new Concat(e.source(), resolved.getFirst(), resolved.subList(1, resolved.size()));
+            }
+            case Left e -> new Left(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
+            case Right e -> new Right(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
+            case StartsWith e -> new StartsWith(
+                e.source(),
+                resolveExpr(e.children().get(0), canonical),
+                resolveExpr(e.children().get(1), canonical)
+            );
+            case EndsWith e -> new EndsWith(
+                e.source(),
+                resolveExpr(e.children().get(0), canonical),
+                resolveExpr(e.children().get(1), canonical)
+            );
+            case Substring e -> {
+                Expression resolvedStr = resolveExpr(e.children().get(0), canonical);
+                Expression resolvedStart = resolveExpr(e.children().get(1), canonical);
+                Expression resolvedLen = e.children().size() > 2 ? resolveExpr(e.children().get(2), canonical) : null;
+                yield new Substring(e.source(), resolvedStr, resolvedStart, resolvedLen);
+            }
+            default -> expr;
+        };
     }
 
     static LogicalPlan buildEsRelation(SimSchema schema) {
@@ -333,6 +301,7 @@ public class LogicalPlanGenerator {
         return new Keep(Source.EMPTY, current, projections);
     }
 
+    // DROP is implemented as KEEP of the complement — the resolver does the same conversion
     private static LogicalPlan wrapDrop(LogicalPlan current, List<Attribute> available, SourceOfRandomness random) {
         List<Attribute> dropped = generateSubset(random, available, 1, available.size() - 1);
         Set<String> dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());

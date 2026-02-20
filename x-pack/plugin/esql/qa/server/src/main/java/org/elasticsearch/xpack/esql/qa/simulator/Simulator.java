@@ -78,7 +78,6 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.elasticsearch.common.logging.LoggerMessageFormat.format;
 import static org.elasticsearch.xpack.esql.CsvTestUtils.multiValuesAwareCsvToStringArray;
 import static org.elasticsearch.xpack.esql.EsqlTestUtils.reader;
 
@@ -170,9 +169,8 @@ public class Simulator {
                 entries = multiValuesAwareCsvToStringArray(line, lineNumber);
                 if (entries.length != columns.size()) {
                     throw new IllegalArgumentException(
-                        format(
-                            null,
-                            "Error line [{}]: Incorrect number of entries; expected [{}] but found [{}]",
+                        Strings.format(
+                            "Error line [%d]: Incorrect number of entries; expected [%d] but found [%d]",
                             lineNumber,
                             columns.size(),
                             entries.length
@@ -289,7 +287,6 @@ public class Simulator {
         Result childResult = simulate(aggregate.child());
         int numRows = childResult.numRows();
         var groups = buildGroups(aggregate, childResult, numRows);
-        // Build aggregate columns, broadcasting per-group values to each original row.
         // Deduplicate by name (keep last): matches ES mergeOutputExpressions semantics where
         // the last entry wins. For INLINE STATS, grouping keys appear after aggregate functions
         // in the aggregates list, so the grouping key's original child value takes precedence
@@ -536,7 +533,7 @@ public class Simulator {
                         }
                         String str = strVal.toString();
                         int len = ((Number) lenVal).intValue();
-                        return (Object) str.substring(Math.max(0, str.length() - len));
+                        return (Object) str.substring(Math.max(0, str.length() - Math.max(0, len)));
                     }).toList());
                 }
                 case StartsWith sw -> {
@@ -628,7 +625,7 @@ public class Simulator {
             );
         }
 
-        /** Evaluates a numeric comparison expression (both sides must be convertible to long). */
+        // Only integer comparisons are generated, so Long.compare is sufficient for all cases.
         private UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
             var left = evaluate(leftExpr, activeBug);
             var right = evaluate(rightExpr, activeBug);

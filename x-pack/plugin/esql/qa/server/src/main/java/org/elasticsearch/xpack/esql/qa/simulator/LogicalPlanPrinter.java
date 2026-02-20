@@ -153,13 +153,17 @@ public class LogicalPlanPrinter {
         return expr instanceof ArithmeticOperation ? "(" + printExpression(expr) + ")" : printExpression(expr);
     }
 
+    private static String printBinaryFunc(String name, Expression expr) {
+        return Strings.format("%s(%s, %s)", name, printExpression(expr.children().get(0)), printExpression(expr.children().get(1)));
+    }
+
     private static String printExpression(Expression expression) {
         return switch (expression) {
             case Alias alias -> Strings.format("%s = %s", alias.name(), printExpression(alias.child()));
             case Attribute attr -> attr.name();
             case Literal literal -> literal.value() instanceof String s ? Strings.format("\"%s\"", s)
                 : literal.value() instanceof BytesRef br ? Strings.format("\"%s\"", br.utf8ToString())
-                : literal.value().toString();
+                : String.valueOf(literal.value());
             case Neg neg -> Strings.format("-(%s)", printExpression(neg.field()));
             case ArithmeticOperation op -> Strings.format(
                 "%s %s %s",
@@ -186,18 +190,10 @@ public class LogicalPlanPrinter {
                 "CONCAT(%s)",
                 c.children().stream().map(LogicalPlanPrinter::printExpression).collect(joining(", "))
             );
-            case Left l -> Strings.format("LEFT(%s, %s)", printExpression(l.children().get(0)), printExpression(l.children().get(1)));
-            case Right r -> Strings.format("RIGHT(%s, %s)", printExpression(r.children().get(0)), printExpression(r.children().get(1)));
-            case StartsWith sw -> Strings.format(
-                "STARTS_WITH(%s, %s)",
-                printExpression(sw.children().get(0)),
-                printExpression(sw.children().get(1))
-            );
-            case EndsWith ew -> Strings.format(
-                "ENDS_WITH(%s, %s)",
-                printExpression(ew.children().get(0)),
-                printExpression(ew.children().get(1))
-            );
+            case Left l -> printBinaryFunc("LEFT", l);
+            case Right r -> printBinaryFunc("RIGHT", r);
+            case StartsWith sw -> printBinaryFunc("STARTS_WITH", sw);
+            case EndsWith ew -> printBinaryFunc("ENDS_WITH", ew);
             case Substring sub -> sub.children().size() > 2
                 ? Strings.format(
                     "SUBSTRING(%s, %s, %s)",
