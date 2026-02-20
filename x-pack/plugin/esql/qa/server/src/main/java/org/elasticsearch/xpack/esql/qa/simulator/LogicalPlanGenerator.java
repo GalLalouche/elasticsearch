@@ -92,12 +92,12 @@ public class LogicalPlanGenerator {
         Max::new
     );
 
-    static LogicalPlan generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
-        return resolveReferences(generateRaw(schema, random, status));
+    static LogicalPlan generate(SimSchema schema, SourceOfRandomness random) {
+        return resolveReferences(generateRaw(schema, random));
     }
 
     /** Returns a plan WITHOUT {@link #resolveReferences} — for testing shrinking validity. */
-    public static LogicalPlan generateRaw(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
+    static LogicalPlan generateRaw(SimSchema schema, SourceOfRandomness random) {
         return generateRaw(schema, PLAN_DEPTH, random);
     }
 
@@ -131,45 +131,43 @@ public class LogicalPlanGenerator {
         for (Attribute attr : resolvedChild.output()) {
             canonical.put(attr.name(), attr);
         }
-        if (plan instanceof Keep keep) {
-            List<NamedExpression> newProj = keep.projections()
-                .stream()
-                .map(ne -> (NamedExpression) canonical.getOrDefault(ne.name(), (Attribute) ne))
-                .toList();
-            return new Keep(keep.source(), resolvedChild, newProj);
-        }
-        if (plan instanceof Filter filter) {
-            return new Filter(filter.source(), resolvedChild, resolveExpr(filter.condition(), canonical));
-        }
-        if (plan instanceof Eval eval) {
-            List<Alias> newFields = eval.fields()
-                .stream()
-                .map(a -> new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic()))
-                .toList();
-            return new Eval(eval.source(), resolvedChild, newFields);
-        }
-        if (plan instanceof OrderBy orderBy) {
-            List<Order> newOrders = orderBy.order()
-                .stream()
-                .map(o -> new Order(o.source(), resolveExpr(o.child(), canonical), o.direction(), o.nullsPosition()))
-                .toList();
-            return new OrderBy(orderBy.source(), resolvedChild, newOrders);
-        }
-        if (plan instanceof Aggregate agg) {
-            List<Expression> newGroupings = agg.groupings().stream().map(e -> resolveExpr(e, canonical)).toList();
-            List<NamedExpression> newAggregates = agg.aggregates().stream().<NamedExpression>map(ne -> {
-                if (ne instanceof Alias a) {
-                    return new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic());
-                }
-                if (ne instanceof Attribute attr) {
-                    return (NamedExpression) canonical.getOrDefault(attr.name(), attr);
-                }
-                return ne;
-            }).toList();
-            return new Aggregate(agg.source(), resolvedChild, newGroupings, newAggregates);
-        }
-        // Limit and other pass-through nodes: just replace child
-        return ((UnaryPlan) plan).replaceChild(resolvedChild);
+        return switch (plan) {
+            case Keep keep -> new Keep(
+                keep.source(),
+                resolvedChild,
+                keep.projections().stream().map(ne -> (NamedExpression) canonical.getOrDefault(ne.name(), (Attribute) ne)).toList()
+            );
+            case Filter filter -> new Filter(filter.source(), resolvedChild, resolveExpr(filter.condition(), canonical));
+            case Eval eval -> new Eval(
+                eval.source(),
+                resolvedChild,
+                eval.fields()
+                    .stream()
+                    .map(a -> new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic()))
+                    .toList()
+            );
+            case OrderBy orderBy -> {
+                yield new OrderBy(
+                    orderBy.source(),
+                    resolvedChild,
+                    orderBy.order()
+                        .stream()
+                        .map(o -> new Order(o.source(), resolveExpr(o.child(), canonical), o.direction(), o.nullsPosition()))
+                        .toList()
+                );
+            }
+            case Aggregate agg -> {
+                List<Expression> newGroupings = agg.groupings().stream().map(e -> resolveExpr(e, canonical)).toList();
+                List<NamedExpression> newAggregates = agg.aggregates().stream().<NamedExpression>map(ne -> switch (ne) {
+                    case Alias a -> new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic());
+                    case Attribute attr -> (NamedExpression) canonical.getOrDefault(attr.name(), attr);
+                    default -> ne;
+                }).toList();
+                yield new Aggregate(agg.source(), resolvedChild, newGroupings, newAggregates);
+            }
+            default -> // Limit and other pass-through nodes: just replace child
+                ((UnaryPlan) plan).replaceChild(resolvedChild);
+        };
     }
 
     private static Expression resolveExpr(Expression expr, Map<String, Attribute> canonical) {
@@ -244,7 +242,7 @@ public class LogicalPlanGenerator {
         }
         if (expr instanceof Concat e) {
             List<Expression> resolved = e.children().stream().map(c -> resolveExpr(c, canonical)).toList();
-            return new Concat(e.source(), resolved.get(0), resolved.subList(1, resolved.size()));
+            return new Concat(e.source(), resolved.getFirst(), resolved.subList(1, resolved.size()));
         }
         if (expr instanceof Left e) {
             return new Left(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));

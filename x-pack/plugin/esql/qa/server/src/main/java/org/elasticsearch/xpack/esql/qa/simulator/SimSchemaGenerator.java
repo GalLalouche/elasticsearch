@@ -7,7 +7,6 @@
 
 package org.elasticsearch.xpack.esql.qa.simulator;
 
-import com.pholser.junit.quickcheck.generator.GenerationStatus;
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import org.elasticsearch.xpack.esql.core.type.DataType;
@@ -26,7 +25,7 @@ class SimSchemaGenerator {
     private static final List<String> COLUMN_NAME_POOL = List.of("a", "b", "c", "d", "x", "y");
     private static final List<DataType> TYPE_POOL = List.of(DataType.INTEGER, DataType.KEYWORD);
 
-    static SimSchema generate(SourceOfRandomness random, GenerationStatus status) {
+    static SimSchema generate(SourceOfRandomness random) {
         String indexName = "sim_" + randomAlpha(random, 3, 6);
         List<String> shuffledNames = new ArrayList<>(COLUMN_NAME_POOL);
         Collections.shuffle(shuffledNames, random.toJDKRandom());
@@ -40,10 +39,10 @@ class SimSchemaGenerator {
     }
 
     /** Retries {@link #generate} until the schema contains at least one INTEGER column. */
-    static SimSchema generateWithInteger(SourceOfRandomness random, GenerationStatus status) {
+    static SimSchema generateWithInteger(SourceOfRandomness random) {
         SimSchema schema;
         do {
-            schema = generate(random, status);
+            schema = generate(random);
         } while (schema.columns().stream().noneMatch(c -> c.type() == DataType.INTEGER));
         return schema;
     }

@@ -9,6 +9,7 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.util.ArrayUtils;
 import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
@@ -64,6 +65,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -244,9 +246,7 @@ public class Simulator {
             .filter(i -> Boolean.TRUE.equals(cond.values.get(i)) != (activeBug == SimBug.WHERE_INVERTED))
             .toArray();
         return new Result(
-            childResult.columns.stream()
-                .map(c -> new Column(c.name, c.type, Arrays.stream(mask).mapToObj(i -> c.values.get(i)).toList()))
-                .toList()
+            childResult.columns.stream().map(c -> new Column(c.name, c.type, Arrays.stream(mask).mapToObj(c.values::get).toList())).toList()
         );
     }
 
@@ -277,9 +277,7 @@ public class Simulator {
             return 0;
         });
         return new Result(
-            childResult.columns.stream()
-                .map(c -> new Column(c.name, c.type, Arrays.stream(indices).map(i -> c.values.get(i)).toList()))
-                .toList()
+            childResult.columns.stream().map(c -> new Column(c.name, c.type, Arrays.stream(indices).map(c.values::get).toList())).toList()
         );
     }
 
@@ -395,7 +393,7 @@ public class Simulator {
 
     private static List<Object> nonNullValues(List<Integer> indices, Result childResult, Expression field, SimBug activeBug) {
         UnnamedColumn col = childResult.evaluate(field, activeBug);
-        return indices.stream().map(i -> col.values.get(i)).filter(Objects::nonNull).toList();
+        return indices.stream().map(col.values::get).filter(Objects::nonNull).toList();
     }
 
     /** Evaluates a constant expression (no {@link Attribute} refs), returning {@code null} for non-constant expressions. Mirrors ES constant-folding: {@code MIN(9)} over zero rows returns {@code 9}. */
@@ -455,7 +453,7 @@ public class Simulator {
                 case Attribute attr -> new UnnamedColumn(getColumn(attr.name()));
                 case Literal literal -> new UnnamedColumn(
                     literal.dataType(),
-                    IntStream.range(0, numRows()).mapToObj(unused -> normalizeObject(literal.value())).toList()
+                    Collections.nCopies(numRows(), normalizeObject(literal.value()))
                 );
                 case Add add -> evalBinaryLong(
                     add.left(),
@@ -493,27 +491,24 @@ public class Simulator {
                 case Reverse rev -> evalUnaryString(rev.field(), activeBug, s -> new StringBuilder(s).reverse().toString());
                 case Length length -> {
                     UnnamedColumn input = evaluate(length.field(), activeBug);
-                    yield new UnnamedColumn(DataType.INTEGER, IntStream.range(0, input.values.size()).mapToObj(i -> {
-                        Object v = input.values.get(i);
-                        if (v == null) {
-                            return null;
-                        }
-                        return (Object) (long) v.toString().length();
-                    }).toList());
+                    yield new UnnamedColumn(
+                        DataType.INTEGER,
+                        input.values.stream().<Object>map(o -> o == null ? null : (long) o.toString().length()).toList()
+                    );
                 }
                 case Concat concat -> {
                     List<UnnamedColumn> args = concat.children().stream().map(child -> evaluate(child, activeBug)).toList();
                     int numRows = args.getFirst().values.size();
-                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, numRows).mapToObj(i -> {
+                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, numRows).<Object>mapToObj(i -> {
                         StringBuilder sb = new StringBuilder();
                         for (UnnamedColumn arg : args) {
                             Object v = arg.values.get(i);
                             if (v == null) {
                                 return null;
                             }
-                            sb.append(v.toString());
+                            sb.append(v);
                         }
-                        return (Object) sb.toString();
+                        return sb.toString();
                     }).toList());
                 }
                 case Left left -> {
@@ -562,10 +557,7 @@ public class Simulator {
                     yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
                         Object strVal = strCol.values.get(i);
                         Object suffixVal = suffixCol.values.get(i);
-                        if (strVal == null || suffixVal == null) {
-                            return null;
-                        }
-                        return (Object) strVal.toString().endsWith(suffixVal.toString());
+                        return strVal == null || suffixVal == null ? null : (Object) strVal.toString().endsWith(suffixVal.toString());
                     }).toList());
                 }
                 case Substring substring -> {
@@ -584,7 +576,7 @@ public class Simulator {
                         int indexStart = start > 0 ? start - 1 : start < 0 ? Math.max(0, str.length() + start) : 0;
                         indexStart = Math.min(indexStart, str.length());
                         if (lenCol == null) {
-                            return (Object) str.substring(indexStart);
+                            return str.substring(indexStart);
                         }
                         Object lenVal = lenCol.values.get(i);
                         if (lenVal == null) {
@@ -630,13 +622,10 @@ public class Simulator {
 
         private UnnamedColumn evalUnaryString(Expression fieldExpr, SimBug activeBug, UnaryOperator<String> op) {
             UnnamedColumn input = evaluate(fieldExpr, activeBug);
-            return new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, input.values.size()).mapToObj(i -> {
-                Object v = input.values.get(i);
-                if (v == null) {
-                    return null;
-                }
-                return (Object) op.apply(v.toString());
-            }).toList());
+            return new UnnamedColumn(
+                DataType.KEYWORD,
+                input.values.stream().<Object>map(o -> o == null ? null : op.apply(o.toString())).toList()
+            );
         }
 
         /** Evaluates a numeric comparison expression (both sides must be convertible to long). */

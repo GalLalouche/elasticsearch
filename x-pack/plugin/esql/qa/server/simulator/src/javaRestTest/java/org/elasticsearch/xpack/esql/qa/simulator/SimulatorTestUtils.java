@@ -106,8 +106,8 @@ class SimulatorTestUtils {
 
         @Override
         public LogicalPlan generate(SourceOfRandomness random, GenerationStatus status) {
-            SimSchema schema = SimSchemaGenerator.generateWithInteger(random, status);
-            return LogicalPlanGenerator.generate(schema, random, status);
+            SimSchema schema = SimSchemaGenerator.generateWithInteger(random);
+            return LogicalPlanGenerator.generate(schema, random);
         }
     }
 
@@ -123,8 +123,8 @@ class SimulatorTestUtils {
 
         @Override
         public LogicalPlan generate(SourceOfRandomness random, GenerationStatus status) {
-            SimSchema schema = SimSchemaGenerator.generateWithInteger(random, status);
-            return LogicalPlanGenerator.generateRaw(schema, random, status);
+            SimSchema schema = SimSchemaGenerator.generateWithInteger(random);
+            return LogicalPlanGenerator.generateRaw(schema, random);
         }
     }
 }

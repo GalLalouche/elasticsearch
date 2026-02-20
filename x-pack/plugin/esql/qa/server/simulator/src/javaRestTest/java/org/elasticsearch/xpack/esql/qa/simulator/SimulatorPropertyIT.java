@@ -228,8 +228,8 @@ public class SimulatorPropertyIT {
                 random.setSeed(Long.parseLong(seedProp));
                 seedApplied = true;
             }
-            SimSchema schema = SimSchemaGenerator.generate(random, status);
-            LogicalPlan plan = LogicalPlanGenerator.generate(schema, random, status);
+            SimSchema schema = SimSchemaGenerator.generate(random);
+            LogicalPlan plan = LogicalPlanGenerator.generate(schema, random);
             if (isRowPlan(plan)) {
                 return new TestCase(null, null, plan, LogicalPlanPrinter.print(plan));
             }

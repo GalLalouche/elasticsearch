@@ -39,7 +39,7 @@ class SimDataGenerator {
             row.put(col.name(), generateValue(col.type(), random));
         }
         if (row.isEmpty()) { // ES rejects empty documents
-            SimSchema.SimColumn firstCol = schema.columns().get(0);
+            SimSchema.SimColumn firstCol = schema.columns().getFirst();
             row.put(firstCol.name(), generateValue(firstCol.type(), random));
         }
         return row;
