@@ -62,6 +62,10 @@ class SimulatorTestUtils {
 
     /** Generates resolved {@link LogicalPlan} trees for property-based tests. */
     public static class ResolvedPlanGenerator extends Generator<LogicalPlan> {
+        static {
+            initLogging();
+        }
+
         public ResolvedPlanGenerator() {
             super(LogicalPlan.class);
         }
@@ -75,6 +79,10 @@ class SimulatorTestUtils {
 
     /** Generates raw (unresolved) {@link LogicalPlan} trees for property-based tests. */
     public static class RawPlanGenerator extends Generator<LogicalPlan> {
+        static {
+            initLogging();
+        }
+
         public RawPlanGenerator() {
             super(LogicalPlan.class);
         }
