@@ -60,6 +60,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -77,7 +79,12 @@ public class LogicalPlanGenerator {
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
     private static final List<String> STATS_ALIAS_POOL = List.of("s0", "s1");
     private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz", " Hi ", "HELLO", "world");
-    private static final List<String> AGG_FUNC_POOL = List.of("COUNT", "SUM", "MIN", "MAX");
+    private static final List<BiFunction<Source, Expression, AggregateFunction>> AGG_FUNC_POOL = List.of(
+        Count::new,
+        Sum::new,
+        Min::new,
+        Max::new
+    );
 
     static LogicalPlan generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
         return resolveReferences(generateRaw(schema, random, status));
@@ -85,13 +92,13 @@ public class LogicalPlanGenerator {
 
     /** Returns a plan WITHOUT {@link #resolveReferences} — for testing shrinking validity. */
     public static LogicalPlan generateRaw(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
-        return generateRaw(schema, PLAN_DEPTH, random, status);
+        return generateRaw(schema, PLAN_DEPTH, random);
     }
 
-    private static LogicalPlan generateRaw(SimSchema schema, int depth, SourceOfRandomness random, GenerationStatus status) {
+    private static LogicalPlan generateRaw(SimSchema schema, int depth, SourceOfRandomness random) {
         LogicalPlan plan = random.nextInt(1, 10) <= 3 ? buildRow(schema, random) : buildEsRelation(schema);
         for (int i = 0; i < depth; i++) {
-            plan = wrapLayer(plan, random, status);
+            plan = wrapLayer(plan, random);
         }
         return plan;
     }
@@ -119,7 +126,7 @@ public class LogicalPlanGenerator {
             canonical.put(attr.name(), attr);
         }
         if (plan instanceof Keep keep) {
-            var newProj = keep.projections()
+            List<NamedExpression> newProj = keep.projections()
                 .stream()
                 .map(ne -> (NamedExpression) canonical.getOrDefault(ne.name(), (Attribute) ne))
                 .toList();
@@ -129,22 +136,22 @@ public class LogicalPlanGenerator {
             return new Filter(filter.source(), resolvedChild, resolveExpr(filter.condition(), canonical));
         }
         if (plan instanceof Eval eval) {
-            var newFields = eval.fields()
+            List<Alias> newFields = eval.fields()
                 .stream()
                 .map(a -> new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic()))
                 .toList();
             return new Eval(eval.source(), resolvedChild, newFields);
         }
         if (plan instanceof OrderBy orderBy) {
-            var newOrders = orderBy.order()
+            List<Order> newOrders = orderBy.order()
                 .stream()
                 .map(o -> new Order(o.source(), resolveExpr(o.child(), canonical), o.direction(), o.nullsPosition()))
                 .toList();
             return new OrderBy(orderBy.source(), resolvedChild, newOrders);
         }
         if (plan instanceof Aggregate agg) {
-            var newGroupings = agg.groupings().stream().map(e -> resolveExpr(e, canonical)).toList();
-            var newAggregates = agg.aggregates().stream().<NamedExpression>map(ne -> {
+            List<Expression> newGroupings = agg.groupings().stream().map(e -> resolveExpr(e, canonical)).toList();
+            List<NamedExpression> newAggregates = agg.aggregates().stream().<NamedExpression>map(ne -> {
                 if (ne instanceof Alias a) {
                     return new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic());
                 }
@@ -267,7 +274,7 @@ public class LogicalPlanGenerator {
     }
 
     /** Randomly wraps the given plan in one additional operator, or returns it unchanged (identity). Options are lazy (Suppliers) so only the chosen branch consumes random state. */
-    static LogicalPlan wrapLayer(LogicalPlan current, SourceOfRandomness random, GenerationStatus status) {
+    static LogicalPlan wrapLayer(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
         List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
@@ -279,14 +286,14 @@ public class LogicalPlanGenerator {
             options.add(() -> wrapDrop(current, available, random));
         }
         if (integerAttrs.isEmpty() == false || keywordAttrs.isEmpty() == false) {
-            options.add(() -> wrapEval(current, random, status));
-            options.add(() -> wrapFilter(current, integerAttrs, random, status));
+            options.add(() -> wrapEval(current, random));
+            options.add(() -> wrapFilter(current, integerAttrs, random));
         }
         if (integerAttrs.isEmpty() == false) {
-            options.add(() -> generateAggregate(current, integerAttrs, available, random, status));
+            options.add(() -> generateAggregate(current, integerAttrs, available, random));
             // INLINE STATS after LIMIT is not supported by the ES|QL engine
             if (current.anyMatch(Limit.class::isInstance) == false) {
-                options.add(() -> wrapInlineStats(current, integerAttrs, available, random, status));
+                options.add(() -> wrapInlineStats(current, integerAttrs, available, random));
             }
         }
         // LIMIT and SORT are excluded: SORT always wraps in LIMIT, and when LIMIT cuts within a group of
@@ -297,22 +304,25 @@ public class LogicalPlanGenerator {
 
     private static LogicalPlan wrapKeep(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> kept = generateSubset(random, current.output(), 1, current.output().size());
-        var projections = kept.stream().map(a -> (NamedExpression) a).toList();
+        List<NamedExpression> projections = kept.stream().map(a -> (NamedExpression) a).toList();
         return new Keep(Source.EMPTY, current, projections);
     }
 
     private static LogicalPlan wrapDrop(LogicalPlan current, List<Attribute> available, SourceOfRandomness random) {
         List<Attribute> dropped = generateSubset(random, available, 1, available.size() - 1);
-        var dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
-        var kept = available.stream().filter(a -> dropNames.contains(a.name()) == false).map(a -> (NamedExpression) a).toList();
+        Set<String> dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
+        List<NamedExpression> kept = available.stream()
+            .filter(a -> dropNames.contains(a.name()) == false)
+            .map(a -> (NamedExpression) a)
+            .toList();
         return new Keep(Source.EMPTY, current, kept);
     }
 
-    private static LogicalPlan wrapEval(LogicalPlan current, SourceOfRandomness random, GenerationStatus status) {
+    private static LogicalPlan wrapEval(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
         List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
-        var existingNames = available.stream().map(Attribute::name).collect(Collectors.toSet());
+        Set<String> existingNames = available.stream().map(Attribute::name).collect(Collectors.toSet());
         List<String> availableAliases = EVAL_ALIAS_POOL.stream().filter(n -> existingNames.contains(n) == false).toList();
         if (availableAliases.isEmpty()) {
             availableAliases = List.of("_col_0", "_col_1");
@@ -327,19 +337,14 @@ public class LogicalPlanGenerator {
             if (keywordAttrs.isEmpty() == false && (integerAttrs.isEmpty() || random.nextBoolean())) {
                 expr = generateKeywordExpression(keywordAttrs, EXPR_DEPTH, random);
             } else {
-                expr = generateExpression(integerAttrs, keywordAttrs, random, status);
+                expr = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
             }
             fields.add(new Alias(Source.EMPTY, shuffled.get(i), expr));
         }
         return new Eval(Source.EMPTY, current, fields);
     }
 
-    private static LogicalPlan wrapFilter(
-        LogicalPlan current,
-        List<Attribute> integerAttrs,
-        SourceOfRandomness random,
-        GenerationStatus status
-    ) {
+    private static LogicalPlan wrapFilter(LogicalPlan current, List<Attribute> integerAttrs, SourceOfRandomness random) {
         List<Attribute> available = current.output();
         List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
         // When no integer columns, or sometimes when keywords exist, generate a string predicate
@@ -352,57 +357,28 @@ public class LogicalPlanGenerator {
                 : new EndsWith(Source.EMPTY, str, patternLit);
             return new Filter(Source.EMPTY, current, cond);
         }
-        Expression left = generateExpression(integerAttrs, keywordAttrs, random, status);
+        Expression left = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
         Expression right = random.nextBoolean()
-            ? generateExpression(integerAttrs, keywordAttrs, random, status)
+            ? generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random)
             : new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
         Expression cond = random.nextBoolean() ? new GreaterThan(Source.EMPTY, left, right) : new LessThan(Source.EMPTY, left, right);
         return new Filter(Source.EMPTY, current, cond);
-    }
-
-    private static LogicalPlan wrapLimit(LogicalPlan current, SourceOfRandomness random) {
-        int n = random.nextInt(1, 10);
-        return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), current);
-    }
-
-    private static LogicalPlan wrapSort(
-        LogicalPlan current,
-        List<Attribute> available,
-        SourceOfRandomness random,
-        GenerationStatus status
-    ) {
-        List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
-        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
-        int maxOrders = Math.min(available.size(), 3);
-        int nOrders = random.nextInt(1, maxOrders);
-        List<Order> orders = new ArrayList<>(nOrders);
-        for (int i = 0; i < nOrders; i++) {
-            Expression expr = (integerAttrs.isEmpty() || random.nextBoolean())
-                ? random.choose(available)
-                : generateExpression(integerAttrs, keywordAttrs, random, status);
-            Order.OrderDirection dir = random.choose(Order.OrderDirection.values());
-            orders.add(new Order(Source.EMPTY, expr, dir, Order.NullsPosition.ANY));
-        }
-        int n = random.nextInt(1, 10);
-        return new Limit(Source.EMPTY, new Literal(Source.EMPTY, n, DataType.INTEGER), new OrderBy(Source.EMPTY, current, orders));
     }
 
     private static LogicalPlan wrapInlineStats(
         LogicalPlan current,
         List<Attribute> integerAttrs,
         List<Attribute> available,
-        SourceOfRandomness random,
-        GenerationStatus status
+        SourceOfRandomness random
     ) {
-        return new InlineStats(Source.EMPTY, generateAggregate(current, integerAttrs, available, random, status));
+        return new InlineStats(Source.EMPTY, generateAggregate(current, integerAttrs, available, random));
     }
 
     private static Aggregate generateAggregate(
         LogicalPlan current,
         List<Attribute> integerAttrs,
         List<Attribute> available,
-        SourceOfRandomness random,
-        GenerationStatus status
+        SourceOfRandomness random
     ) {
         int maxGroups = Math.min(available.size(), 2);
         List<Attribute> groupKeys = (maxGroups > 0 && random.nextBoolean()) ? generateSubset(random, available, 1, maxGroups) : List.of();
@@ -414,35 +390,15 @@ public class LogicalPlanGenerator {
         List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
         List<NamedExpression> aggregates = new ArrayList<>();
         for (int i = 0; i < nNames; i++) {
-            Expression field = generateExpression(integerAttrs, keywordAttrs, random, status);
+            Expression field = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
             // Constant-only aggregate expressions crash INLINE STATS (ES planner bug)
             if (field.references().isEmpty()) {
                 field = random.choose(integerAttrs);
             }
-            String funcName = random.choose(AGG_FUNC_POOL);
-            aggregates.add(new Alias(Source.EMPTY, shuffledNames.get(i), buildAggFunc(funcName, field)));
+            aggregates.add(new Alias(Source.EMPTY, shuffledNames.get(i), random.choose(AGG_FUNC_POOL).apply(Source.EMPTY, field)));
         }
         aggregates.addAll(groupKeys);
         return new Aggregate(Source.EMPTY, current, List.copyOf(groupKeys), List.copyOf(aggregates));
-    }
-
-    private static AggregateFunction buildAggFunc(String funcName, Expression field) {
-        return switch (funcName) {
-            case "COUNT" -> new Count(Source.EMPTY, field);
-            case "SUM" -> new Sum(Source.EMPTY, field);
-            case "MIN" -> new Min(Source.EMPTY, field);
-            case "MAX" -> new Max(Source.EMPTY, field);
-            default -> throw new IllegalStateException("Unknown aggregate function: " + funcName);
-        };
-    }
-
-    private static Expression generateExpression(
-        List<Attribute> integerAttrs,
-        List<Attribute> keywordAttrs,
-        SourceOfRandomness random,
-        GenerationStatus status
-    ) {
-        return generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
     }
 
     private static Expression generateExpression(
