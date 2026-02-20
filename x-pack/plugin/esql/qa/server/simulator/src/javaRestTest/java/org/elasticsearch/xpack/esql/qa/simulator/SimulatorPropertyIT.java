@@ -35,9 +35,11 @@ import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
+import org.elasticsearch.xpack.esql.plan.logical.Drop;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
+import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.Row;
@@ -231,7 +233,7 @@ public class SimulatorPropertyIT {
             if (isRowPlan(plan)) {
                 return new TestCase(null, null, plan, LogicalPlanPrinter.print(plan));
             }
-            List<Map<String, Object>> data = SimDataGenerator.generate(schema, random, status);
+            List<Map<String, Object>> data = SimDataGenerator.generate(schema, random);
             return new TestCase(schema, data, plan, LogicalPlanPrinter.print(plan));
         }
 
@@ -248,9 +250,17 @@ public class SimulatorPropertyIT {
                 addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(unary.child()));
             }
 
-            // TODO: try removing operators in the MIDDLE of the pipeline (not just the outermost)
+            // Strategy 2: Remove safe operators from the MIDDLE of the pipeline
+            List<LogicalPlan> stages = flattenStages(larger.plan());
+            for (int i = 1; i < stages.size() - 1; i++) { // skip outermost (Strategy 1) and leaf (FROM/ROW)
+                if (isSafeToRemoveFromMiddle(stages.get(i))) {
+                    List<LogicalPlan> reduced = new ArrayList<>(stages);
+                    reduced.remove(i);
+                    addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(rebuildFromStages(reduced)));
+                }
+            }
 
-            // Strategy 2: Remove individual EVAL fields (keep N-1)
+            // Strategy 3: Remove individual EVAL fields (keep N-1)
             if (larger.plan() instanceof Eval eval && eval.fields().size() > 1) {
                 for (int f = 0; f < eval.fields().size(); f++) {
                     List<Alias> reduced = new ArrayList<>(eval.fields());
@@ -263,13 +273,13 @@ public class SimulatorPropertyIT {
                 }
             }
 
-            // Strategy 3: Remove individual aggregates from INLINE STATS / STATS (keep N-1)
+            // Strategy 4: Remove individual aggregates from INLINE STATS / STATS (keep N-1)
             removeIndividualAggregates(candidates, larger);
 
-            // Strategy 4: Simplify expressions to sub-expressions
+            // Strategy 5: Simplify expressions to sub-expressions
             addExpressionShrinks(candidates, larger);
 
-            // Strategy 5: Remove any data row (not just last)
+            // Strategy 6: Remove any data row (not just last)
             if (larger.data() != null && larger.data().size() > 1) {
                 for (int r = 0; r < larger.data().size(); r++) {
                     List<Map<String, Object>> smaller = new ArrayList<>(larger.data());
@@ -278,7 +288,7 @@ public class SimulatorPropertyIT {
                 }
             }
 
-            // Strategy 6: Fill in a null (absent) field with a non-null value
+            // Strategy 7: Fill in a null (absent) field with a non-null value
             if (larger.data() != null) {
                 for (int r = 0; r < larger.data().size(); r++) {
                     Map<String, Object> row = larger.data().get(r);
@@ -396,6 +406,45 @@ public class SimulatorPropertyIT {
         /** Wraps a new Aggregate in InlineStats if the original plan was InlineStats, otherwise returns it as-is. */
         private static LogicalPlan wrapAggregate(LogicalPlan original, Aggregate newAgg) {
             return original instanceof InlineStats is ? new InlineStats(is.source(), newAgg) : newAgg;
+        }
+
+        /** Flattens the plan into pipeline stages (root first, FROM/ROW last). InlineStats skips its inner Aggregate. */
+        private static List<LogicalPlan> flattenStages(LogicalPlan plan) {
+            List<LogicalPlan> stages = new ArrayList<>();
+            LogicalPlan current = plan;
+            while (current instanceof UnaryPlan unary) {
+                stages.add(current);
+                if (current instanceof InlineStats is) {
+                    current = is.aggregate().child();
+                } else {
+                    current = unary.child();
+                }
+            }
+            stages.add(current); // FROM or ROW
+            return stages;
+        }
+
+        /** Rebuilds a plan from bottom (last) to top (first), reconnecting stages. */
+        private static LogicalPlan rebuildFromStages(List<LogicalPlan> stages) {
+            LogicalPlan rebuilt = stages.getLast(); // FROM or ROW
+            for (int j = stages.size() - 2; j >= 0; j--) {
+                LogicalPlan stage = stages.get(j);
+                if (stage instanceof InlineStats is) {
+                    Aggregate agg = is.aggregate();
+                    Aggregate newAgg = new Aggregate(agg.source(), rebuilt, agg.groupings(), agg.aggregates());
+                    rebuilt = new InlineStats(is.source(), newAgg);
+                } else if (stage instanceof Aggregate agg) {
+                    rebuilt = new Aggregate(agg.source(), rebuilt, agg.groupings(), agg.aggregates());
+                } else {
+                    rebuilt = ((UnaryPlan) stage).replaceChild(rebuilt);
+                }
+            }
+            return rebuilt;
+        }
+
+        /** Returns true for operators that are safe to remove from the middle of the pipeline. */
+        private static boolean isSafeToRemoveFromMiddle(LogicalPlan plan) {
+            return plan instanceof Keep || plan instanceof Drop || plan instanceof Filter;
         }
 
         /** Recursively collects all sub-expressions (children and their descendants). */
