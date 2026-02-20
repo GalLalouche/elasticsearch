@@ -67,11 +67,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static java.util.function.Function.identity;
+import static org.elasticsearch.xpack.esql.core.util.TestUtils.of;
 
 /**
  * Generates random {@link LogicalPlan} trees. Plans are built bottom-up: an {@link EsRelation} or {@link Row} base
@@ -127,7 +127,10 @@ public class LogicalPlanGenerator {
             case Keep keep -> new Keep(
                 keep.source(),
                 resolvedChild,
-                keep.projections().stream().<NamedExpression>map(ne -> canonical.getOrDefault(ne.name(), (Attribute) ne)).toList()
+                keep.projections()
+                    .stream()
+                    .<NamedExpression>map(ne -> ne instanceof Attribute a ? canonical.getOrDefault(a.name(), a) : ne)
+                    .toList()
             );
             case Filter filter -> new Filter(filter.source(), resolvedChild, resolveExpr(filter.condition(), canonical));
             case Eval eval -> new Eval(
@@ -150,7 +153,7 @@ public class LogicalPlanGenerator {
                 List<Expression> newGroupings = agg.groupings().stream().map(e -> resolveExpr(e, canonical)).toList();
                 List<NamedExpression> newAggregates = agg.aggregates().stream().map(ne -> switch (ne) {
                     case Alias a -> new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic());
-                    case Attribute attr -> (NamedExpression) canonical.getOrDefault(attr.name(), attr);
+                    case Attribute attr -> canonical.getOrDefault(attr.name(), attr);
                     default -> ne;
                 }).toList();
                 yield new Aggregate(agg.source(), resolvedChild, newGroupings, newAggregates);
@@ -164,74 +167,20 @@ public class LogicalPlanGenerator {
         return switch (expr) {
             case Attribute a -> canonical.getOrDefault(a.name(), a);
             case Literal l -> l;
-            case Add e -> new Add(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.configuration());
-            case Sub e -> new Sub(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.configuration());
-            case Mul e -> new Mul(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
-            case Div e -> new Div(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
-            case Mod e -> new Mod(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical));
-            case Neg e -> new Neg(e.source(), resolveExpr(e.field(), canonical));
-            case GreaterThan e -> new GreaterThan(
-                e.source(),
-                resolveExpr(e.left(), canonical),
-                resolveExpr(e.right(), canonical),
-                e.zoneId()
-            );
-            case LessThan e -> new LessThan(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-            case GreaterThanOrEqual e -> new GreaterThanOrEqual(
-                e.source(),
-                resolveExpr(e.left(), canonical),
-                resolveExpr(e.right(), canonical),
-                e.zoneId()
-            );
-            case LessThanOrEqual e -> new LessThanOrEqual(
-                e.source(),
-                resolveExpr(e.left(), canonical),
-                resolveExpr(e.right(), canonical),
-                e.zoneId()
-            );
-            case Equals e -> new Equals(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-            case NotEquals e -> new NotEquals(e.source(), resolveExpr(e.left(), canonical), resolveExpr(e.right(), canonical), e.zoneId());
-            case Count e -> new Count(e.source(), resolveExpr(e.field(), canonical));
-            case Sum e -> new Sum(e.source(), resolveExpr(e.field(), canonical));
-            case Min e -> new Min(e.source(), resolveExpr(e.field(), canonical));
-            case Max e -> new Max(e.source(), resolveExpr(e.field(), canonical));
-            case Trim e -> new Trim(e.source(), resolveExpr(e.field(), canonical));
-            case ToUpper e -> new ToUpper(e.source(), resolveExpr(e.field(), canonical), e.configuration());
-            case ToLower e -> new ToLower(e.source(), resolveExpr(e.field(), canonical), e.configuration());
-            case Reverse e -> new Reverse(e.source(), resolveExpr(e.field(), canonical));
-            case Length e -> new Length(e.source(), resolveExpr(e.field(), canonical));
-            case Concat e -> {
-                List<Expression> resolved = e.children().stream().map(c -> resolveExpr(c, canonical)).toList();
-                yield new Concat(e.source(), resolved.getFirst(), resolved.subList(1, resolved.size()));
-            }
-            case Left e -> new Left(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
-            case Right e -> new Right(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
-            case StartsWith e -> new StartsWith(
-                e.source(),
-                resolveExpr(e.children().get(0), canonical),
-                resolveExpr(e.children().get(1), canonical)
-            );
-            case EndsWith e -> new EndsWith(
-                e.source(),
-                resolveExpr(e.children().get(0), canonical),
-                resolveExpr(e.children().get(1), canonical)
-            );
-            case Substring e -> {
-                Expression resolvedStr = resolveExpr(e.children().get(0), canonical);
-                Expression resolvedStart = resolveExpr(e.children().get(1), canonical);
-                Expression resolvedLen = e.children().size() > 2 ? resolveExpr(e.children().get(2), canonical) : null;
-                yield new Substring(e.source(), resolvedStr, resolvedStart, resolvedLen);
-            }
-            default -> expr;
+            default -> expr.replaceChildren(expr.children().stream().map(c -> resolveExpr(c, canonical)).toList());
         };
     }
 
     static LogicalPlan buildEsRelation(SimSchema schema) {
-        List<Attribute> attrs = schema.columns()
-            .stream()
-            .<Attribute>map(col -> new ReferenceAttribute(Source.EMPTY, col.name(), col.type()))
-            .toList();
-        return new EsRelation(Source.EMPTY, schema.indexName(), IndexMode.STANDARD, Map.of(), Map.of(), Map.of(), attrs);
+        return new EsRelation(
+            Source.EMPTY,
+            schema.indexName(),
+            IndexMode.STANDARD,
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            schema.columns().stream().<Attribute>map(col -> new ReferenceAttribute(Source.EMPTY, col.name(), col.type())).toList()
+        );
     }
 
     static Row buildRow(SimSchema schema, SourceOfRandomness random) {
@@ -293,19 +242,18 @@ public class LogicalPlanGenerator {
 
     private static LogicalPlan wrapKeep(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> kept = generateSubset(random, current.output(), 1, current.output().size());
-        List<NamedExpression> projections = kept.stream().<NamedExpression>map(Function.identity()).toList();
-        return new Keep(Source.EMPTY, current, projections);
+        return new Keep(Source.EMPTY, current, kept.stream().<NamedExpression>map(identity()).toList());
     }
 
     // DROP is implemented as KEEP of the complement — the resolver does the same conversion
     private static LogicalPlan wrapDrop(LogicalPlan current, List<Attribute> available, SourceOfRandomness random) {
         List<Attribute> dropped = generateSubset(random, available, 1, available.size() - 1);
         Set<String> dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
-        List<NamedExpression> kept = available.stream()
-            .filter(a -> dropNames.contains(a.name()) == false)
-            .<NamedExpression>map(Function.identity())
-            .toList();
-        return new Keep(Source.EMPTY, current, kept);
+        return new Keep(
+            Source.EMPTY,
+            current,
+            available.stream().filter(a -> dropNames.contains(a.name()) == false).<NamedExpression>map(identity()).toList()
+        );
     }
 
     private static LogicalPlan wrapEval(
@@ -344,7 +292,7 @@ public class LogicalPlanGenerator {
         if (keywordAttrs.isEmpty() == false && (integerAttrs.isEmpty() || random.nextBoolean())) {
             Expression str = random.choose(keywordAttrs);
             String pattern = random.choose(List.of("f", "B", "ba", "foo"));
-            Expression patternLit = new Literal(Source.EMPTY, new BytesRef(pattern), DataType.KEYWORD);
+            Expression patternLit = of(pattern);
             Expression cond = random.nextBoolean()
                 ? new StartsWith(Source.EMPTY, str, patternLit)
                 : new EndsWith(Source.EMPTY, str, patternLit);
@@ -353,17 +301,20 @@ public class LogicalPlanGenerator {
         Expression left = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
         Expression right = random.nextBoolean()
             ? generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random)
-            : new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
-        Expression cond = GenUtils.<Expression>choose(
-            random,
-            new GreaterThan(Source.EMPTY, left, right),
-            new LessThan(Source.EMPTY, left, right),
-            new GreaterThanOrEqual(Source.EMPTY, left, right),
-            new LessThanOrEqual(Source.EMPTY, left, right),
-            new Equals(Source.EMPTY, left, right),
-            new NotEquals(Source.EMPTY, left, right)
+            : of(random.nextInt(1, 10));
+        return new Filter(
+            Source.EMPTY,
+            current,
+            GenUtils.<Expression>choose(
+                random,
+                new GreaterThan(Source.EMPTY, left, right),
+                new LessThan(Source.EMPTY, left, right),
+                new GreaterThanOrEqual(Source.EMPTY, left, right),
+                new LessThanOrEqual(Source.EMPTY, left, right),
+                new Equals(Source.EMPTY, left, right),
+                new NotEquals(Source.EMPTY, left, right)
+            )
         );
-        return new Filter(Source.EMPTY, current, cond);
     }
 
     private static Aggregate generateAggregate(
@@ -374,7 +325,7 @@ public class LogicalPlanGenerator {
         SourceOfRandomness random
     ) {
         int maxGroups = Math.min(available.size(), 2);
-        List<Attribute> groupKeys = (maxGroups > 0 && random.nextBoolean()) ? generateSubset(random, available, 1, maxGroups) : List.of();
+        List<Attribute> groupKeys = random.nextBoolean() ? generateSubset(random, available, 1, maxGroups) : List.of();
 
         List<String> shuffledNames = new ArrayList<>(STATS_ALIAS_POOL);
         Collections.shuffle(shuffledNames, random.toJDKRandom());
@@ -383,10 +334,8 @@ public class LogicalPlanGenerator {
         for (int i = 0; i < nNames; i++) {
             Expression field = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
             // Constant-only aggregate expressions crash INLINE STATS (ES planner bug)
-            if (field.references().isEmpty()) {
-                field = random.choose(integerAttrs);
-            }
-            aggregates.add(new Alias(Source.EMPTY, shuffledNames.get(i), random.choose(AGG_FUNC_POOL).apply(Source.EMPTY, field)));
+            Expression aggField = field.references().isEmpty() ? random.choose(integerAttrs) : field;
+            aggregates.add(new Alias(Source.EMPTY, shuffledNames.get(i), random.choose(AGG_FUNC_POOL).apply(Source.EMPTY, aggField)));
         }
         aggregates.addAll(groupKeys);
         return new Aggregate(Source.EMPTY, current, List.copyOf(groupKeys), List.copyOf(aggregates));
@@ -418,9 +367,7 @@ public class LogicalPlanGenerator {
     private static Expression generateLeaf(List<Attribute> integerAttrs, List<Attribute> keywordAttrs, SourceOfRandomness random) {
         // If no integer columns, fall back to LENGTH(keyword) if available, or a literal
         if (integerAttrs.isEmpty()) {
-            return keywordAttrs.isEmpty()
-                ? new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER)
-                : new Length(Source.EMPTY, random.choose(keywordAttrs));
+            return keywordAttrs.isEmpty() ? of(random.nextInt(1, 10)) : new Length(Source.EMPTY, random.choose(keywordAttrs));
         }
         // 20% chance of LENGTH(keyword) if keyword columns exist
         if (keywordAttrs.isEmpty() == false && random.nextInt(0, 4) == 0) {
@@ -429,7 +376,7 @@ public class LogicalPlanGenerator {
         if (random.nextBoolean()) {
             return random.choose(integerAttrs);
         }
-        return new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
+        return of(random.nextInt(1, 10));
     }
 
     /** Generates a keyword expression: either a leaf (attribute or string literal) or a function call. */
@@ -438,7 +385,6 @@ public class LogicalPlanGenerator {
             return generateKeywordLeaf(keywordAttrs, random);
         }
         Expression child = generateKeywordExpression(keywordAttrs, depth - 1, random);
-        // nextInt is inclusive on both bounds
         return GenUtils.<Expression>choose(
             random,
             new Trim(Source.EMPTY, child),
@@ -446,14 +392,9 @@ public class LogicalPlanGenerator {
             new ToLower(Source.EMPTY, child, EsqlTestUtils.TEST_CFG),
             new Reverse(Source.EMPTY, child),
             generateConcat(keywordAttrs, depth, random, child),
-            new Left(Source.EMPTY, child, new Literal(Source.EMPTY, random.nextInt(1, 5), DataType.INTEGER)),
-            new Right(Source.EMPTY, child, new Literal(Source.EMPTY, random.nextInt(1, 5), DataType.INTEGER)),
-            new Substring(
-                Source.EMPTY,
-                child,
-                new Literal(Source.EMPTY, random.nextInt(1, 3), DataType.INTEGER),
-                random.nextBoolean() ? new Literal(Source.EMPTY, random.nextInt(1, 4), DataType.INTEGER) : null
-            )
+            new Left(Source.EMPTY, child, of(random.nextInt(1, 5))),
+            new Right(Source.EMPTY, child, of(random.nextInt(1, 5))),
+            new Substring(Source.EMPTY, child, of(random.nextInt(1, 3)), random.nextBoolean() ? of(random.nextInt(1, 4)) : null)
         );
     }
 
@@ -470,7 +411,7 @@ public class LogicalPlanGenerator {
         if (keywordAttrs.isEmpty() == false && random.nextBoolean()) {
             return random.choose(keywordAttrs);
         }
-        return new Literal(Source.EMPTY, new BytesRef(random.choose(KEYWORD_POOL)), DataType.KEYWORD);
+        return of(random.choose(KEYWORD_POOL));
     }
 
     /** Picks a random subset of {@code attrs}. Silently clamps to {@code attrs.size()} when the list is smaller than {@code min}. */

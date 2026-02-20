@@ -41,6 +41,7 @@ import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
+import org.elasticsearch.xpack.esql.plan.logical.Row;
 import org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation;
 
 import java.io.BufferedReader;
@@ -87,7 +88,7 @@ public class Simulator {
 
     public Result simulate(LogicalPlan plan) throws IOException {
         return switch (plan) {
-            case org.elasticsearch.xpack.esql.plan.logical.Row row -> visit(row);
+            case Row row -> visit(row);
             case UnresolvedRelation relation -> visit(relation);
             case EsRelation relation -> visit(relation);
             case Keep keep -> visit(keep);
@@ -104,7 +105,7 @@ public class Simulator {
         };
     }
 
-    private Result visit(org.elasticsearch.xpack.esql.plan.logical.Row row) {
+    private Result visit(Row row) {
         List<Column> columns = row.fields().stream().map(alias -> {
             if (alias.child() instanceof Literal l) {
                 return new Column(alias.name(), alias.dataType(), List.of(normalizeObject(l.value())));
@@ -268,7 +269,7 @@ public class Simulator {
         var aggregate = inlineStats.aggregate();
         Result childResult = simulate(aggregate.child());
         int numRows = childResult.numRows();
-        var groups = buildGroups(aggregate, childResult, numRows);
+        var groups = buildGroups(aggregate, childResult);
         // Deduplicate by name (keep last): matches ES mergeOutputExpressions semantics where
         // the last entry wins. For INLINE STATS, grouping keys appear after aggregate functions
         // in the aggregates list, so the grouping key's original child value takes precedence
@@ -297,7 +298,7 @@ public class Simulator {
 
     private Result visit(Aggregate aggregate) throws IOException {
         Result childResult = simulate(aggregate.child());
-        var groups = buildGroups(aggregate, childResult, childResult.numRows());
+        var groups = buildGroups(aggregate, childResult);
         // Deduplicate by name (keep last): matches ES mergeOutputExpressions semantics.
         // Grouping keys appear after aggregate functions in the aggregates list, so the
         // grouping key value takes precedence over an aggregate output with the same name.
@@ -320,14 +321,16 @@ public class Simulator {
         return new Result(deduplicateKeepLast(allCols));
     }
 
-    private LinkedHashMap<List<Object>, List<Integer>> buildGroups(Aggregate aggregate, Result childResult, int numRows) {
+    private LinkedHashMap<List<Object>, List<Integer>> buildGroups(Aggregate aggregate, Result childResult) {
+        int numRows = childResult.numRows();
         var groups = new LinkedHashMap<List<Object>, List<Integer>>();
         if (aggregate.groupings().isEmpty()) {
             groups.put(List.of(), IntStream.range(0, numRows).boxed().toList());
         } else {
+            List<List<Object>> groupingCols = aggregate.groupings().stream().map(g -> childResult.evaluate(g, activeBug).values()).toList();
             for (int i = 0; i < numRows; i++) {
                 int row = i;
-                List<Object> key = aggregate.groupings().stream().map(g -> childResult.evaluate(g, activeBug).values().get(row)).toList();
+                List<Object> key = groupingCols.stream().map(col -> col.get(row)).toList();
                 groups.computeIfAbsent(key, k -> new ArrayList<>()).add(i);
             }
         }
@@ -341,7 +344,7 @@ public class Simulator {
             lastPositions.put(columns.get(i).name(), i);
         }
         return IntStream.range(0, columns.size())
-            .filter(i -> lastPositions.get(columns.get(i).name()) == i)
+            .filter(i -> lastPositions.get(columns.get(i).name()).intValue() == i)
             .mapToObj(columns::get)
             .toList();
     }

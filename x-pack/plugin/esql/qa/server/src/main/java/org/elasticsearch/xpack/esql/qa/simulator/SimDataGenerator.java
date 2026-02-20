@@ -14,7 +14,7 @@ import org.elasticsearch.xpack.esql.core.type.DataType;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 /**
  * Generates random row data conforming to a {@link SimSchema}.
@@ -27,7 +27,8 @@ class SimDataGenerator {
     private static final double NULL_PROBABILITY = 0.2;
 
     static List<Map<String, Object>> generate(SimSchema schema, SourceOfRandomness random) {
-        return IntStream.range(0, random.nextInt(1, 5)).mapToObj(i -> generateRow(schema, random)).toList();
+        int n = random.nextInt(1, 5);
+        return Stream.generate(() -> generateRow(schema, random)).limit(n).toList();
     }
 
     private static Map<String, Object> generateRow(SimSchema schema, SourceOfRandomness random) {

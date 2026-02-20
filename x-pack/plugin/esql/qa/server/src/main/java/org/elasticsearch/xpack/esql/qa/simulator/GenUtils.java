@@ -9,13 +9,12 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
-import org.elasticsearch.common.util.ArrayUtils;
-
 class GenUtils {
     private GenUtils() {/* static class */}
 
-    @SuppressWarnings("unchecked")
+    @SafeVarargs
     public static <T> T choose(SourceOfRandomness random, T first, T second, T... rest) {
-        return random.choose(ArrayUtils.concat((T[]) new Object[] { first, second }, rest));
+        int idx = random.nextInt(0, 1 + rest.length);
+        return idx == 0 ? first : idx == 1 ? second : rest[idx - 2];
     }
 }
