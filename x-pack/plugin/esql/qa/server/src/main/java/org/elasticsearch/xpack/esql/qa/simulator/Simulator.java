@@ -238,7 +238,6 @@ public class Simulator {
         return new Result(childResult.columns.stream().map(c -> new Column(c.name, c.type, c.values.subList(0, actual))).toList());
     }
 
-    @SuppressWarnings("unchecked")
     private Result visit(OrderBy orderBy) throws IOException {
         Result childResult = simulate(orderBy.child());
         int numRows = childResult.numRows();
@@ -248,10 +247,12 @@ public class Simulator {
         List<List<Object>> orderValues = orders.stream().map(o -> childResult.evaluate(o.child(), activeBug).values).toList();
         Arrays.sort(indices, (a, b) -> {
             for (int i = 0; i < orders.size(); i++) {
-                int cmp = ((Comparable<Object>) orderValues.get(i).get(a)).compareTo(orderValues.get(i).get(b));
+                Object valA = orderValues.get(i).get(a);
+                Object valB = orderValues.get(i).get(b);
+                boolean asc = (orders.get(i).direction() == Order.OrderDirection.ASC) != (activeBug == SimBug.SORT_REVERSED);
+                int cmp = compareNullSafe(valA, valB, asc);
                 if (cmp != 0) {
-                    boolean asc = (orders.get(i).direction() == Order.OrderDirection.ASC) != (activeBug == SimBug.SORT_REVERSED);
-                    return asc ? cmp : -cmp;
+                    return cmp;
                 }
             }
             return 0;
@@ -480,6 +481,22 @@ public class Simulator {
                 return (Object) test.test(Long.compare(toLong(l), toLong(r)));
             }).toList());
         }
+    }
+
+    /** Null-safe comparison for sort values. Follows ES|QL default null ordering: nulls last for ASC, nulls first for DESC. */
+    @SuppressWarnings("unchecked")
+    private static int compareNullSafe(Object a, Object b, boolean asc) {
+        if (a == null && b == null) {
+            return 0;
+        }
+        if (a == null) {
+            return asc ? 1 : -1;
+        }
+        if (b == null) {
+            return asc ? -1 : 1;
+        }
+        int cmp = ((Comparable<Object>) a).compareTo(b);
+        return asc ? cmp : -cmp;
     }
 
     private static long toLong(Object object) {

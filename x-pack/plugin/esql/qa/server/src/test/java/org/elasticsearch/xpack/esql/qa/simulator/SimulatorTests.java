@@ -24,9 +24,12 @@ import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
+import org.elasticsearch.xpack.esql.plan.logical.Eval;
+import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 
 import java.io.IOException;
@@ -409,15 +412,14 @@ public class SimulatorTests extends ESTestCase {
         );
         var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 2, "b", "x"), Map.of("a", 3, "b", "y"));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        var aAttr = from.output().get(0); // a:INTEGER
-        var bAttr = from.output().get(1); // b:KEYWORD
+        var aAttr = from.output().get(0);
+        var bAttr = from.output().get(1);
         var aggregate = new Aggregate(
             Source.EMPTY,
             from,
             List.<Expression>of(bAttr),
             List.<NamedExpression>of(new Alias(Source.EMPTY, "s0", new Sum(Source.EMPTY, aAttr)), bAttr)
         );
-        // Groups: "x" → rows 0,1 (a=1,2), "y" → row 2 (a=3)
         assertThat(
             new Simulator(schema, data).simulate(aggregate),
             equalTo(
@@ -528,8 +530,8 @@ public class SimulatorTests extends ESTestCase {
         );
         var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 2, "b", "x"), Map.of("a", 3, "b", "y"));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        var aAttr = from.output().get(0); // a:INTEGER
-        var bAttr = from.output().get(1); // b:KEYWORD
+        var aAttr = from.output().get(0);
+        var bAttr = from.output().get(1);
         var aggregate = new Aggregate(
             Source.EMPTY,
             from,
@@ -537,7 +539,6 @@ public class SimulatorTests extends ESTestCase {
             List.<NamedExpression>of(new Alias(Source.EMPTY, "s0", new Sum(Source.EMPTY, aAttr)), bAttr)
         );
         var inlineStats = new InlineStats(Source.EMPTY, aggregate);
-        // All 3 rows preserved; s0 broadcast per group. Columns: [a, s0, b]
         assertThat(
             new Simulator(schema, data).simulate(inlineStats),
             equalTo(
@@ -564,7 +565,6 @@ public class SimulatorTests extends ESTestCase {
             List.<NamedExpression>of(new Alias(Source.EMPTY, "total", new Sum(Source.EMPTY, aAttr)))
         );
         var inlineStats = new InlineStats(Source.EMPTY, aggregate);
-        // All 3 rows preserved; total broadcast to all. Columns: [a, total]
         assertThat(
             new Simulator(schema, data).simulate(inlineStats),
             equalTo(
@@ -587,8 +587,8 @@ public class SimulatorTests extends ESTestCase {
         );
         var data = List.<Map<String, Object>>of(Map.of("s1", 1, "b", "x"), Map.of("s1", 1, "b", "y"), Map.of("s1", 2, "b", "x"));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        var s1Attr = from.output().get(0); // s1:INTEGER
-        var bAttr = from.output().get(1); // b:KEYWORD
+        var s1Attr = from.output().get(0);
+        var bAttr = from.output().get(1);
         // aggregates list: [Alias("s1", COUNT(b)), Alias("s0", COUNT(b)), s1Attr]
         var aggregate = new Aggregate(
             Source.EMPTY,
@@ -601,13 +601,11 @@ public class SimulatorTests extends ESTestCase {
             )
         );
         Simulator.Result result = new Simulator(schema, data).simulate(aggregate);
-        // Should produce 2 columns (s0, s1), not 3 (s1, s0, s1)
         assertThat(result.columns().size(), equalTo(2));
         assertThat(result.columns().get(0).name(), equalTo("s0"));
         assertThat(result.columns().get(1).name(), equalTo("s1"));
-        // deduplicateKeepLast keeps the grouping key "s1" (last), not the COUNT "s1" (first)
-        assertThat(result.columns().get(0).values(), equalTo(List.of(2L, 1L)));  // s0: COUNT values
-        assertThat(result.columns().get(1).values(), equalTo(List.of(1L, 2L)));  // s1: grouping key values
+        assertThat(result.columns().get(0).values(), equalTo(List.of(2L, 1L)));
+        assertThat(result.columns().get(1).values(), equalTo(List.of(1L, 2L)));
     }
 
     public void testChainedInlineStatsShadowingKeepsGroupingKeyValue() throws Exception {
@@ -656,6 +654,141 @@ public class SimulatorTests extends ESTestCase {
         // s1 should be 6 (grouping key value), not 1 (COUNT value)
         assertThat(result2.getColumn("s1").values(), equalTo(List.of(6L)));
         assertThat(result2.getColumn("b").values(), equalTo(List.of(1L)));
+    }
+
+    public void testNullInArithmetic() throws Exception {
+        // Row 0: a=1, b=2 -> z = 3. Row 1: a absent (null), b=3 -> z = null.
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.INTEGER))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", 2), Map.of("b", 3));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var bAttr = from.output().get(1);
+        var add = new Add(Source.EMPTY, aAttr, bAttr, EsqlTestUtils.TEST_CFG);
+        var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "z", add)));
+        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Simulator.Column zCol = result.getColumn("z");
+        assertThat(zCol.values().get(0), equalTo(3L));
+        assertNull(zCol.values().get(1));
+    }
+
+    public void testNullInFilter() throws Exception {
+        // WHERE a > 5: null a -> filtered out; a=3 -> filtered out; a=10 -> kept.
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 10, "b", "x"), Map.of("b", "y"), Map.of("a", 3, "b", "z"));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var gt = new GreaterThan(Source.EMPTY, aAttr, new Literal(Source.EMPTY, 5, DataType.INTEGER));
+        var filter = new Filter(Source.EMPTY, from, gt);
+        Simulator.Result result = new Simulator(schema, data).simulate(filter);
+        assertThat(result.numRows(), equalTo(1));
+        assertThat(result.getColumn("a").values().get(0), equalTo(10L));
+    }
+
+    public void testNullInStatsCount() throws Exception {
+        // COUNT(a) grouped by b: group "x" has rows (a=1) and (a=null) -> COUNT=1; group "y" has (a=3) -> COUNT=1.
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("b", "x"), Map.of("a", 3, "b", "y"));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var bAttr = from.output().get(1);
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "cnt", new Count(Source.EMPTY, aAttr)), bAttr)
+        );
+        Simulator.Result result = new Simulator(schema, data).simulate(aggregate);
+        assertThat(result.getColumn("cnt").values(), equalTo(List.of(1L, 1L)));
+    }
+
+    public void testNullInStatsSum() throws Exception {
+        // SUM(a) grouped by b: group "x" has (a=1) and (a=null) -> SUM=1; group "y" has (a=null) only -> SUM=null.
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("b", "x"), Map.of("b", "y"));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var bAttr = from.output().get(1);
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "s", new Sum(Source.EMPTY, aAttr)), bAttr)
+        );
+        Simulator.Result result = new Simulator(schema, data).simulate(aggregate);
+        List<Object> sumValues = result.getColumn("s").values();
+        List<Object> bValues = result.getColumn("b").values();
+        int xIdx = bValues.indexOf("x");
+        int yIdx = bValues.indexOf("y");
+        assertThat(sumValues.get(xIdx), equalTo(1L));
+        assertNull(sumValues.get(yIdx));
+    }
+
+    public void testNullInGroupingKey() throws Exception {
+        // SUM(a) grouped by b: group "x" has (a=1) -> SUM=1; group null has (a=2) and (a=3) -> SUM=5.
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 2), Map.of("a", 3));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var bAttr = from.output().get(1);
+        var aggregate = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.<Expression>of(bAttr),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "s", new Sum(Source.EMPTY, aAttr)), bAttr)
+        );
+        Simulator.Result result = new Simulator(schema, data).simulate(aggregate);
+        List<Object> sumValues = result.getColumn("s").values();
+        List<Object> bValues = result.getColumn("b").values();
+        assertThat(sumValues.size(), equalTo(2));
+        // Find "x" group and null group (order may vary)
+        int xIdx = bValues.indexOf("x");
+        int nullIdx = xIdx == 0 ? 1 : 0;
+        assertThat(sumValues.get(xIdx), equalTo(1L));
+        assertThat(sumValues.get(nullIdx), equalTo(5L));
+        assertNull(bValues.get(nullIdx));
+    }
+
+    public void testAllNullsInColumn() throws Exception {
+        // All rows have null a -> COUNT(a)=0, SUM(a)=null.
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.INTEGER))
+        );
+        var data = List.<Map<String, Object>>of(Map.of("b", 1), Map.of("b", 2));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        var aAttr = from.output().get(0);
+        var aggregateCount = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.of(),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "cnt", new Count(Source.EMPTY, aAttr)))
+        );
+        Simulator.Result countResult = new Simulator(schema, data).simulate(aggregateCount);
+        assertThat(countResult.getColumn("cnt").values().get(0), equalTo(0L));
+
+        var aggregateSum = new Aggregate(
+            Source.EMPTY,
+            from,
+            List.of(),
+            List.<NamedExpression>of(new Alias(Source.EMPTY, "s", new Sum(Source.EMPTY, aAttr)))
+        );
+        Simulator.Result sumResult = new Simulator(schema, data).simulate(aggregateSum);
+        assertNull(sumResult.getColumn("s").values().get(0));
     }
 
     private Simulator.Result simulate(String statement) throws IOException {

@@ -38,6 +38,7 @@ import org.junit.runner.RunWith;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -57,8 +58,6 @@ public class SimulatorPropertyIT {
         .build();
 
     private static RestClient restClient;
-
-    private static final int TRIES = 50;
 
     @BeforeClass
     public static void connectClient() throws Throwable {
@@ -89,7 +88,7 @@ public class SimulatorPropertyIT {
         }
     }
 
-    @Property(trials = TRIES)
+    @Property(trials = 50)
     public void simulatorMatchesEs(@From(TestCaseGenerator.class) TestCase tc) throws Exception {
         // Clean up any stale index from a previous run, then set up fresh
         deleteIndex(tc.schema().indexName());
@@ -200,6 +199,25 @@ public class SimulatorPropertyIT {
                 List<Map<String, Object>> smaller = new ArrayList<>(larger.data());
                 smaller.remove(smaller.size() - 1);
                 candidates.add(new TestCase(larger.schema(), smaller, larger.plan(), larger.query()));
+            }
+            // Shrink data: fill in a null (absent) field with a non-null value
+            for (int r = 0; r < larger.data().size(); r++) {
+                Map<String, Object> row = larger.data().get(r);
+                for (SimSchema.SimColumn col : larger.schema().columns()) {
+                    if (row.containsKey(col.name()) == false) {
+                        List<Map<String, Object>> filledData = larger.data().stream()
+                            .<Map<String, Object>>map(LinkedHashMap::new)
+                            .toList();
+                        Object fillValue = switch (col.type()) {
+                            case INTEGER -> 1;
+                            case KEYWORD -> "foo";
+                            default -> throw new UnsupportedOperationException("Unsupported type: " + col.type());
+                        };
+                        filledData.get(r).put(col.name(), fillValue);
+                        candidates.add(new TestCase(larger.schema(), filledData, larger.plan(), larger.query()));
+                        break; // Only try the first null per row to limit candidate explosion
+                    }
+                }
             }
             return candidates;
         }

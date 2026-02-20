@@ -35,10 +35,19 @@ class SimDataGenerator {
         return rows;
     }
 
+    private static final double NULL_PROBABILITY = 0.2;
+
     private static Map<String, Object> generateRow(SimSchema schema, SourceOfRandomness random) {
         Map<String, Object> row = new LinkedHashMap<>();
         for (SimSchema.SimColumn col : schema.columns()) {
+            if (random.nextDouble() < NULL_PROBABILITY) {
+                continue; // absent keys appear as null in ES|QL
+            }
             row.put(col.name(), generateValue(col.type(), random));
+        }
+        if (row.isEmpty()) { // ES rejects empty documents
+            SimSchema.SimColumn firstCol = schema.columns().get(0);
+            row.put(firstCol.name(), generateValue(firstCol.type(), random));
         }
         return row;
     }
