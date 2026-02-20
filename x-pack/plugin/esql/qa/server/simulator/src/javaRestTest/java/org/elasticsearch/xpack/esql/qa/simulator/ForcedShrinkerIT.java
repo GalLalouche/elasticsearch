@@ -64,7 +64,7 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     private static final Logger logger = LogManager.getLogger(ForcedShrinkerIT.class);
 
     @ClassRule
-    public static ElasticsearchCluster cluster = ElasticsearchCluster.local()
+    public static final ElasticsearchCluster cluster = ElasticsearchCluster.local()
         .distribution(DistributionType.DEFAULT)
         .setting("xpack.security.enabled", "false")
         .setting("xpack.license.self_generated.type", "trial")
@@ -343,7 +343,7 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     /** Resolves {@link UnresolvedFunction} to the corresponding aggregate function (COUNT/SUM/MIN/MAX). */
     private static Expression resolveExpr(Expression expr) {
         if (expr instanceof UnresolvedFunction uf) {
-            Expression field = uf.children().get(0);
+            Expression field = uf.children().getFirst();
             return switch (uf.name().toUpperCase(Locale.ROOT)) {
                 case "COUNT" -> new Count(uf.source(), field);
                 case "SUM" -> new Sum(uf.source(), field);
@@ -376,15 +376,15 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         LogicalPlan rebuilt = stages.getLast(); // FROM
         for (int j = stages.size() - 2; j >= 0; j--) {
             LogicalPlan stage = stages.get(j);
-            if (stage instanceof InlineStats is) {
-                Aggregate agg = is.aggregate();
-                Aggregate newAgg = new Aggregate(agg.source(), rebuilt, agg.groupings(), agg.aggregates());
-                rebuilt = new InlineStats(is.source(), newAgg);
-            } else if (stage instanceof Aggregate agg) {
-                rebuilt = new Aggregate(agg.source(), rebuilt, agg.groupings(), agg.aggregates());
-            } else {
-                rebuilt = ((UnaryPlan) stage).replaceChild(rebuilt);
-            }
+            rebuilt = switch (stage) {
+                case InlineStats is -> {
+                    Aggregate agg = is.aggregate();
+                    Aggregate newAgg = new Aggregate(agg.source(), rebuilt, agg.groupings(), agg.aggregates());
+                    yield new InlineStats(is.source(), newAgg);
+                }
+                case Aggregate agg -> new Aggregate(agg.source(), rebuilt, agg.groupings(), agg.aggregates());
+                default -> ((UnaryPlan) stage).replaceChild(rebuilt);
+            };
         }
         return rebuilt;
     }
@@ -425,12 +425,8 @@ public class ForcedShrinkerIT extends ESRestTestCase {
                     }
                 }
             }
-            case InlineStats is -> {
-                results.addAll(shrinkAggregateExprs(is.aggregate()).stream().map(a -> new InlineStats(is.source(), a)).toList());
-            }
-            case Aggregate agg -> {
-                results.addAll(shrinkAggregateExprs(agg));
-            }
+            case InlineStats is -> results.addAll(shrinkAggregateExprs(is.aggregate()).stream().map(a -> new InlineStats(is.source(), a)).toList());
+            case Aggregate agg -> results.addAll(shrinkAggregateExprs(agg));
             default -> {
                 /* no expressions to shrink */ }
         }
@@ -483,11 +479,7 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         try {
             indexData(schema, rows);
 
-            if ("mismatch".equals(failureMode)) {
-                return queryMismatches(query, schema, rows, plan);
-            } else {
-                return queryCrashes(query);
-            }
+            return "mismatch".equals(failureMode) ? queryMismatches(query, schema, rows, plan) : queryCrashes(query);
         } finally {
             deleteIndexBestEffort(schema.indexName());
         }
