@@ -57,7 +57,7 @@ class SimulatorTestUtils {
         TestLogging annotation = testClass.getAnnotation(TestLogging.class);
         if (annotation != null) {
             for (String pair : annotation.value().split(",")) {
-                String[] kv = pair.split(":");
+                String[] kv = pair.split(":", 2);
                 if (kv.length != 2) {
                     throw new IllegalArgumentException("Invalid @TestLogging entry: [" + pair + "], expected format 'logger:LEVEL'");
                 }

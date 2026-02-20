@@ -118,8 +118,8 @@ public class SimulatorPropertyIT {
 
     @Property(trials = 50, maxShrinkDepth = 100, maxShrinkTime = 120000)
     public void simulatorMatchesEs(@From(TestCaseGenerator.class) TestCase tc) throws Exception {
-        trialCount++;
-        logger.info("[Trial {}] {}", trialCount, tc);
+        int trial = ++trialCount;
+        logger.info("[Trial {}] {}", trial, tc);
         boolean needsIndex = tc.schema() != null;
 
         if (needsIndex) {
@@ -212,6 +212,7 @@ public class SimulatorPropertyIT {
     }
 
     public static class TestCaseGenerator extends Generator<TestCase> {
+        // Static: seed is applied once across all generator instances so subsequent trials explore new territory
         private static boolean seedApplied;
 
         public TestCaseGenerator() {
@@ -350,7 +351,7 @@ public class SimulatorPropertyIT {
                 case InlineStats is -> shrinkAggregateExpressions(candidates, larger, is.aggregate());
                 case Aggregate agg -> shrinkAggregateExpressions(candidates, larger, agg);
                 default -> {
-                    /* no expressions to shrink */ }
+                }
             }
         }
 
@@ -373,8 +374,8 @@ public class SimulatorPropertyIT {
             Aggregate agg;
             if (larger.plan() instanceof InlineStats is) {
                 agg = is.aggregate();
-            } else if (larger.plan() instanceof Aggregate a) {
-                agg = a;
+            } else if (larger.plan() instanceof Aggregate aggregate) {
+                agg = aggregate;
             } else {
                 return;
             }
@@ -400,14 +401,14 @@ public class SimulatorPropertyIT {
         /** Recursively collects all sub-expressions (children and their descendants). */
         private static List<Expression> collectSubExpressions(Expression expr) {
             List<Expression> subs = new ArrayList<>();
-            collectSubExpressionsInto(subs, expr);
+            collectSubExpressionsRecursive(subs, expr);
             return subs;
         }
 
-        private static void collectSubExpressionsInto(List<Expression> out, Expression expr) {
+        private static void collectSubExpressionsRecursive(List<Expression> out, Expression expr) {
             for (Expression child : expr.children()) {
                 out.add(child);
-                collectSubExpressionsInto(out, child);
+                collectSubExpressionsRecursive(out, child);
             }
         }
     }
