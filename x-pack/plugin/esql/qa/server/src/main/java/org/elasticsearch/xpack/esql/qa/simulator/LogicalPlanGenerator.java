@@ -355,15 +355,15 @@ public class LogicalPlanGenerator {
         Expression right = random.nextBoolean()
             ? generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random)
             : new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
-        Expression cond = switch (random.nextInt(0, 5)) {
-            case 0 -> new GreaterThan(Source.EMPTY, left, right);
-            case 1 -> new LessThan(Source.EMPTY, left, right);
-            case 2 -> new GreaterThanOrEqual(Source.EMPTY, left, right);
-            case 3 -> new LessThanOrEqual(Source.EMPTY, left, right);
-            case 4 -> new Equals(Source.EMPTY, left, right);
-            case 5 -> new NotEquals(Source.EMPTY, left, right);
-            default -> throw new IllegalStateException();
-        };
+        Expression cond = GenUtils.<Expression>choose(
+            random,
+            new GreaterThan(Source.EMPTY, left, right),
+            new LessThan(Source.EMPTY, left, right),
+            new GreaterThanOrEqual(Source.EMPTY, left, right),
+            new LessThanOrEqual(Source.EMPTY, left, right),
+            new Equals(Source.EMPTY, left, right),
+            new NotEquals(Source.EMPTY, left, right)
+        );
         return new Filter(Source.EMPTY, current, cond);
     }
 
@@ -414,15 +414,14 @@ public class LogicalPlanGenerator {
         }
         Expression left = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
         Expression right = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
-        // nextInt is inclusive on both bounds
-        Expression result = switch (random.nextInt(0, 4)) {
-            case 0 -> new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
-            case 1 -> new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
-            case 2 -> new Mul(Source.EMPTY, left, right);
-            case 3 -> new Div(Source.EMPTY, left, right);
-            case 4 -> new Mod(Source.EMPTY, left, right);
-            default -> throw new IllegalStateException();
-        };
+        Expression result = GenUtils.<Expression>choose(
+            random,
+            new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG),
+            new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG),
+            new Mul(Source.EMPTY, left, right),
+            new Div(Source.EMPTY, left, right),
+            new Mod(Source.EMPTY, left, right)
+        );
         // ~20% chance of wrapping in negation
         if (random.nextInt(0, 4) == 0) {
             result = new Neg(Source.EMPTY, result);
