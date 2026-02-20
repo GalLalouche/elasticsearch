@@ -121,7 +121,7 @@ public class Simulator {
     private Result visit(org.elasticsearch.xpack.esql.plan.logical.Row row) {
         List<Column> columns = row.fields().stream().map(alias -> {
             if (alias.child() instanceof Literal l) {
-                return new Column(alias.name(), alias.dataType(), List.of(l.value()));
+                return new Column(alias.name(), alias.dataType(), List.of(normalizeObject(l.value())));
             }
             throw new UnsupportedOperationException(
                 Strings.format("Row field [%s] is not a literal, but a %s", alias.name(), alias.child().getClass())
