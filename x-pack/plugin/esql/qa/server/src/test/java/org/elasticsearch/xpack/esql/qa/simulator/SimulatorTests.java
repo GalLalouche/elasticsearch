@@ -57,7 +57,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=1, y=2, z=3"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("x", DataType.INTEGER, List.of(1)),
                     new Simulator.Column("y", DataType.INTEGER, List.of(2)),
                     new Simulator.Column("z", DataType.INTEGER, List.of(3))
@@ -70,7 +70,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=1, y=2 | eval z = x + y"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("x", DataType.INTEGER, List.of(1)),
                     new Simulator.Column("y", DataType.INTEGER, List.of(2)),
                     // FIXME(gal, NOCOMMIT) This is silly, but because all arithmetics right now are done in long, only z is long.
@@ -84,7 +84,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("from sample_data"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "@timestamp",
                         DataType.DATETIME,
@@ -130,7 +130,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("from sample_data | keep event_duration"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "event_duration",
                         DataType.LONG,
@@ -145,7 +145,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("from sample_data | drop @timestamp, client_ip, message"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "event_duration",
                         DataType.LONG,
@@ -160,7 +160,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("from sample_data | keep event_duration | eval duration_in_seconds = event_duration / 1000"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "event_duration",
                         DataType.LONG,
@@ -180,7 +180,7 @@ public class SimulatorTests extends ESTestCase {
                 EVAL duration_in_seconds = event_duration / 1000 + 42, constant = "foo"
                 """),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "event_duration",
                         DataType.LONG,
@@ -197,7 +197,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("from sample_data | where event_duration > 3000000"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "@timestamp",
                         DataType.DATETIME,
@@ -223,7 +223,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=10, y=3 | eval z = x - y"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("x", DataType.INTEGER, List.of(10)),
                     new Simulator.Column("y", DataType.INTEGER, List.of(3)),
                     new Simulator.Column("z", DataType.INTEGER, List.of(7L))
@@ -236,7 +236,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=3, y=4 | eval z = x * y"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("x", DataType.INTEGER, List.of(3)),
                     new Simulator.Column("y", DataType.INTEGER, List.of(4)),
                     new Simulator.Column("z", DataType.INTEGER, List.of(12L))
@@ -249,7 +249,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=1 | EVAL y = x + 1 | EVAL z = y + 1"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("x", DataType.INTEGER, List.of(1)),
                     new Simulator.Column("y", DataType.INTEGER, List.of(2L)),
                     new Simulator.Column("z", DataType.INTEGER, List.of(3L))
@@ -263,7 +263,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=1 | EVAL _col_0 = 9 | EVAL _col_0 = 4"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("x", DataType.INTEGER, List.of(1)),
                     new Simulator.Column("_col_0", DataType.INTEGER, List.of(4))
                 )
@@ -274,7 +274,7 @@ public class SimulatorTests extends ESTestCase {
     public void testIntegerArithmeticOverflowReturnsNull() throws Exception {
         // 50000 * 50000 = 2,500,000,000 which exceeds Integer.MAX_VALUE (2,147,483,647).
         // ES|QL returns null for integer overflow; the simulator must match.
-        Simulator.Result result = simulate("ROW x=50000 | EVAL z = x * x");
+        Result result = simulate("ROW x=50000 | EVAL z = x * x");
         assertThat(result.columns().get(1).name(), equalTo("z"));
         assertThat(result.columns().get(1).type(), equalTo(DataType.INTEGER));
         assertNull(result.columns().get(1).values().get(0));
@@ -291,7 +291,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             new Simulator(schema, data).simulate(plan),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("a", DataType.INTEGER, List.of(1L, 2L)),
                     new Simulator.Column("b", DataType.KEYWORD, List.of("foo", "bar"))
                 )
@@ -303,10 +303,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=1, y=2 | LIMIT 1"),
             equalTo(
-                new Simulator.Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(1)),
-                    new Simulator.Column("y", DataType.INTEGER, List.of(2))
-                )
+                new Result(new Simulator.Column("x", DataType.INTEGER, List.of(1)), new Simulator.Column("y", DataType.INTEGER, List.of(2)))
             )
         );
     }
@@ -315,7 +312,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("FROM sample_data | SORT event_duration ASC | LIMIT 3"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "@timestamp",
                         DataType.DATETIME,
@@ -337,7 +334,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("FROM sample_data | SORT event_duration DESC | LIMIT 2"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "@timestamp",
                         DataType.DATETIME,
@@ -358,7 +355,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("FROM sample_data | WHERE event_duration < 2000000"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column(
                         "@timestamp",
                         DataType.DATETIME,
@@ -394,7 +391,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             new Simulator(schema, data).simulate(aggregate),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("s0", DataType.LONG, List.of(3L, 3L)),
                     new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
                 )
@@ -420,7 +417,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             new Simulator(schema, data).simulate(aggregate),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("cnt", DataType.LONG, List.of(2L, 1L)),
                     new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
                 )
@@ -446,7 +443,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             new Simulator(schema, data).simulate(aggMin),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("lo", DataType.INTEGER, List.of(1L, 3L)),
                     new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
                 )
@@ -461,7 +458,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             new Simulator(schema, data).simulate(aggMax),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("hi", DataType.INTEGER, List.of(5L, 3L)),
                     new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
                 )
@@ -482,7 +479,7 @@ public class SimulatorTests extends ESTestCase {
         );
         assertThat(
             new Simulator(schema, data).simulate(aggregate),
-            equalTo(new Simulator.Result(new Simulator.Column("total", DataType.LONG, List.of(10L))))
+            equalTo(new Result(new Simulator.Column("total", DataType.LONG, List.of(10L))))
         );
     }
 
@@ -505,7 +502,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             new Simulator(schema, data).simulate(inlineStats),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("a", DataType.INTEGER, List.of(1L, 2L, 3L)),
                     new Simulator.Column("s0", DataType.LONG, List.of(3L, 3L, 3L)),
                     new Simulator.Column("b", DataType.KEYWORD, List.of("x", "x", "y"))
@@ -529,7 +526,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             new Simulator(schema, data).simulate(inlineStats),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("a", DataType.INTEGER, List.of(2L, 3L, 5L)),
                     new Simulator.Column("total", DataType.LONG, List.of(10L, 10L, 10L))
                 )
@@ -559,7 +556,7 @@ public class SimulatorTests extends ESTestCase {
                 s1Attr
             )
         );
-        Simulator.Result result = new Simulator(schema, data).simulate(aggregate);
+        Result result = new Simulator(schema, data).simulate(aggregate);
         assertThat(result.columns().size(), equalTo(2));
         assertThat(result.columns().get(0).name(), equalTo("s0"));
         assertThat(result.columns().get(1).name(), equalTo("s1"));
@@ -589,7 +586,7 @@ public class SimulatorTests extends ESTestCase {
 
         // After inline1, result should be: [b=[1], s1=[6]]
         var sim = new Simulator(schema, data);
-        Simulator.Result result1 = sim.simulate(inline1);
+        Result result1 = sim.simulate(inline1);
         assertThat(result1.columns().size(), equalTo(2));
         assertThat(result1.getColumn("b").values(), equalTo(List.of(1L)));
         assertThat(result1.getColumn("s1").values(), equalTo(List.of(6L)));
@@ -608,7 +605,7 @@ public class SimulatorTests extends ESTestCase {
         );
         var inline2 = new InlineStats(Source.EMPTY, agg2);
 
-        Simulator.Result result2 = sim.simulate(inline2);
+        Result result2 = sim.simulate(inline2);
         // s1 should be 6 (grouping key value), not 1 (COUNT value)
         assertThat(result2.getColumn("s1").values(), equalTo(List.of(6L)));
         assertThat(result2.getColumn("b").values(), equalTo(List.of(1L)));
@@ -638,23 +635,23 @@ public class SimulatorTests extends ESTestCase {
             List.of(),
             List.<NamedExpression>of(new Alias(Source.EMPTY, "s0", new Count(Source.EMPTY, xAttr)))
         );
-        Simulator.Result result = simulator.simulate(aggregate);
+        Result result = simulator.simulate(aggregate);
         assertThat(result.getColumn("s0").values().get(0), equalTo(1L));
     }
 
     public void testRowWithWhereFiltersOut() throws Exception {
-        Simulator.Result result = simulate("ROW x = 1 | WHERE x > 5");
+        Result result = simulate("ROW x = 1 | WHERE x > 5");
         assertThat(result.numRows(), equalTo(0));
     }
 
     public void testRowWithWhereKeeps() throws Exception {
-        Simulator.Result result = simulate("ROW x = 10 | WHERE x > 5");
+        Result result = simulate("ROW x = 10 | WHERE x > 5");
         assertThat(result.numRows(), equalTo(1));
         assertThat(result.getColumn("x").values().get(0), equalTo(10));
     }
 
     public void testRowKeywordOnly() throws Exception {
-        Simulator.Result result = simulate("ROW name = \"hello\", tag = \"world\"");
+        Result result = simulate("ROW name = \"hello\", tag = \"world\"");
         assertThat(result.columns().size(), equalTo(2));
         assertThat(result.getColumn("name").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("tag").type(), equalTo(DataType.KEYWORD));
@@ -663,7 +660,7 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testRowWithKeep() throws Exception {
-        Simulator.Result result = simulate("ROW x = 1, y = 2, z = 3 | KEEP x, z");
+        Result result = simulate("ROW x = 1, y = 2, z = 3 | KEEP x, z");
         assertThat(result.columns().size(), equalTo(2));
         assertThat(result.getColumn("x").values().get(0), equalTo(1));
         assertThat(result.getColumn("z").values().get(0), equalTo(3));
@@ -685,7 +682,7 @@ public class SimulatorTests extends ESTestCase {
             List.<Expression>of(yAttr),
             List.<NamedExpression>of(new Alias(Source.EMPTY, "s0", new Sum(Source.EMPTY, xAttr)), yAttr)
         );
-        Simulator.Result result = simulator.simulate(aggregate);
+        Result result = simulator.simulate(aggregate);
         assertThat(result.numRows(), equalTo(1));
         assertThat(result.getColumn("s0").values().get(0), equalTo(5L));
         assertThat(result.getColumn("y").values().get(0), equalTo(3));
@@ -697,7 +694,7 @@ public class SimulatorTests extends ESTestCase {
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var xAttr = from.output().get(0);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", new Trim(Source.EMPTY, xAttr))));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().get(0), equalTo("hi"));
     }
@@ -712,7 +709,7 @@ public class SimulatorTests extends ESTestCase {
             from,
             List.of(new Alias(Source.EMPTY, "y", new ToUpper(Source.EMPTY, xAttr, EsqlTestUtils.TEST_CFG)))
         );
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().get(0), equalTo("HELLO"));
     }
@@ -727,7 +724,7 @@ public class SimulatorTests extends ESTestCase {
             from,
             List.of(new Alias(Source.EMPTY, "y", new ToLower(Source.EMPTY, xAttr, EsqlTestUtils.TEST_CFG)))
         );
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().get(0), equalTo("hello"));
     }
@@ -738,7 +735,7 @@ public class SimulatorTests extends ESTestCase {
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var xAttr = from.output().get(0);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", new Reverse(Source.EMPTY, xAttr))));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().get(0), equalTo("olleh"));
     }
@@ -752,7 +749,7 @@ public class SimulatorTests extends ESTestCase {
         var trimmed = new Trim(Source.EMPTY, xAttr);
         var upper = new ToUpper(Source.EMPTY, trimmed, EsqlTestUtils.TEST_CFG);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", upper)));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().get(0), equalTo("HI"));
     }
@@ -763,7 +760,7 @@ public class SimulatorTests extends ESTestCase {
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var xAttr = from.output().get(0);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", new Length(Source.EMPTY, xAttr))));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.INTEGER));
         assertThat(result.getColumn("y").values().get(0), equalTo(5L));
     }
@@ -774,7 +771,7 @@ public class SimulatorTests extends ESTestCase {
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var xAttr = from.output().get(0);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", new Length(Source.EMPTY, xAttr))));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.INTEGER));
         assertThat(result.getColumn("y").values().get(0), equalTo(0L));
     }
@@ -789,7 +786,7 @@ public class SimulatorTests extends ESTestCase {
         var aAttr = from.output().get(0);
         var bAttr = from.output().get(1);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "c", new Concat(Source.EMPTY, aAttr, List.of(bAttr)))));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("c").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("c").values().get(0), equalTo("foobar"));
     }
@@ -801,7 +798,7 @@ public class SimulatorTests extends ESTestCase {
         var xAttr = from.output().get(0);
         var lenLit = new Literal(Source.EMPTY, 3, DataType.INTEGER);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", new Left(Source.EMPTY, xAttr, lenLit))));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().get(0), equalTo("hel"));
     }
@@ -813,7 +810,7 @@ public class SimulatorTests extends ESTestCase {
         var xAttr = from.output().get(0);
         var lenLit = new Literal(Source.EMPTY, 3, DataType.INTEGER);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", new Right(Source.EMPTY, xAttr, lenLit))));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().get(0), equalTo("llo"));
     }
@@ -826,7 +823,7 @@ public class SimulatorTests extends ESTestCase {
         var xAttr = from.output().get(0);
         var prefixLit = new Literal(Source.EMPTY, new BytesRef("foo"), DataType.KEYWORD);
         var filter = new Filter(Source.EMPTY, from, new StartsWith(Source.EMPTY, xAttr, prefixLit));
-        Simulator.Result result = new Simulator(schema, data).simulate(filter);
+        Result result = new Simulator(schema, data).simulate(filter);
         assertThat(result.numRows(), equalTo(1));
         assertThat(result.getColumn("x").values().get(0), equalTo("foobar"));
     }
@@ -839,7 +836,7 @@ public class SimulatorTests extends ESTestCase {
         var xAttr = from.output().get(0);
         var suffixLit = new Literal(Source.EMPTY, new BytesRef("bar"), DataType.KEYWORD);
         var filter = new Filter(Source.EMPTY, from, new EndsWith(Source.EMPTY, xAttr, suffixLit));
-        Simulator.Result result = new Simulator(schema, data).simulate(filter);
+        Result result = new Simulator(schema, data).simulate(filter);
         assertThat(result.numRows(), equalTo(1));
         assertThat(result.getColumn("x").values().get(0), equalTo("foobar"));
     }
@@ -856,7 +853,7 @@ public class SimulatorTests extends ESTestCase {
             from,
             List.of(new Alias(Source.EMPTY, "y", new Substring(Source.EMPTY, xAttr, startLit, lenLit)))
         );
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().get(0), equalTo("ell"));
     }
@@ -865,7 +862,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=7, y=3 | EVAL z = x % y"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("x", DataType.INTEGER, List.of(7)),
                     new Simulator.Column("y", DataType.INTEGER, List.of(3)),
                     new Simulator.Column("z", DataType.INTEGER, List.of(1L))
@@ -875,13 +872,13 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testEvalDivByZero() throws Exception {
-        Simulator.Result result = simulate("ROW x=5 | EVAL z = x / 0");
+        Result result = simulate("ROW x=5 | EVAL z = x / 0");
         assertThat(result.columns().get(1).name(), equalTo("z"));
         assertNull(result.columns().get(1).values().get(0));
     }
 
     public void testEvalModByZero() throws Exception {
-        Simulator.Result result = simulate("ROW x=5 | EVAL z = x % 0");
+        Result result = simulate("ROW x=5 | EVAL z = x % 0");
         assertThat(result.columns().get(1).name(), equalTo("z"));
         assertNull(result.columns().get(1).values().get(0));
     }
@@ -890,7 +887,7 @@ public class SimulatorTests extends ESTestCase {
         assertThat(
             simulate("ROW x=3 | EVAL z = -x"),
             equalTo(
-                new Simulator.Result(
+                new Result(
                     new Simulator.Column("x", DataType.INTEGER, List.of(3)),
                     new Simulator.Column("z", DataType.INTEGER, List.of(-3L))
                 )
@@ -906,12 +903,12 @@ public class SimulatorTests extends ESTestCase {
         var aAttr = from.output().get(0);
         var neg = new Neg(Source.EMPTY, aAttr);
         var eval = new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "z", neg)));
-        Simulator.Result result = new Simulator(schema, data).simulate(eval);
+        Result result = new Simulator(schema, data).simulate(eval);
         assertNull(result.getColumn("z").values().get(0));
     }
 
     public void testWhereGreaterThanOrEqual() throws Exception {
-        Simulator.Result result = simulate("FROM sample_data | WHERE event_duration >= 1756467");
+        Result result = simulate("FROM sample_data | WHERE event_duration >= 1756467");
         assertThat(result.numRows(), equalTo(5));
         for (Object val : result.getColumn("event_duration").values()) {
             assertTrue(((Number) val).longValue() >= 1756467);
@@ -919,7 +916,7 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testWhereLessThanOrEqual() throws Exception {
-        Simulator.Result result = simulate("FROM sample_data | WHERE event_duration <= 1756467");
+        Result result = simulate("FROM sample_data | WHERE event_duration <= 1756467");
         assertThat(result.numRows(), equalTo(3));
         for (Object val : result.getColumn("event_duration").values()) {
             assertTrue(((Number) val).longValue() <= 1756467);
@@ -927,7 +924,7 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testWhereEquals() throws Exception {
-        Simulator.Result result = simulate("FROM sample_data | WHERE event_duration == 1756467");
+        Result result = simulate("FROM sample_data | WHERE event_duration == 1756467");
         assertThat(result.numRows(), equalTo(1));
         assertThat(result.getColumn("event_duration").values().get(0), equalTo(1756467L));
     }
@@ -944,12 +941,12 @@ public class SimulatorTests extends ESTestCase {
         var aAttr = from.output().get(0);
         var neq = new NotEquals(Source.EMPTY, aAttr, new Literal(Source.EMPTY, 2, DataType.INTEGER));
         var filter = new Filter(Source.EMPTY, from, neq);
-        Simulator.Result result = new Simulator(schema, data).simulate(filter);
+        Result result = new Simulator(schema, data).simulate(filter);
         assertThat(result.numRows(), equalTo(2));
         assertThat(result.getColumn("a").values(), equalTo(List.of(1L, 3L)));
     }
 
-    private Simulator.Result simulate(String statement) throws IOException {
+    private Result simulate(String statement) throws IOException {
         return simulator.simulate(parser.createStatement(statement).plan());
     }
 }

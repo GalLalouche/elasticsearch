@@ -80,7 +80,7 @@ public class SimulatorPropertyIT {
     private static RestClient restClient;
 
     @BeforeClass
-    public static void connectClient() throws Throwable {
+    public static void connectClient() {
         String[] addresses = cluster.getHttpAddresses().split(",");
         HttpHost[] hosts = new HttpHost[addresses.length];
         for (int i = 0; i < addresses.length; i++) {
@@ -135,10 +135,10 @@ public class SimulatorPropertyIT {
             }
 
             Simulator simulator = needsIndex ? new Simulator(tc.schema(), tc.data()) : new Simulator();
-            Simulator.Result simResult = simulator.simulate(tc.plan());
+            Result simResult = simulator.simulate(tc.plan());
 
             Map<String, Object> esResponse = runEsqlQuery(tc.query());
-            Simulator.Result esResult = responseToResult(esResponse);
+            Result esResult = responseToResult(esResponse);
 
             List<Simulator.Column> simColumns = sortedColumns(simResult.columns());
             List<Simulator.Column> esCols = sortedColumns(esResult.columns());
@@ -543,7 +543,7 @@ public class SimulatorPropertyIT {
     }
 
     @SuppressWarnings("unchecked")
-    private static Simulator.Result responseToResult(Map<String, Object> response) {
+    private static Result responseToResult(Map<String, Object> response) {
         List<Map<String, String>> columns = (List<Map<String, String>>) response.get("columns");
         List<List<Object>> values = (List<List<Object>>) response.get("values");
 
@@ -560,7 +560,7 @@ public class SimulatorPropertyIT {
             }
             resultColumns.add(new Simulator.Column(name, type, colValues));
         }
-        return new Simulator.Result(resultColumns);
+        return new Result(resultColumns);
     }
 
     private static List<Simulator.Column> sortedColumns(List<Simulator.Column> columns) {
@@ -607,7 +607,7 @@ public class SimulatorPropertyIT {
      * Assumes ES default null ordering (nulls last for ASC, first for DESC);
      * the generator always uses {@link Order.NullsPosition#ANY}.
      */
-    private static void verifySortOrder(List<Order> orders, Simulator.Result result, String label, String query) {
+    private static void verifySortOrder(List<Order> orders, Result result, String label, String query) {
         int numRows = result.numRows();
         if (numRows <= 1) {
             return;

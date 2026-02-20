@@ -138,7 +138,7 @@ public class SimulatorBugTests {
         SimSchema schema = new SimSchema("sim_test", List.of(new SimSchema.SimColumn("a", DataType.KEYWORD)));
         List<Map<String, Object>> data = List.of(Map.of("a", "Hello"));
         EsRelation rel = buildEsRelation(schema);
-        Attribute a = rel.output().get(0);
+        Attribute a = rel.output().getFirst();
         LogicalPlan plan = new Eval(
             Source.EMPTY,
             rel,
@@ -161,8 +161,8 @@ public class SimulatorBugTests {
 
     private static void assertDivergence(SimSchema schema, List<Map<String, Object>> data, LogicalPlan plan, SimBug bug)
         throws IOException {
-        Simulator.Result correctResult = new Simulator(schema, data).simulate(plan);
-        Simulator.Result buggedResult = new Simulator(schema, data, bug).simulate(plan);
+        Result correctResult = new Simulator(schema, data).simulate(plan);
+        Result buggedResult = new Simulator(schema, data, bug).simulate(plan);
         if (correctResult.equals(buggedResult)) {
             throw new AssertionError(Strings.format("Expected divergence with bug %s but results were equal: %s", bug, correctResult));
         }

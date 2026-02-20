@@ -425,7 +425,9 @@ public class ForcedShrinkerIT extends ESRestTestCase {
                     }
                 }
             }
-            case InlineStats is -> results.addAll(shrinkAggregateExprs(is.aggregate()).stream().map(a -> new InlineStats(is.source(), a)).toList());
+            case InlineStats is -> results.addAll(
+                shrinkAggregateExprs(is.aggregate()).stream().map(a -> new InlineStats(is.source(), a)).toList()
+            );
             case Aggregate agg -> results.addAll(shrinkAggregateExprs(agg));
             default -> {
                 /* no expressions to shrink */ }
@@ -502,18 +504,15 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     private boolean queryMismatches(String query, SimSchema schema, List<Map<String, Object>> rows, LogicalPlan plan) {
         try {
             Map<String, Object> esResponse = runEsqlQuery(query);
-            Simulator.Result esResult = responseToResult(esResponse);
-
-            Simulator simulator = new Simulator(schema, rows);
-            Simulator.Result simResult = simulator.simulate(plan);
-
+            Result esResult = responseToResult(esResponse);
+            Result simResult = new Simulator(schema, rows).simulate(plan);
             return resultsMatch(simResult, esResult) == false;
         } catch (Exception e) {
             return false;
         }
     }
 
-    private static boolean resultsMatch(Simulator.Result simResult, Simulator.Result esResult) {
+    private static boolean resultsMatch(Result simResult, Result esResult) {
         List<Simulator.Column> simColumns = sortedColumns(simResult.columns());
         List<Simulator.Column> esCols = sortedColumns(esResult.columns());
         if (simColumns.size() != esCols.size()) {
@@ -614,7 +613,7 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     }
 
     @SuppressWarnings("unchecked")
-    private static Simulator.Result responseToResult(Map<String, Object> response) {
+    private static Result responseToResult(Map<String, Object> response) {
         List<Map<String, String>> columns = (List<Map<String, String>>) response.get("columns");
         List<List<Object>> values = (List<List<Object>>) response.get("values");
 
@@ -631,7 +630,7 @@ public class ForcedShrinkerIT extends ESRestTestCase {
             }
             resultColumns.add(new Simulator.Column(name, type, colValues));
         }
-        return new Simulator.Result(resultColumns);
+        return new Result(resultColumns);
     }
 
     private static List<Simulator.Column> sortedColumns(List<Simulator.Column> columns) {

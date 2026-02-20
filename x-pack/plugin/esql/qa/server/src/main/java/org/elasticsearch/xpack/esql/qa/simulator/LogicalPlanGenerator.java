@@ -143,19 +143,17 @@ public class LogicalPlanGenerator {
                     .map(a -> new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic()))
                     .toList()
             );
-            case OrderBy orderBy -> {
-                yield new OrderBy(
-                    orderBy.source(),
-                    resolvedChild,
-                    orderBy.order()
-                        .stream()
-                        .map(o -> new Order(o.source(), resolveExpr(o.child(), canonical), o.direction(), o.nullsPosition()))
-                        .toList()
-                );
-            }
+            case OrderBy orderBy -> new OrderBy(
+                orderBy.source(),
+                resolvedChild,
+                orderBy.order()
+                    .stream()
+                    .map(o -> new Order(o.source(), resolveExpr(o.child(), canonical), o.direction(), o.nullsPosition()))
+                    .toList()
+            );
             case Aggregate agg -> {
                 List<Expression> newGroupings = agg.groupings().stream().map(e -> resolveExpr(e, canonical)).toList();
-                List<NamedExpression> newAggregates = agg.aggregates().stream().<NamedExpression>map(ne -> switch (ne) {
+                List<NamedExpression> newAggregates = agg.aggregates().stream().map(ne -> switch (ne) {
                     case Alias a -> new Alias(a.source(), a.name(), resolveExpr(a.child(), canonical), a.id(), a.synthetic());
                     case Attribute attr -> (NamedExpression) canonical.getOrDefault(attr.name(), attr);
                     default -> ne;
@@ -423,19 +421,15 @@ public class LogicalPlanGenerator {
             new Mod(Source.EMPTY, left, right)
         );
         // ~20% chance of wrapping in negation
-        if (random.nextInt(0, 4) == 0) {
-            result = new Neg(Source.EMPTY, result);
-        }
-        return result;
+        return random.nextInt(0, 4) == 0 ? new Neg(Source.EMPTY, result) : result;
     }
 
     private static Expression generateLeaf(List<Attribute> integerAttrs, List<Attribute> keywordAttrs, SourceOfRandomness random) {
         // If no integer columns, fall back to LENGTH(keyword) if available, or a literal
         if (integerAttrs.isEmpty()) {
-            if (keywordAttrs.isEmpty() == false) {
-                return new Length(Source.EMPTY, random.choose(keywordAttrs));
-            }
-            return new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
+            return keywordAttrs.isEmpty()
+                ? new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER)
+                : new Length(Source.EMPTY, random.choose(keywordAttrs));
         }
         // 20% chance of LENGTH(keyword) if keyword columns exist
         if (keywordAttrs.isEmpty() == false && random.nextInt(0, 4) == 0) {
@@ -454,34 +448,31 @@ public class LogicalPlanGenerator {
         }
         Expression child = generateKeywordExpression(keywordAttrs, depth - 1, random);
         // nextInt is inclusive on both bounds
-        return switch (random.nextInt(0, 7)) {
-            case 0 -> new Trim(Source.EMPTY, child);
-            case 1 -> new ToUpper(Source.EMPTY, child, EsqlTestUtils.TEST_CFG);
-            case 2 -> new ToLower(Source.EMPTY, child, EsqlTestUtils.TEST_CFG);
-            case 3 -> new Reverse(Source.EMPTY, child);
-            case 4 -> {
-                int nRest = random.nextInt(1, 2);
-                List<Expression> rest = new ArrayList<>(nRest);
-                for (int j = 0; j < nRest; j++) {
-                    rest.add(generateKeywordExpression(keywordAttrs, depth - 1, random));
-                }
-                yield new Concat(Source.EMPTY, child, rest);
-            }
-            case 5 -> {
-                Expression len = new Literal(Source.EMPTY, random.nextInt(1, 5), DataType.INTEGER);
-                yield new Left(Source.EMPTY, child, len);
-            }
-            case 6 -> {
-                Expression len = new Literal(Source.EMPTY, random.nextInt(1, 5), DataType.INTEGER);
-                yield new Right(Source.EMPTY, child, len);
-            }
-            case 7 -> {
-                Expression start = new Literal(Source.EMPTY, random.nextInt(1, 3), DataType.INTEGER);
-                Expression len = random.nextBoolean() ? new Literal(Source.EMPTY, random.nextInt(1, 4), DataType.INTEGER) : null;
-                yield new Substring(Source.EMPTY, child, start, len);
-            }
-            default -> throw new IllegalStateException();
-        };
+        return GenUtils.<Expression>choose(
+            random,
+            new Trim(Source.EMPTY, child),
+            new ToUpper(Source.EMPTY, child, EsqlTestUtils.TEST_CFG),
+            new ToLower(Source.EMPTY, child, EsqlTestUtils.TEST_CFG),
+            new Reverse(Source.EMPTY, child),
+            generateConcat(keywordAttrs, depth, random, child),
+            new Left(Source.EMPTY, child, new Literal(Source.EMPTY, random.nextInt(1, 5), DataType.INTEGER)),
+            new Right(Source.EMPTY, child, new Literal(Source.EMPTY, random.nextInt(1, 5), DataType.INTEGER)),
+            new Substring(
+                Source.EMPTY,
+                child,
+                new Literal(Source.EMPTY, random.nextInt(1, 3), DataType.INTEGER),
+                random.nextBoolean() ? new Literal(Source.EMPTY, random.nextInt(1, 4), DataType.INTEGER) : null
+            )
+        );
+    }
+
+    private static Concat generateConcat(List<Attribute> keywordAttrs, int depth, SourceOfRandomness random, Expression child) {
+        int nRest = random.nextInt(1, 2);
+        List<Expression> rest = new ArrayList<>(nRest);
+        for (int j = 0; j < nRest; j++) {
+            rest.add(generateKeywordExpression(keywordAttrs, depth - 1, random));
+        }
+        return new Concat(Source.EMPTY, child, rest);
     }
 
     private static Expression generateKeywordLeaf(List<Attribute> keywordAttrs, SourceOfRandomness random) {
