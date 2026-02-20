@@ -31,6 +31,8 @@ import org.elasticsearch.xcontent.json.JsonXContent;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
+import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
@@ -257,6 +259,9 @@ public class SimulatorPropertyIT {
                 }
             }
 
+            // Strategy 3: Remove individual aggregates from INLINE STATS / STATS (keep N-1)
+            removeIndividualAggregates(candidates, larger);
+
             // Strategy 4: Simplify expressions to sub-expressions
             addExpressionShrinks(candidates, larger);
 
@@ -330,7 +335,56 @@ public class SimulatorPropertyIT {
                         }
                     }
                 }
+                case InlineStats is -> shrinkAggregateExpressions(candidates, larger, is.aggregate(), is);
+                case Aggregate agg -> shrinkAggregateExpressions(candidates, larger, agg, null);
                 default -> { /* no expressions to shrink */ }
+            }
+        }
+
+        /** Tries replacing each aggregate field expression with its sub-expressions. */
+        private void shrinkAggregateExpressions(
+            List<TestCase> candidates,
+            TestCase larger,
+            Aggregate agg,
+            InlineStats wrapper
+        ) {
+            for (int a = 0; a < agg.aggregates().size(); a++) {
+                if (agg.aggregates().get(a) instanceof Alias alias && alias.child() instanceof AggregateFunction aggFunc) {
+                    for (Expression sub : collectSubExpressions(aggFunc.field())) {
+                        List<NamedExpression> newAggs = new ArrayList<>(agg.aggregates());
+                        newAggs.set(a, new Alias(alias.source(), alias.name(), aggFunc.withField(sub)));
+                        Aggregate newAgg = new Aggregate(agg.source(), agg.child(), agg.groupings(), newAggs);
+                        LogicalPlan candidate = wrapper != null ? new InlineStats(wrapper.source(), newAgg) : newAgg;
+                        addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(candidate));
+                    }
+                }
+            }
+        }
+
+        /** Tries removing individual aggregate aliases from INLINE STATS or STATS. */
+        private void removeIndividualAggregates(List<TestCase> candidates, TestCase larger) {
+            Aggregate agg;
+            if (larger.plan() instanceof InlineStats is) {
+                agg = is.aggregate();
+            } else if (larger.plan() instanceof Aggregate a) {
+                agg = a;
+            } else {
+                return;
+            }
+            // Aggregate aliases come before grouping keys in the aggregates list
+            int numGroupings = agg.groupings().size();
+            int numAggAliases = agg.aggregates().size() - numGroupings;
+            if (numAggAliases <= 1) {
+                return;
+            }
+            for (int i = 0; i < numAggAliases; i++) {
+                List<NamedExpression> reduced = new ArrayList<>(agg.aggregates());
+                reduced.remove(i);
+                Aggregate newAgg = new Aggregate(agg.source(), agg.child(), agg.groupings(), reduced);
+                LogicalPlan candidate = larger.plan() instanceof InlineStats is
+                    ? new InlineStats(is.source(), newAgg)
+                    : newAgg;
+                addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(candidate));
             }
         }
 
