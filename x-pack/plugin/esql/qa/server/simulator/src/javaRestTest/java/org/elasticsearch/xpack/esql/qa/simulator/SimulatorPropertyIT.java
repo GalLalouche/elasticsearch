@@ -83,6 +83,7 @@ public class SimulatorPropertyIT {
         }
     }
 
+    /** A test case: {@code schema} and {@code data} are null for ROW plans (no index needed), non-null for FROM plans. */
     record TestCase(@Nullable SimSchema schema, @Nullable List<Map<String, Object>> data, LogicalPlan plan, String query) {
         TestCase {
             assert (schema == null) == (data == null);
@@ -102,7 +103,7 @@ public class SimulatorPropertyIT {
         boolean needsIndex = tc.schema() != null;
 
         if (needsIndex) {
-            // Clean up any stale index from a previous run, then set up fresh
+            // Delete first — a previously crashed trial may have left the index behind
             deleteIndex(tc.schema().indexName());
             createIndex(tc.schema());
         }
@@ -117,7 +118,6 @@ public class SimulatorPropertyIT {
             Map<String, Object> esResponse = runEsqlQuery(tc.query());
             Simulator.Result esResult = responseToResult(esResponse);
 
-            // Compare (sort columns by name for consistent ordering)
             List<Simulator.Column> simColumns = sortedColumns(simResult.columns());
             List<Simulator.Column> esCols = sortedColumns(esResult.columns());
 
@@ -157,7 +157,8 @@ public class SimulatorPropertyIT {
                     verifySortOrder(effectiveSort, simResult, "simulator", tc.query());
                     verifySortOrder(effectiveSort, esResult, "ES", tc.query());
                 } catch (IllegalArgumentException e) {
-                    // Sort key column not in final output (dropped by KEEP/DROP after SORT) — can't verify order
+                    // Safe to skip: sort key was dropped by KEEP/DROP after SORT, so we can't verify
+                    // order — but the multiset row comparison below still catches data mismatches.
                     if (e.getMessage() == null || e.getMessage().startsWith("Column not found:") == false) {
                         throw e;
                     }

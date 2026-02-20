@@ -12,9 +12,7 @@ import com.pholser.junit.quickcheck.Property;
 import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
-import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
-import org.elasticsearch.xpack.esql.plan.logical.Row;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 import org.junit.runner.RunWith;
 
@@ -44,7 +42,8 @@ public class ShrinkingValidityTests {
     }
 
     private static List<String> validateReferences(LogicalPlan plan) {
-        if (plan instanceof EsRelation || plan instanceof Row || (plan instanceof UnaryPlan) == false) {
+        // Only UnaryPlan nodes reference child attributes that could be stale
+        if ((plan instanceof UnaryPlan) == false) {
             return List.of();
         }
         var unary = (UnaryPlan) plan;

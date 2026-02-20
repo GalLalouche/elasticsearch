@@ -134,7 +134,6 @@ public class Simulator {
         String pattern = relation.indexPattern().indexPattern();
         assert pattern.indexOf('*') == -1 : "Index patterns with wildcards are not supported yet in simulation, found: " + pattern;
 
-        // If in-memory data is provided for this index, use it directly
         if (schema != null && data != null && pattern.equals(schema.indexName())) {
             return buildResultFromMemory(schema, data);
         }
@@ -457,7 +456,7 @@ public class Simulator {
                 case ToLower toLower -> evalUnaryString(toLower.field(), activeBug, s -> s.toLowerCase(Locale.ROOT));
                 case Reverse rev -> evalUnaryString(rev.field(), activeBug, s -> new StringBuilder(s).reverse().toString());
                 case Length length -> {
-                    var input = evaluate(length.field(), activeBug);
+                    UnnamedColumn input = evaluate(length.field(), activeBug);
                     yield new UnnamedColumn(DataType.INTEGER, IntStream.range(0, input.values.size()).mapToObj(i -> {
                         Object v = input.values.get(i);
                         if (v == null) {
@@ -482,80 +481,80 @@ public class Simulator {
                     }).toList());
                 }
                 case Left left -> {
-                    var strCol = evaluate(left.children().get(0), activeBug);
-                    var lenCol = evaluate(left.children().get(1), activeBug);
+                    UnnamedColumn strCol = evaluate(left.children().get(0), activeBug);
+                    UnnamedColumn lenCol = evaluate(left.children().get(1), activeBug);
                     yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object s = strCol.values.get(i);
-                        Object l = lenCol.values.get(i);
-                        if (s == null || l == null) {
+                        Object strVal = strCol.values.get(i);
+                        Object lenVal = lenCol.values.get(i);
+                        if (strVal == null || lenVal == null) {
                             return null;
                         }
-                        String str = s.toString();
-                        int len = ((Number) l).intValue();
+                        String str = strVal.toString();
+                        int len = ((Number) lenVal).intValue();
                         return (Object) str.substring(0, Math.min(Math.max(0, len), str.length()));
                     }).toList());
                 }
                 case Right right -> {
-                    var strCol = evaluate(right.children().get(0), activeBug);
-                    var lenCol = evaluate(right.children().get(1), activeBug);
+                    UnnamedColumn strCol = evaluate(right.children().get(0), activeBug);
+                    UnnamedColumn lenCol = evaluate(right.children().get(1), activeBug);
                     yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object s = strCol.values.get(i);
-                        Object l = lenCol.values.get(i);
-                        if (s == null || l == null) {
+                        Object strVal = strCol.values.get(i);
+                        Object lenVal = lenCol.values.get(i);
+                        if (strVal == null || lenVal == null) {
                             return null;
                         }
-                        String str = s.toString();
-                        int len = ((Number) l).intValue();
+                        String str = strVal.toString();
+                        int len = ((Number) lenVal).intValue();
                         return (Object) str.substring(Math.max(0, str.length() - len));
                     }).toList());
                 }
                 case StartsWith sw -> {
-                    var strCol = evaluate(sw.children().get(0), activeBug);
-                    var prefixCol = evaluate(sw.children().get(1), activeBug);
+                    UnnamedColumn strCol = evaluate(sw.children().get(0), activeBug);
+                    UnnamedColumn prefixCol = evaluate(sw.children().get(1), activeBug);
                     yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object s = strCol.values.get(i);
-                        Object p = prefixCol.values.get(i);
-                        if (s == null || p == null) {
+                        Object strVal = strCol.values.get(i);
+                        Object prefixVal = prefixCol.values.get(i);
+                        if (strVal == null || prefixVal == null) {
                             return null;
                         }
-                        return (Object) s.toString().startsWith(p.toString());
+                        return (Object) strVal.toString().startsWith(prefixVal.toString());
                     }).toList());
                 }
                 case EndsWith ew -> {
-                    var strCol = evaluate(ew.children().get(0), activeBug);
-                    var suffixCol = evaluate(ew.children().get(1), activeBug);
+                    UnnamedColumn strCol = evaluate(ew.children().get(0), activeBug);
+                    UnnamedColumn suffixCol = evaluate(ew.children().get(1), activeBug);
                     yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object s = strCol.values.get(i);
-                        Object p = suffixCol.values.get(i);
-                        if (s == null || p == null) {
+                        Object strVal = strCol.values.get(i);
+                        Object suffixVal = suffixCol.values.get(i);
+                        if (strVal == null || suffixVal == null) {
                             return null;
                         }
-                        return (Object) s.toString().endsWith(p.toString());
+                        return (Object) strVal.toString().endsWith(suffixVal.toString());
                     }).toList());
                 }
                 case Substring substring -> {
-                    var strCol = evaluate(substring.children().get(0), activeBug);
-                    var startCol = evaluate(substring.children().get(1), activeBug);
+                    UnnamedColumn strCol = evaluate(substring.children().get(0), activeBug);
+                    UnnamedColumn startCol = evaluate(substring.children().get(1), activeBug);
                     UnnamedColumn lenCol = substring.children().size() > 2 ? evaluate(substring.children().get(2), activeBug) : null;
                     yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
-                        Object sv = strCol.values.get(i);
-                        Object stv = startCol.values.get(i);
-                        if (sv == null || stv == null) {
+                        Object strVal = strCol.values.get(i);
+                        Object startVal = startCol.values.get(i);
+                        if (strVal == null || startVal == null) {
                             return null;
                         }
-                        String str = sv.toString();
-                        int start = ((Number) stv).intValue();
+                        String str = strVal.toString();
+                        int start = ((Number) startVal).intValue();
                         // 1-based start; negative start = from end; 0 = beginning
                         int indexStart = start > 0 ? start - 1 : start < 0 ? Math.max(0, str.length() + start) : 0;
                         indexStart = Math.min(indexStart, str.length());
                         if (lenCol == null) {
                             return (Object) str.substring(indexStart);
                         }
-                        Object lv = lenCol.values.get(i);
-                        if (lv == null) {
+                        Object lenVal = lenCol.values.get(i);
+                        if (lenVal == null) {
                             return null;
                         }
-                        int len = ((Number) lv).intValue();
+                        int len = ((Number) lenVal).intValue();
                         int indexEnd = Math.min(str.length(), indexStart + Math.max(0, len));
                         return (Object) str.substring(indexStart, indexEnd);
                     }).toList());
@@ -594,7 +593,7 @@ public class Simulator {
         }
 
         private UnnamedColumn evalUnaryString(Expression fieldExpr, SimBug activeBug, UnaryOperator<String> op) {
-            var input = evaluate(fieldExpr, activeBug);
+            UnnamedColumn input = evaluate(fieldExpr, activeBug);
             return new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, input.values.size()).mapToObj(i -> {
                 Object v = input.values.get(i);
                 if (v == null) {

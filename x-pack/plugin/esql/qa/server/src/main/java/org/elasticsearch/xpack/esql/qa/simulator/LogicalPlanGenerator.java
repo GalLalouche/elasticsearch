@@ -266,7 +266,7 @@ public class LogicalPlanGenerator {
         };
     }
 
-    /** Randomly wraps the given plan in one additional operator, or returns it unchanged (identity). */
+    /** Randomly wraps the given plan in one additional operator, or returns it unchanged (identity). Options are lazy (Suppliers) so only the chosen branch consumes random state. */
     static LogicalPlan wrapLayer(LogicalPlan current, SourceOfRandomness random, GenerationStatus status) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
@@ -345,11 +345,11 @@ public class LogicalPlanGenerator {
         // When no integer columns, or sometimes when keywords exist, generate a string predicate
         if (keywordAttrs.isEmpty() == false && (integerAttrs.isEmpty() || random.nextBoolean())) {
             Expression str = random.choose(keywordAttrs);
-            String affix = random.choose(List.of("f", "B", "ba", "foo"));
-            Expression affixLit = new Literal(Source.EMPTY, new BytesRef(affix), DataType.KEYWORD);
+            String pattern = random.choose(List.of("f", "B", "ba", "foo"));
+            Expression patternLit = new Literal(Source.EMPTY, new BytesRef(pattern), DataType.KEYWORD);
             Expression cond = random.nextBoolean()
-                ? new StartsWith(Source.EMPTY, str, affixLit)
-                : new EndsWith(Source.EMPTY, str, affixLit);
+                ? new StartsWith(Source.EMPTY, str, patternLit)
+                : new EndsWith(Source.EMPTY, str, patternLit);
             return new Filter(Source.EMPTY, current, cond);
         }
         Expression left = generateExpression(integerAttrs, keywordAttrs, random, status);
@@ -456,6 +456,7 @@ public class LogicalPlanGenerator {
         }
         Expression left = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
         Expression right = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
+        // nextInt is inclusive on both bounds
         return switch (random.nextInt(0, 2)) {
             case 0 -> new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
             case 1 -> new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
@@ -488,6 +489,7 @@ public class LogicalPlanGenerator {
             return generateKeywordLeaf(keywordAttrs, random);
         }
         Expression child = generateKeywordExpression(keywordAttrs, depth - 1, random);
+        // nextInt is inclusive on both bounds
         return switch (random.nextInt(0, 7)) {
             case 0 -> new Trim(Source.EMPTY, child);
             case 1 -> new ToUpper(Source.EMPTY, child, EsqlTestUtils.TEST_CFG);
@@ -525,6 +527,7 @@ public class LogicalPlanGenerator {
         return new Literal(Source.EMPTY, new BytesRef(random.choose(KEYWORD_POOL)), DataType.KEYWORD);
     }
 
+    /** Picks a random subset of {@code attrs}. Silently clamps to {@code attrs.size()} when the list is smaller than {@code min}. */
     private static List<Attribute> generateSubset(SourceOfRandomness random, List<Attribute> attrs, int min, int max) {
         List<Attribute> shuffled = new ArrayList<>(attrs);
         Collections.shuffle(shuffled, random.toJDKRandom());
