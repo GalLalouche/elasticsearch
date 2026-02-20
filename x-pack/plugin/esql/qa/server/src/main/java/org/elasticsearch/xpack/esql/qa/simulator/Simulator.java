@@ -24,6 +24,17 @@ import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Concat;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.EndsWith;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Left;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Length;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Reverse;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Right;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.StartsWith;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Substring;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToLower;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToUpper;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Trim;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
@@ -49,10 +60,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.IntPredicate;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -435,6 +448,118 @@ public class Simulator {
                 case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r) -> r == 0 ? null : l / r);
                 case GreaterThan gt -> evalComparison(gt.left(), gt.right(), activeBug, cmp -> cmp > 0);
                 case LessThan lt -> evalComparison(lt.left(), lt.right(), activeBug, cmp -> cmp < 0);
+                case Trim trim -> evalUnaryString(trim.field(), activeBug, String::trim);
+                case ToUpper toUpper -> evalUnaryString(
+                    toUpper.field(),
+                    activeBug,
+                    s -> activeBug == SimBug.TO_UPPER_IS_TO_LOWER ? s.toLowerCase(Locale.ROOT) : s.toUpperCase(Locale.ROOT)
+                );
+                case ToLower toLower -> evalUnaryString(toLower.field(), activeBug, s -> s.toLowerCase(Locale.ROOT));
+                case Reverse rev -> evalUnaryString(rev.field(), activeBug, s -> new StringBuilder(s).reverse().toString());
+                case Length length -> {
+                    var input = evaluate(length.field(), activeBug);
+                    yield new UnnamedColumn(DataType.INTEGER, IntStream.range(0, input.values.size()).mapToObj(i -> {
+                        Object v = input.values.get(i);
+                        if (v == null) {
+                            return null;
+                        }
+                        return (Object) (long) v.toString().length();
+                    }).toList());
+                }
+                case Concat concat -> {
+                    List<UnnamedColumn> args = concat.children().stream().map(child -> evaluate(child, activeBug)).toList();
+                    int numRows = args.getFirst().values.size();
+                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, numRows).mapToObj(i -> {
+                        StringBuilder sb = new StringBuilder();
+                        for (UnnamedColumn arg : args) {
+                            Object v = arg.values.get(i);
+                            if (v == null) {
+                                return null;
+                            }
+                            sb.append(v.toString());
+                        }
+                        return (Object) sb.toString();
+                    }).toList());
+                }
+                case Left left -> {
+                    var strCol = evaluate(left.children().get(0), activeBug);
+                    var lenCol = evaluate(left.children().get(1), activeBug);
+                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
+                        Object s = strCol.values.get(i);
+                        Object l = lenCol.values.get(i);
+                        if (s == null || l == null) {
+                            return null;
+                        }
+                        String str = s.toString();
+                        int len = ((Number) l).intValue();
+                        return (Object) str.substring(0, Math.min(Math.max(0, len), str.length()));
+                    }).toList());
+                }
+                case Right right -> {
+                    var strCol = evaluate(right.children().get(0), activeBug);
+                    var lenCol = evaluate(right.children().get(1), activeBug);
+                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
+                        Object s = strCol.values.get(i);
+                        Object l = lenCol.values.get(i);
+                        if (s == null || l == null) {
+                            return null;
+                        }
+                        String str = s.toString();
+                        int len = ((Number) l).intValue();
+                        return (Object) str.substring(Math.max(0, str.length() - len));
+                    }).toList());
+                }
+                case StartsWith sw -> {
+                    var strCol = evaluate(sw.children().get(0), activeBug);
+                    var prefixCol = evaluate(sw.children().get(1), activeBug);
+                    yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
+                        Object s = strCol.values.get(i);
+                        Object p = prefixCol.values.get(i);
+                        if (s == null || p == null) {
+                            return null;
+                        }
+                        return (Object) s.toString().startsWith(p.toString());
+                    }).toList());
+                }
+                case EndsWith ew -> {
+                    var strCol = evaluate(ew.children().get(0), activeBug);
+                    var suffixCol = evaluate(ew.children().get(1), activeBug);
+                    yield new UnnamedColumn(DataType.BOOLEAN, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
+                        Object s = strCol.values.get(i);
+                        Object p = suffixCol.values.get(i);
+                        if (s == null || p == null) {
+                            return null;
+                        }
+                        return (Object) s.toString().endsWith(p.toString());
+                    }).toList());
+                }
+                case Substring substring -> {
+                    var strCol = evaluate(substring.children().get(0), activeBug);
+                    var startCol = evaluate(substring.children().get(1), activeBug);
+                    UnnamedColumn lenCol = substring.children().size() > 2 ? evaluate(substring.children().get(2), activeBug) : null;
+                    yield new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values.size()).mapToObj(i -> {
+                        Object sv = strCol.values.get(i);
+                        Object stv = startCol.values.get(i);
+                        if (sv == null || stv == null) {
+                            return null;
+                        }
+                        String str = sv.toString();
+                        int start = ((Number) stv).intValue();
+                        // 1-based start; negative start = from end; 0 = beginning
+                        int indexStart = start > 0 ? start - 1 : start < 0 ? Math.max(0, str.length() + start) : 0;
+                        indexStart = Math.min(indexStart, str.length());
+                        if (lenCol == null) {
+                            return (Object) str.substring(indexStart);
+                        }
+                        Object lv = lenCol.values.get(i);
+                        if (lv == null) {
+                            return null;
+                        }
+                        int len = ((Number) lv).intValue();
+                        int indexEnd = Math.min(str.length(), indexStart + Math.max(0, len));
+                        return (Object) str.substring(indexStart, indexEnd);
+                    }).toList());
+                }
                 default -> throw new UnsupportedOperationException(Strings.format("Unsupported Expression in evaluate: [%s]", expression));
             };
         }
@@ -465,6 +590,17 @@ public class Simulator {
                     return null;
                 }
                 return (Object) longResult;
+            }).toList());
+        }
+
+        private UnnamedColumn evalUnaryString(Expression fieldExpr, SimBug activeBug, UnaryOperator<String> op) {
+            var input = evaluate(fieldExpr, activeBug);
+            return new UnnamedColumn(DataType.KEYWORD, IntStream.range(0, input.values.size()).mapToObj(i -> {
+                Object v = input.values.get(i);
+                if (v == null) {
+                    return null;
+                }
+                return (Object) op.apply(v.toString());
             }).toList());
         }
 

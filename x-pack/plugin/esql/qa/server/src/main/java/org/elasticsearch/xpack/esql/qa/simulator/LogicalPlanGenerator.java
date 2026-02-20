@@ -27,6 +27,17 @@ import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Concat;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.EndsWith;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Left;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Length;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Reverse;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Right;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.StartsWith;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Substring;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToLower;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToUpper;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Trim;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Sub;
@@ -65,7 +76,7 @@ public class LogicalPlanGenerator {
 
     private static final List<String> EVAL_ALIAS_POOL = List.of("z", "w", "v", "col_0", "col_1");
     private static final List<String> STATS_ALIAS_POOL = List.of("s0", "s1");
-    private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz");
+    private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz", " Hi ", "HELLO", "world");
     private static final List<String> AGG_FUNC_POOL = List.of("COUNT", "SUM", "MIN", "MAX");
 
     static LogicalPlan generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
@@ -182,6 +193,43 @@ public class LogicalPlanGenerator {
         if (expr instanceof Max e) {
             return new Max(e.source(), resolveExpr(e.field(), canonical));
         }
+        if (expr instanceof Trim e) {
+            return new Trim(e.source(), resolveExpr(e.field(), canonical));
+        }
+        if (expr instanceof ToUpper e) {
+            return new ToUpper(e.source(), resolveExpr(e.field(), canonical), e.configuration());
+        }
+        if (expr instanceof ToLower e) {
+            return new ToLower(e.source(), resolveExpr(e.field(), canonical), e.configuration());
+        }
+        if (expr instanceof Reverse e) {
+            return new Reverse(e.source(), resolveExpr(e.field(), canonical));
+        }
+        if (expr instanceof Length e) {
+            return new Length(e.source(), resolveExpr(e.field(), canonical));
+        }
+        if (expr instanceof Concat e) {
+            List<Expression> resolved = e.children().stream().map(c -> resolveExpr(c, canonical)).toList();
+            return new Concat(e.source(), resolved.get(0), resolved.subList(1, resolved.size()));
+        }
+        if (expr instanceof Left e) {
+            return new Left(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
+        }
+        if (expr instanceof Right e) {
+            return new Right(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
+        }
+        if (expr instanceof StartsWith e) {
+            return new StartsWith(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
+        }
+        if (expr instanceof EndsWith e) {
+            return new EndsWith(e.source(), resolveExpr(e.children().get(0), canonical), resolveExpr(e.children().get(1), canonical));
+        }
+        if (expr instanceof Substring e) {
+            Expression resolvedStr = resolveExpr(e.children().get(0), canonical);
+            Expression resolvedStart = resolveExpr(e.children().get(1), canonical);
+            Expression resolvedLen = e.children().size() > 2 ? resolveExpr(e.children().get(2), canonical) : null;
+            return new Substring(e.source(), resolvedStr, resolvedStart, resolvedLen);
+        }
         return expr;
     }
 
@@ -222,6 +270,7 @@ public class LogicalPlanGenerator {
     static LogicalPlan wrapLayer(LogicalPlan current, SourceOfRandomness random, GenerationStatus status) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
+        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
 
         List<Supplier<LogicalPlan>> options = new ArrayList<>();
         options.add(() -> current); // identity — allows shrinking layers away
@@ -229,9 +278,11 @@ public class LogicalPlanGenerator {
         if (available.size() > 1) {
             options.add(() -> wrapDrop(current, available, random));
         }
-        if (integerAttrs.isEmpty() == false) {
+        if (integerAttrs.isEmpty() == false || keywordAttrs.isEmpty() == false) {
             options.add(() -> wrapEval(current, random, status));
             options.add(() -> wrapFilter(current, integerAttrs, random, status));
+        }
+        if (integerAttrs.isEmpty() == false) {
             options.add(() -> generateAggregate(current, integerAttrs, available, random, status));
             // INLINE STATS after LIMIT is not supported by the ES|QL engine
             if (current.anyMatch(Limit.class::isInstance) == false) {
@@ -260,6 +311,7 @@ public class LogicalPlanGenerator {
     private static LogicalPlan wrapEval(LogicalPlan current, SourceOfRandomness random, GenerationStatus status) {
         List<Attribute> available = current.output();
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
+        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
         var existingNames = available.stream().map(Attribute::name).collect(Collectors.toSet());
         List<String> availableAliases = EVAL_ALIAS_POOL.stream().filter(n -> existingNames.contains(n) == false).toList();
         if (availableAliases.isEmpty()) {
@@ -271,7 +323,13 @@ public class LogicalPlanGenerator {
         Collections.shuffle(shuffled, random.toJDKRandom());
         List<Alias> fields = new ArrayList<>(nAliases);
         for (int i = 0; i < nAliases; i++) {
-            fields.add(new Alias(Source.EMPTY, shuffled.get(i), generateExpression(integerAttrs, random, status)));
+            Expression expr;
+            if (keywordAttrs.isEmpty() == false && (integerAttrs.isEmpty() || random.nextBoolean())) {
+                expr = generateKeywordExpression(keywordAttrs, EXPR_DEPTH, random);
+            } else {
+                expr = generateExpression(integerAttrs, keywordAttrs, random, status);
+            }
+            fields.add(new Alias(Source.EMPTY, shuffled.get(i), expr));
         }
         return new Eval(Source.EMPTY, current, fields);
     }
@@ -282,9 +340,21 @@ public class LogicalPlanGenerator {
         SourceOfRandomness random,
         GenerationStatus status
     ) {
-        Expression left = generateExpression(integerAttrs, random, status);
+        List<Attribute> available = current.output();
+        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
+        // When no integer columns, or sometimes when keywords exist, generate a string predicate
+        if (keywordAttrs.isEmpty() == false && (integerAttrs.isEmpty() || random.nextBoolean())) {
+            Expression str = random.choose(keywordAttrs);
+            String affix = random.choose(List.of("f", "B", "ba", "foo"));
+            Expression affixLit = new Literal(Source.EMPTY, new BytesRef(affix), DataType.KEYWORD);
+            Expression cond = random.nextBoolean()
+                ? new StartsWith(Source.EMPTY, str, affixLit)
+                : new EndsWith(Source.EMPTY, str, affixLit);
+            return new Filter(Source.EMPTY, current, cond);
+        }
+        Expression left = generateExpression(integerAttrs, keywordAttrs, random, status);
         Expression right = random.nextBoolean()
-            ? generateExpression(integerAttrs, random, status)
+            ? generateExpression(integerAttrs, keywordAttrs, random, status)
             : new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
         Expression cond = random.nextBoolean() ? new GreaterThan(Source.EMPTY, left, right) : new LessThan(Source.EMPTY, left, right);
         return new Filter(Source.EMPTY, current, cond);
@@ -302,13 +372,14 @@ public class LogicalPlanGenerator {
         GenerationStatus status
     ) {
         List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
+        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
         int maxOrders = Math.min(available.size(), 3);
         int nOrders = random.nextInt(1, maxOrders);
         List<Order> orders = new ArrayList<>(nOrders);
         for (int i = 0; i < nOrders; i++) {
             Expression expr = (integerAttrs.isEmpty() || random.nextBoolean())
                 ? random.choose(available)
-                : generateExpression(integerAttrs, random, status);
+                : generateExpression(integerAttrs, keywordAttrs, random, status);
             Order.OrderDirection dir = random.choose(Order.OrderDirection.values());
             orders.add(new Order(Source.EMPTY, expr, dir, Order.NullsPosition.ANY));
         }
@@ -340,9 +411,10 @@ public class LogicalPlanGenerator {
         Collections.shuffle(shuffledNames, random.toJDKRandom());
         int nNames = random.nextInt(1, STATS_ALIAS_POOL.size());
 
+        List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
         List<NamedExpression> aggregates = new ArrayList<>();
         for (int i = 0; i < nNames; i++) {
-            Expression field = generateExpression(integerAttrs, random, status);
+            Expression field = generateExpression(integerAttrs, keywordAttrs, random, status);
             // Constant-only aggregate expressions crash INLINE STATS (ES planner bug)
             if (field.references().isEmpty()) {
                 field = random.choose(integerAttrs);
@@ -364,16 +436,26 @@ public class LogicalPlanGenerator {
         };
     }
 
-    private static Expression generateExpression(List<Attribute> integerAttrs, SourceOfRandomness random, GenerationStatus status) {
-        return generateExpression(integerAttrs, EXPR_DEPTH, random);
+    private static Expression generateExpression(
+        List<Attribute> integerAttrs,
+        List<Attribute> keywordAttrs,
+        SourceOfRandomness random,
+        GenerationStatus status
+    ) {
+        return generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
     }
 
-    private static Expression generateExpression(List<Attribute> integerAttrs, int depth, SourceOfRandomness random) {
+    private static Expression generateExpression(
+        List<Attribute> integerAttrs,
+        List<Attribute> keywordAttrs,
+        int depth,
+        SourceOfRandomness random
+    ) {
         if (depth == 0 || random.nextBoolean()) {
-            return generateLeaf(integerAttrs, random);
+            return generateLeaf(integerAttrs, keywordAttrs, random);
         }
-        Expression left = generateExpression(integerAttrs, depth - 1, random);
-        Expression right = generateExpression(integerAttrs, depth - 1, random);
+        Expression left = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
+        Expression right = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
         return switch (random.nextInt(0, 2)) {
             case 0 -> new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
             case 1 -> new Sub(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG);
@@ -382,11 +464,65 @@ public class LogicalPlanGenerator {
         };
     }
 
-    private static Expression generateLeaf(List<Attribute> integerAttrs, SourceOfRandomness random) {
+    private static Expression generateLeaf(List<Attribute> integerAttrs, List<Attribute> keywordAttrs, SourceOfRandomness random) {
+        // If no integer columns, fall back to LENGTH(keyword) if available, or a literal
+        if (integerAttrs.isEmpty()) {
+            if (keywordAttrs.isEmpty() == false) {
+                return new Length(Source.EMPTY, random.choose(keywordAttrs));
+            }
+            return new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
+        }
+        // 20% chance of LENGTH(keyword) if keyword columns exist
+        if (keywordAttrs.isEmpty() == false && random.nextInt(0, 4) == 0) {
+            return new Length(Source.EMPTY, random.choose(keywordAttrs));
+        }
         if (random.nextBoolean()) {
             return random.choose(integerAttrs);
         }
         return new Literal(Source.EMPTY, random.nextInt(1, 10), DataType.INTEGER);
+    }
+
+    /** Generates a keyword expression: either a leaf (attribute or string literal) or a function call. */
+    private static Expression generateKeywordExpression(List<Attribute> keywordAttrs, int depth, SourceOfRandomness random) {
+        if (depth == 0 || random.nextBoolean()) {
+            return generateKeywordLeaf(keywordAttrs, random);
+        }
+        Expression child = generateKeywordExpression(keywordAttrs, depth - 1, random);
+        return switch (random.nextInt(0, 7)) {
+            case 0 -> new Trim(Source.EMPTY, child);
+            case 1 -> new ToUpper(Source.EMPTY, child, EsqlTestUtils.TEST_CFG);
+            case 2 -> new ToLower(Source.EMPTY, child, EsqlTestUtils.TEST_CFG);
+            case 3 -> new Reverse(Source.EMPTY, child);
+            case 4 -> {
+                int nRest = random.nextInt(1, 2);
+                List<Expression> rest = new ArrayList<>(nRest);
+                for (int j = 0; j < nRest; j++) {
+                    rest.add(generateKeywordExpression(keywordAttrs, depth - 1, random));
+                }
+                yield new Concat(Source.EMPTY, child, rest);
+            }
+            case 5 -> {
+                Expression len = new Literal(Source.EMPTY, random.nextInt(1, 5), DataType.INTEGER);
+                yield new Left(Source.EMPTY, child, len);
+            }
+            case 6 -> {
+                Expression len = new Literal(Source.EMPTY, random.nextInt(1, 5), DataType.INTEGER);
+                yield new Right(Source.EMPTY, child, len);
+            }
+            case 7 -> {
+                Expression start = new Literal(Source.EMPTY, random.nextInt(1, 3), DataType.INTEGER);
+                Expression len = random.nextBoolean() ? new Literal(Source.EMPTY, random.nextInt(1, 4), DataType.INTEGER) : null;
+                yield new Substring(Source.EMPTY, child, start, len);
+            }
+            default -> throw new IllegalStateException();
+        };
+    }
+
+    private static Expression generateKeywordLeaf(List<Attribute> keywordAttrs, SourceOfRandomness random) {
+        if (keywordAttrs.isEmpty() == false && random.nextBoolean()) {
+            return random.choose(keywordAttrs);
+        }
+        return new Literal(Source.EMPTY, new BytesRef(random.choose(KEYWORD_POOL)), DataType.KEYWORD);
     }
 
     private static List<Attribute> generateSubset(SourceOfRandomness random, List<Attribute> attrs, int min, int max) {

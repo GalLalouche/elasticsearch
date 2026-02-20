@@ -18,6 +18,7 @@ import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToUpper;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
@@ -130,6 +131,20 @@ public class SimulatorBugTests {
         List<NamedExpression> aggregates = List.of(alias);
         LogicalPlan plan = new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, rel, List.of(), aggregates));
         assertDivergence(schema, data, plan, SimBug.INLINE_STATS_DROPS_ROWS);
+    }
+
+    @Test
+    public void bugToUpperIsToLower() throws IOException {
+        SimSchema schema = new SimSchema("sim_test", List.of(new SimSchema.SimColumn("a", DataType.KEYWORD)));
+        List<Map<String, Object>> data = List.of(Map.of("a", "Hello"));
+        EsRelation rel = buildEsRelation(schema);
+        Attribute a = rel.output().get(0);
+        LogicalPlan plan = new Eval(
+            Source.EMPTY,
+            rel,
+            List.of(new Alias(Source.EMPTY, "z", new ToUpper(Source.EMPTY, a, EsqlTestUtils.TEST_CFG)))
+        );
+        assertDivergence(schema, data, plan, SimBug.TO_UPPER_IS_TO_LOWER);
     }
 
     private static SimSchema schema1IntCol() {

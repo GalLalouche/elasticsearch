@@ -19,6 +19,17 @@ import org.elasticsearch.xpack.esql.expression.function.aggregate.Count;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Max;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Min;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.Sum;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Concat;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.EndsWith;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Left;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Length;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Reverse;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Right;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.StartsWith;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Substring;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToLower;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToUpper;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.Trim;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.ArithmeticOperation;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.EsqlBinaryComparison;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
@@ -164,6 +175,35 @@ public class LogicalPlanPrinter {
             case Sum s -> Strings.format("SUM(%s)", printExpression(s.field()));
             case Min m -> Strings.format("MIN(%s)", printExpression(m.field()));
             case Max m -> Strings.format("MAX(%s)", printExpression(m.field()));
+            case Trim t -> Strings.format("TRIM(%s)", printExpression(t.field()));
+            case ToUpper t -> Strings.format("TO_UPPER(%s)", printExpression(t.field()));
+            case ToLower t -> Strings.format("TO_LOWER(%s)", printExpression(t.field()));
+            case Reverse r -> Strings.format("REVERSE(%s)", printExpression(r.field()));
+            case Length l -> Strings.format("LENGTH(%s)", printExpression(l.field()));
+            case Concat c -> Strings.format(
+                "CONCAT(%s)",
+                c.children().stream().map(LogicalPlanPrinter::printExpression).collect(joining(", "))
+            );
+            case Left l -> Strings.format("LEFT(%s, %s)", printExpression(l.children().get(0)), printExpression(l.children().get(1)));
+            case Right r -> Strings.format("RIGHT(%s, %s)", printExpression(r.children().get(0)), printExpression(r.children().get(1)));
+            case StartsWith sw -> Strings.format(
+                "STARTS_WITH(%s, %s)",
+                printExpression(sw.children().get(0)),
+                printExpression(sw.children().get(1))
+            );
+            case EndsWith ew -> Strings.format(
+                "ENDS_WITH(%s, %s)",
+                printExpression(ew.children().get(0)),
+                printExpression(ew.children().get(1))
+            );
+            case Substring sub -> sub.children().size() > 2
+                ? Strings.format(
+                    "SUBSTRING(%s, %s, %s)",
+                    printExpression(sub.children().get(0)),
+                    printExpression(sub.children().get(1)),
+                    printExpression(sub.children().get(2))
+                )
+                : Strings.format("SUBSTRING(%s, %s)", printExpression(sub.children().get(0)), printExpression(sub.children().get(1)));
             default -> throw new UnsupportedOperationException(
                 Strings.format("Printing of expression [%s] is not supported yet", expression.getClass())
             );

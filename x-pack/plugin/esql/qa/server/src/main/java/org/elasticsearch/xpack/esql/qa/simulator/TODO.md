@@ -63,7 +63,7 @@
 - [x] Generate arithmetic expressions in aggregation fields (e.g., `STATS s0 = SUM(a + b) BY c`)
 - [x] Generate `ROW` plans (simulator already handles ROW evaluation, but the generator never produces them)
 - [ ] Support more commands (RENAME, etc.)
-- [ ] Support keyword functions (e.g., CONCAT, LENGTH, SUBSTRING, TO_UPPER, TO_LOWER, TRIM, etc.)
+- [x] Support keyword functions (e.g., CONCAT, LENGTH, SUBSTRING, TO_UPPER, TO_LOWER, TRIM, etc.)
 - [x] Unit tests for simulator (Row, From, Keep, Drop, Where, Eval with Add/Sub/Mul, EsRelation in-memory)
 
 ## 7. End-to-end property test

@@ -24,7 +24,7 @@ import java.util.Map;
 class SimDataGenerator {
     private SimDataGenerator() { /* static class */ }
 
-    private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz");
+    private static final List<String> KEYWORD_POOL = List.of("foo", "bar", "baz", " Hi ", "HELLO", "world");
 
     static List<Map<String, Object>> generate(SimSchema schema, SourceOfRandomness random, GenerationStatus status) {
         int nRows = random.nextInt(1, 5);
