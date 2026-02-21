@@ -51,7 +51,11 @@ import java.util.function.UnaryOperator;
 
 import static org.elasticsearch.xpack.esql.CsvTestUtils.Type.DATETIME;
 import static org.elasticsearch.xpack.esql.core.util.TestUtils.of;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.lessThanOrEqualTo;
+import static org.hamcrest.Matchers.startsWith;
 
 public class SimulatorTests extends ESTestCase {
     private static final Simulator simulator = new Simulator();
@@ -402,13 +406,9 @@ public class SimulatorTests extends ESTestCase {
      * output name, ES preserves the grouping key's value (the original child column), not the aggregate.
      */
     public void testChainedInlineStatsShadowingKeepsGroupingKeyValue() throws IOException {
-        // When a second INLINE STATS redefines a column from the first via an aggregate that shares
-        // its name with a grouping key, ES preserves the grouping key's (original child) value.
-        // Example: INLINE STATS s1 = MAX(b + 5) BY b | INLINE STATS s1 = COUNT(b) BY s1
-        // After the second INLINE STATS, s1 should retain the MAX result (6), not become COUNT (1).
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("b", DataType.INTEGER)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        var bAttr = from.output().getFirst(); // b:INTEGER
+        var bAttr = from.output().getFirst();
 
         // First INLINE STATS: s1 = MAX(b + 5) BY b -> s1=6
         List<NamedExpression> aggregates = List.of(
@@ -424,12 +424,14 @@ public class SimulatorTests extends ESTestCase {
         // The grouping key s1 has value 6; COUNT(b) = 1.
         // ES keeps the grouping key value (s1=6), not the COUNT value (s1=1).
         var s1Ref = new ReferenceAttribute(Source.EMPTY, "s1", result1.getColumn("s1").type());
-        Alias alias = new Alias(Source.EMPTY, "s1", new Count(Source.EMPTY, new ReferenceAttribute(Source.EMPTY, "b", DataType.INTEGER)));
         Aggregate aggregate = new Aggregate(
             Source.EMPTY,
             new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, from, List.of(bAttr), aggregates)),
             List.of(s1Ref),
-            List.of(alias, s1Ref)
+            List.of(
+                new Alias(Source.EMPTY, "s1", new Count(Source.EMPTY, new ReferenceAttribute(Source.EMPTY, "b", DataType.INTEGER))),
+                s1Ref
+            )
         );
         assertThat(
             sim.simulate(new InlineStats(Source.EMPTY, aggregate)),
@@ -441,9 +443,9 @@ public class SimulatorTests extends ESTestCase {
         // KEYWORD literals require BytesRef (not String) per Literal's assertion.
         Row row = new Row(Source.EMPTY, List.of(new Alias(Source.EMPTY, "x", of(5)), new Alias(Source.EMPTY, "name", of("bar"))));
         String printed = LogicalPlanPrinter.print(row);
-        assertTrue(printed.startsWith("ROW "));
-        assertTrue(printed.contains("x = "));
-        assertTrue(printed.contains("name = \""));
+        assertThat(printed, startsWith("ROW "));
+        assertThat(printed, containsString("x = "));
+        assertThat(printed, containsString("name = \""));
     }
 
     public void testRowWithStatsNoGrouping() throws IOException {
@@ -598,8 +600,14 @@ public class SimulatorTests extends ESTestCase {
     public void testEvalSubstring() throws IOException {
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        Alias alias = new Alias(Source.EMPTY, "y", new Substring(Source.EMPTY, from.output().getFirst(), of(2), of(3)));
-        Result result = Simulator.singleRow(schema, Map.of("x", "hello")).simulate(new Eval(Source.EMPTY, from, List.of(alias)));
+        Result result = Simulator.singleRow(schema, Map.of("x", "hello"))
+            .simulate(
+                new Eval(
+                    Source.EMPTY,
+                    from,
+                    List.of(new Alias(Source.EMPTY, "y", new Substring(Source.EMPTY, from.output().getFirst(), of(2), of(3))))
+                )
+            );
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().getFirst(), equalTo("ell"));
     }
@@ -638,7 +646,7 @@ public class SimulatorTests extends ESTestCase {
         Result result = simulate("FROM sample_data | WHERE event_duration >= 1756467");
         assertThat(result.numRows(), equalTo(5));
         for (Object val : result.getColumn("event_duration").values()) {
-            assertTrue(((Number) val).longValue() >= 1756467);
+            assertThat(Simulator.toLong(val), greaterThanOrEqualTo(1756467L));
         }
     }
 
@@ -646,7 +654,7 @@ public class SimulatorTests extends ESTestCase {
         Result result = simulate("FROM sample_data | WHERE event_duration <= 1756467");
         assertThat(result.numRows(), equalTo(3));
         for (Object val : result.getColumn("event_duration").values()) {
-            assertTrue(((Number) val).longValue() <= 1756467);
+            assertThat(Simulator.toLong(val), lessThanOrEqualTo(1756467L));
         }
     }
 

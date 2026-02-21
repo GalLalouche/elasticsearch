@@ -205,16 +205,14 @@ public class Simulator {
 
     private Result visit(Eval eval) throws IOException {
         Result childResult = simulate(eval.child());
-        var newColumns = new ArrayList<Column>();
-        for (var expression : eval.expressions()) {
+        List<Column> newColumns = eval.expressions().stream().map(expression -> {
             if (expression instanceof Alias alias) {
-                newColumns.add(childResult.evaluate(alias.child(), activeBug).toNamed(alias.name()));
-            } else {
-                throw new UnsupportedOperationException(
-                    Strings.format("Eval expression [%s] is not an alias, but a %s", expression, expression.getClass())
-                );
+                return childResult.evaluate(alias.child(), activeBug).toNamed(alias.name());
             }
-        }
+            throw new UnsupportedOperationException(
+                Strings.format("Eval expression [%s] is not an alias, but a %s", expression, expression.getClass())
+            );
+        }).toList();
         return new Result(deduplicateKeepLast(CollectionUtils.concatLists(childResult.columns(), newColumns)));
     }
 
@@ -348,7 +346,7 @@ public class Simulator {
             lastPositions.put(columns.get(i).name(), i);
         }
         return IntStream.range(0, columns.size())
-            .filter(i -> lastPositions.get(columns.get(i).name()).intValue() == i)
+            .filter(i -> lastPositions.get(columns.get(i).name()) == i)
             .mapToObj(columns::get)
             .toList();
     }

@@ -85,9 +85,7 @@ public record Result(List<Simulator.Column> columns) {
             case Neg neg -> {
                 Simulator.UnnamedColumn input = evaluate(neg.field(), activeBug);
                 yield new Simulator.UnnamedColumn(input.type(), input.values().stream().<Object>map(o -> {
-                    if (o == null) {
-                        return null;
-                    }
+                    if (o == null) return null;
                     long result = -Simulator.toLong(o);
                     return input.type() == DataType.INTEGER && (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) ? null : result;
                 }).toList());

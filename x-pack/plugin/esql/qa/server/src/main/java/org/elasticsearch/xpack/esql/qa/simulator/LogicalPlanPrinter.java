@@ -163,9 +163,14 @@ public class LogicalPlanPrinter {
         return switch (expression) {
             case Alias alias -> Strings.format("%s = %s", alias.name(), printExpression(alias.child()));
             case Attribute attr -> attr.name();
-            case Literal literal -> literal.value() instanceof String s ? Strings.format("\"%s\"", s)
-                : literal.value() instanceof BytesRef br ? Strings.format("\"%s\"", br.utf8ToString())
-                : String.valueOf(literal.value());
+            case Literal literal -> {
+                String str = switch (literal.value()) {
+                    case String s -> s;
+                    case BytesRef br -> br.utf8ToString();
+                    default -> null;
+                };
+                yield str != null ? Strings.format("\"%s\"", str) : String.valueOf(literal.value());
+            }
             case Neg neg -> Strings.format("-(%s)", printExpression(neg.field()));
             case ArithmeticOperation op -> Strings.format(
                 "%s %s %s",
