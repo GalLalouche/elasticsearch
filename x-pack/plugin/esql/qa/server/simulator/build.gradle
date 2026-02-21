@@ -30,6 +30,9 @@ tasks.named('javaRestTest') {
   usesDefaultDistribution("to be triaged")
   useJUnitPlatform()
   maxParallelForks = 1
+  if (providers.systemProperty('tests.verbose').isPresent()) {
+    testLogging.showStandardStreams = true
+  }
   systemProperty 'simulator.planDepth', providers.systemProperty('simulator.planDepth').getOrElse('5')
   providers.systemProperty('simulator.query').orElse('').get().with { query ->
     if (!query.isEmpty()) systemProperty 'simulator.query', query

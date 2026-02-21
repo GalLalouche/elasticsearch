@@ -80,6 +80,10 @@ public class Simulator {
         this(schema, data, SimBug.BUG_FREE);
     }
 
+    static Simulator singleRow(SimSchema schema, Map<String, Object> row) {
+        return new Simulator(schema, List.of(row));
+    }
+
     Simulator(@Nullable SimSchema schema, @Nullable List<Map<String, Object>> data, SimBug activeBug) {
         this.schema = schema;
         this.data = data;
@@ -436,7 +440,27 @@ public class Simulator {
         return ((Number) object).longValue();
     }
 
-    public record Column(String name, DataType type, List<Object> values) {}
+    public record Column(String name, DataType type, List<Object> values) {
+        public static Column ofInt(String name, Object... values) {
+            return new Column(name, DataType.INTEGER, List.of(values));
+        }
+
+        public static Column ofLong(String name, Object... values) {
+            return new Column(name, DataType.LONG, List.of(values));
+        }
+
+        public static Column ofKeyword(String name, Object... values) {
+            return new Column(name, DataType.KEYWORD, List.of(values));
+        }
+
+        public static Column ofIp(String name, Object... values) {
+            return new Column(name, DataType.IP, List.of(values));
+        }
+
+        public static Column ofDatetime(String name, Object... values) {
+            return new Column(name, DataType.DATETIME, List.of(values));
+        }
+    }
 
     /** An unnamed column of values, e.g. for literals or inline expressions. */
     public record UnnamedColumn(DataType type, List<Object> values) {

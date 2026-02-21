@@ -30,7 +30,9 @@ import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.xcontent.json.JsonXContent;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
+import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.function.aggregate.AggregateFunction;
@@ -55,6 +57,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /** Integration property test: generates random plans and data, then compares simulator results against a real ES cluster. */
 @RunWith(JUnitQuickcheck.class)
@@ -276,8 +279,11 @@ public class SimulatorPropertyIT {
             // Strategy 4: Remove individual aggregates from INLINE STATS / STATS (keep N-1)
             removeIndividualAggregates(candidates, larger);
 
-            // Strategy 5: Simplify expressions to sub-expressions
+            // Strategy 5: Simplify expressions to sub-expressions (all stages)
             addExpressionShrinks(candidates, larger);
+
+            // Strategy 5b: Simplify sub-expressions to literals (all stages, recursive)
+            addLiteralShrinks(candidates, larger);
 
             // Strategy 6: Remove any data row (not just last)
             if (larger.data() != null && larger.data().size() > 1) {
@@ -310,6 +316,25 @@ public class SimulatorPropertyIT {
                     }
                 }
             }
+
+            // Strategy 8: Remove unused schema columns
+            if (larger.schema() != null && larger.schema().columns().size() > 1) {
+                for (int c = 0; c < larger.schema().columns().size(); c++) {
+                    String colName = larger.schema().columns().get(c).name();
+                    List<SimSchema.SimColumn> reducedCols = new ArrayList<>(larger.schema().columns());
+                    reducedCols.remove(c);
+                    SimSchema reducedSchema = new SimSchema(larger.schema().indexName(), reducedCols);
+                    List<Map<String, Object>> reducedData = larger.data()
+                        .stream()
+                        .<Map<String, Object>>map(row -> {
+                            var copy = new LinkedHashMap<>(row);
+                            copy.remove(colName);
+                            return copy;
+                        })
+                        .toList();
+                    candidates.add(new TestCase(reducedSchema, reducedData, larger.plan(), larger.query()));
+                }
+            }
             return candidates;
         }
 
@@ -317,66 +342,95 @@ public class SimulatorPropertyIT {
             candidates.add(new TestCase(original.schema(), original.data(), plan, LogicalPlanPrinter.print(plan)));
         }
 
-        /** Tries replacing each expression in the outermost stage with its sub-expressions. */
+        /** Tries replacing expressions with sub-expressions in all stages. */
         private static void addExpressionShrinks(List<TestCase> candidates, TestCase larger) {
-            LogicalPlan plan = larger.plan();
-            switch (plan) {
+            addExpressionShrinksWith(candidates, larger, TestCaseGenerator::collectSubExpressions);
+        }
+
+        /** Tries replacing sub-expressions with literals in all stages. */
+        private static void addLiteralShrinks(List<TestCase> candidates, TestCase larger) {
+            addExpressionShrinksWith(candidates, larger, TestCaseGenerator::literalSimplifications);
+        }
+
+        /**
+         * Generic expression shrinking: for each stage in the pipeline, tries replacing
+         * expressions using the given candidate generator function.
+         */
+        private static void addExpressionShrinksWith(
+            List<TestCase> candidates,
+            TestCase larger,
+            Function<Expression, List<Expression>> exprCandidates
+        ) {
+            List<LogicalPlan> stages = flattenStages(larger.plan());
+            for (int s = 0; s < stages.size() - 1; s++) { // skip leaf (FROM/ROW)
+                for (LogicalPlan modified : stageExpressionCandidates(stages.get(s), exprCandidates)) {
+                    List<LogicalPlan> newStages = new ArrayList<>(stages);
+                    newStages.set(s, modified);
+                    addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                }
+            }
+        }
+
+        /** Returns candidate stages where one expression has been replaced using the given function. */
+        private static List<LogicalPlan> stageExpressionCandidates(
+            LogicalPlan stage,
+            Function<Expression, List<Expression>> exprCandidates
+        ) {
+            List<LogicalPlan> result = new ArrayList<>();
+            switch (stage) {
                 case Eval eval -> {
                     for (int f = 0; f < eval.fields().size(); f++) {
                         Alias alias = eval.fields().get(f);
-                        for (Expression sub : collectSubExpressions(alias.child())) {
+                        for (Expression sub : exprCandidates.apply(alias.child())) {
                             List<Alias> newFields = new ArrayList<>(eval.fields());
                             newFields.set(f, new Alias(alias.source(), alias.name(), sub));
-                            addPlanCandidate(
-                                candidates,
-                                larger,
-                                LogicalPlanGenerator.resolveReferences(new Eval(eval.source(), eval.child(), newFields))
-                            );
+                            result.add(new Eval(eval.source(), eval.child(), newFields));
                         }
                     }
                 }
                 case Filter filter -> {
-                    for (Expression sub : collectSubExpressions(filter.condition())) {
-                        addPlanCandidate(
-                            candidates,
-                            larger,
-                            LogicalPlanGenerator.resolveReferences(new Filter(filter.source(), filter.child(), sub))
-                        );
+                    for (Expression sub : exprCandidates.apply(filter.condition())) {
+                        result.add(new Filter(filter.source(), filter.child(), sub));
                     }
                 }
                 case OrderBy orderBy -> {
                     for (int k = 0; k < orderBy.order().size(); k++) {
                         Order order = orderBy.order().get(k);
-                        for (Expression sub : collectSubExpressions(order.child())) {
+                        for (Expression sub : exprCandidates.apply(order.child())) {
                             List<Order> newOrders = new ArrayList<>(orderBy.order());
                             newOrders.set(k, new Order(order.source(), sub, order.direction(), order.nullsPosition()));
-                            addPlanCandidate(
-                                candidates,
-                                larger,
-                                LogicalPlanGenerator.resolveReferences(new OrderBy(orderBy.source(), orderBy.child(), newOrders))
-                            );
+                            result.add(new OrderBy(orderBy.source(), orderBy.child(), newOrders));
                         }
                     }
                 }
-                case InlineStats is -> shrinkAggregateExpressions(candidates, larger, is.aggregate());
-                case Aggregate agg -> shrinkAggregateExpressions(candidates, larger, agg);
-                default -> {
+                case InlineStats is -> {
+                    Aggregate agg = is.aggregate();
+                    for (Aggregate modified : aggExpressionCandidates(agg, exprCandidates)) {
+                        result.add(new InlineStats(is.source(), modified));
+                    }
                 }
+                case Aggregate agg -> result.addAll(aggExpressionCandidates(agg, exprCandidates));
+                default -> {}
             }
+            return result;
         }
 
-        /** Tries replacing each aggregate field expression with its sub-expressions. */
-        private static void shrinkAggregateExpressions(List<TestCase> candidates, TestCase larger, Aggregate agg) {
+        /** Returns candidate Aggregates where one aggregate field expression has been replaced. */
+        private static List<Aggregate> aggExpressionCandidates(
+            Aggregate agg,
+            Function<Expression, List<Expression>> exprCandidates
+        ) {
+            List<Aggregate> result = new ArrayList<>();
             for (int a = 0; a < agg.aggregates().size(); a++) {
                 if (agg.aggregates().get(a) instanceof Alias alias && alias.child() instanceof AggregateFunction aggFunc) {
-                    for (Expression sub : collectSubExpressions(aggFunc.field())) {
+                    for (Expression sub : exprCandidates.apply(aggFunc.field())) {
                         List<NamedExpression> newAggs = new ArrayList<>(agg.aggregates());
                         newAggs.set(a, new Alias(alias.source(), alias.name(), aggFunc.withField(sub)));
-                        Aggregate newAgg = new Aggregate(agg.source(), agg.child(), agg.groupings(), newAggs);
-                        addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(wrapAggregate(larger.plan(), newAgg)));
+                        result.add(new Aggregate(agg.source(), agg.child(), agg.groupings(), newAggs));
                     }
                 }
             }
+            return result;
         }
 
         /** Tries removing individual aggregate aliases from INLINE STATS or STATS. */
@@ -459,6 +513,51 @@ public class SimulatorPropertyIT {
                 out.add(child);
                 collectSubExpressionsRecursive(out, child);
             }
+        }
+
+        /**
+         * Returns candidate expressions where exactly one non-literal sub-expression
+         * has been replaced with a literal of matching type, preserving the surrounding structure.
+         */
+        private static List<Expression> literalSimplifications(Expression expr) {
+            List<Expression> candidates = new ArrayList<>();
+            addLiteralSimplificationsRecursive(candidates, expr);
+            return candidates;
+        }
+
+        private static void addLiteralSimplificationsRecursive(List<Expression> candidates, Expression expr) {
+            List<Expression> children = expr.children();
+            for (int i = 0; i < children.size(); i++) {
+                Expression child = children.get(i);
+                if (child instanceof Literal) continue;
+
+                // Try replacing this child with a literal
+                Literal lit = literalForType(child.dataType());
+                if (lit != null) {
+                    List<Expression> newChildren = new ArrayList<>(children);
+                    newChildren.set(i, lit);
+                    candidates.add(expr.replaceChildren(newChildren));
+                }
+
+                // Recursively try simplifying within this child
+                List<Expression> innerCandidates = new ArrayList<>();
+                addLiteralSimplificationsRecursive(innerCandidates, child);
+                for (Expression simplifiedChild : innerCandidates) {
+                    List<Expression> newChildren = new ArrayList<>(children);
+                    newChildren.set(i, simplifiedChild);
+                    candidates.add(expr.replaceChildren(newChildren));
+                }
+            }
+        }
+
+        private static Literal literalForType(DataType type) {
+            return switch (type) {
+                case INTEGER -> new Literal(Source.EMPTY, 1, DataType.INTEGER);
+                case LONG -> new Literal(Source.EMPTY, 1L, DataType.LONG);
+                case DOUBLE -> new Literal(Source.EMPTY, 1.0, DataType.DOUBLE);
+                case BOOLEAN -> new Literal(Source.EMPTY, true, DataType.BOOLEAN);
+                default -> null; // Can't simplify unknown types
+            };
         }
     }
 
@@ -654,7 +753,7 @@ public class SimulatorPropertyIT {
         if (b == null) {
             return asc ? -1 : 1;
         }
-        int cmp = compareValues(a, b);
+        int cmp = nullSafeCompareValues(a, b);
         return asc ? cmp : -cmp;
     }
 
@@ -674,7 +773,7 @@ public class SimulatorPropertyIT {
 
     private static int compareRows(List<Object> a, List<Object> b) {
         for (int i = 0; i < a.size(); i++) {
-            int cmp = compareValues(a.get(i), b.get(i));
+            int cmp = nullSafeCompareValues(a.get(i), b.get(i));
             if (cmp != 0) {
                 return cmp;
             }
@@ -683,7 +782,7 @@ public class SimulatorPropertyIT {
     }
 
     @SuppressWarnings({ "unchecked", "rawtypes" })
-    private static int compareValues(Object a, Object b) {
+    private static int nullSafeCompareValues(Object a, Object b) {
         if (a == null && b == null) {
             return 0;
         }

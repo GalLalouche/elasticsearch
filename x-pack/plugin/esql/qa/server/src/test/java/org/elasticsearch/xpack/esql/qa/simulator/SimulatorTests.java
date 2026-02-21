@@ -8,7 +8,6 @@
 package org.elasticsearch.xpack.esql.qa.simulator;
 
 import org.elasticsearch.test.ESTestCase;
-import org.elasticsearch.xpack.esql.CsvTestUtils;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
@@ -42,6 +41,7 @@ import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.Row;
+import org.elasticsearch.xpack.esql.qa.simulator.Simulator.Column;
 
 import java.io.IOException;
 import java.util.List;
@@ -49,6 +49,7 @@ import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.UnaryOperator;
 
+import static org.elasticsearch.xpack.esql.CsvTestUtils.Type.DATETIME;
 import static org.elasticsearch.xpack.esql.core.util.TestUtils.of;
 import static org.hamcrest.Matchers.equalTo;
 
@@ -68,16 +69,7 @@ public class SimulatorTests extends ESTestCase {
     private static final List<Map<String, Object>> A_DATA = List.of(Map.of("a", 2), Map.of("a", 3), Map.of("a", 5));
 
     public void testRow() throws IOException {
-        assertThat(
-            simulate("ROW x=1, y=2, z=3"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(1)),
-                    new Simulator.Column("y", DataType.INTEGER, List.of(2)),
-                    new Simulator.Column("z", DataType.INTEGER, List.of(3))
-                )
-            )
-        );
+        assertThat(simulate("ROW x=1, y=2, z=3"), equalTo(new Result(Column.ofInt("x", 1), Column.ofInt("y", 2), Column.ofInt("z", 3))));
     }
 
     public void testEvalSimple() throws IOException {
@@ -85,10 +77,10 @@ public class SimulatorTests extends ESTestCase {
             simulate("ROW x=1, y=2 | eval z = x + y"),
             equalTo(
                 new Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(1)),
-                    new Simulator.Column("y", DataType.INTEGER, List.of(2)),
+                    Column.ofInt("x", 1),
+                    Column.ofInt("y", 2),
                     // FIXME(gal, NOCOMMIT) This is silly, but because all arithmetics right now are done in long, only z is long.
-                    new Simulator.Column("z", DataType.INTEGER, List.of(3L))
+                    Column.ofInt("z", 3L)
                 )
             )
         );
@@ -99,41 +91,36 @@ public class SimulatorTests extends ESTestCase {
             simulate("from sample_data"),
             equalTo(
                 new Result(
-                    new Simulator.Column(
+                    Column.ofDatetime(
                         "@timestamp",
-                        DataType.DATETIME,
-                        List.of(
-                            dt("2023-10-23T13:55:01.543Z"),
-                            dt("2023-10-23T13:53:55.832Z"),
-                            dt("2023-10-23T13:52:55.015Z"),
-                            dt("2023-10-23T13:51:54.732Z"),
-                            dt("2023-10-23T13:33:34.937Z"),
-                            dt("2023-10-23T12:27:28.948Z"),
-                            dt("2023-10-23T12:15:03.360Z")
-                        )
+                        DATETIME.convert("2023-10-23T13:55:01.543Z"),
+                        DATETIME.convert("2023-10-23T13:53:55.832Z"),
+                        DATETIME.convert("2023-10-23T13:52:55.015Z"),
+                        DATETIME.convert("2023-10-23T13:51:54.732Z"),
+                        DATETIME.convert("2023-10-23T13:33:34.937Z"),
+                        DATETIME.convert("2023-10-23T12:27:28.948Z"),
+                        DATETIME.convert("2023-10-23T12:15:03.360Z")
                     ),
-                    new Simulator.Column(
+                    Column.ofIp(
                         "client_ip",
-                        DataType.IP,
-                        List.of("172.21.3.15", "172.21.3.15", "172.21.3.15", "172.21.3.15", "172.21.0.5", "172.21.2.113", "172.21.2.162")
+                        "172.21.3.15",
+                        "172.21.3.15",
+                        "172.21.3.15",
+                        "172.21.3.15",
+                        "172.21.0.5",
+                        "172.21.2.113",
+                        "172.21.2.162"
                     ),
-                    new Simulator.Column(
-                        "event_duration",
-                        DataType.LONG,
-                        List.of(1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L)
-                    ),
-                    new Simulator.Column(
+                    Column.ofLong("event_duration", 1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L),
+                    Column.ofKeyword(
                         "message",
-                        DataType.KEYWORD,
-                        List.of(
-                            "Connected to 10.1.0.1",
-                            "Connection error",
-                            "Connection error",
-                            "Connection error",
-                            "Disconnected",
-                            "Connected to 10.1.0.2",
-                            "Connected to 10.1.0.3"
-                        )
+                        "Connected to 10.1.0.1",
+                        "Connection error",
+                        "Connection error",
+                        "Connection error",
+                        "Disconnected",
+                        "Connected to 10.1.0.2",
+                        "Connected to 10.1.0.3"
                     )
                 )
             )
@@ -143,30 +130,14 @@ public class SimulatorTests extends ESTestCase {
     public void testFromKeep() throws IOException {
         assertThat(
             simulate("from sample_data | keep event_duration"),
-            equalTo(
-                new Result(
-                    new Simulator.Column(
-                        "event_duration",
-                        DataType.LONG,
-                        List.of(1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L)
-                    )
-                )
-            )
+            equalTo(new Result(Column.ofLong("event_duration", 1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L)))
         );
     }
 
     public void testFromDrop() throws IOException {
         assertThat(
             simulate("from sample_data | drop @timestamp, client_ip, message"),
-            equalTo(
-                new Result(
-                    new Simulator.Column(
-                        "event_duration",
-                        DataType.LONG,
-                        List.of(1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L)
-                    )
-                )
-            )
+            equalTo(new Result(Column.ofLong("event_duration", 1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L)))
         );
     }
 
@@ -175,12 +146,8 @@ public class SimulatorTests extends ESTestCase {
             simulate("from sample_data | keep event_duration | eval duration_in_seconds = event_duration / 1000"),
             equalTo(
                 new Result(
-                    new Simulator.Column(
-                        "event_duration",
-                        DataType.LONG,
-                        List.of(1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L)
-                    ),
-                    new Simulator.Column("duration_in_seconds", DataType.LONG, List.of(1756L, 5033L, 8268L, 725L, 1232L, 2764L, 3450L))
+                    Column.ofLong("event_duration", 1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L),
+                    Column.ofLong("duration_in_seconds", 1756L, 5033L, 8268L, 725L, 1232L, 2764L, 3450L)
                 )
             )
         );
@@ -195,13 +162,9 @@ public class SimulatorTests extends ESTestCase {
                 """),
             equalTo(
                 new Result(
-                    new Simulator.Column(
-                        "event_duration",
-                        DataType.LONG,
-                        List.of(1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L)
-                    ),
-                    new Simulator.Column("duration_in_seconds", DataType.LONG, List.of(1798L, 5075L, 8310L, 767L, 1274L, 2806L, 3492L)),
-                    new Simulator.Column("constant", DataType.KEYWORD, List.of("foo", "foo", "foo", "foo", "foo", "foo", "foo"))
+                    Column.ofLong("event_duration", 1756467L, 5033755L, 8268153L, 725448L, 1232382L, 2764889L, 3450233L),
+                    Column.ofLong("duration_in_seconds", 1798L, 5075L, 8310L, 767L, 1274L, 2806L, 3492L),
+                    Column.ofKeyword("constant", "foo", "foo", "foo", "foo", "foo", "foo", "foo")
                 )
             )
         );
@@ -212,18 +175,15 @@ public class SimulatorTests extends ESTestCase {
             simulate("from sample_data | where event_duration > 3000000"),
             equalTo(
                 new Result(
-                    new Simulator.Column(
+                    Column.ofDatetime(
                         "@timestamp",
-                        DataType.DATETIME,
-                        List.of(dt("2023-10-23T13:53:55.832Z"), dt("2023-10-23T13:52:55.015Z"), dt("2023-10-23T12:15:03.360Z"))
+                        DATETIME.convert("2023-10-23T13:53:55.832Z"),
+                        DATETIME.convert("2023-10-23T13:52:55.015Z"),
+                        DATETIME.convert("2023-10-23T12:15:03.360Z")
                     ),
-                    new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.3.15", "172.21.2.162")),
-                    new Simulator.Column("event_duration", DataType.LONG, List.of(5033755L, 8268153L, 3450233L)),
-                    new Simulator.Column(
-                        "message",
-                        DataType.KEYWORD,
-                        List.of("Connection error", "Connection error", "Connected to 10.1.0.3")
-                    )
+                    Column.ofIp("client_ip", "172.21.3.15", "172.21.3.15", "172.21.2.162"),
+                    Column.ofLong("event_duration", 5033755L, 8268153L, 3450233L),
+                    Column.ofKeyword("message", "Connection error", "Connection error", "Connected to 10.1.0.3")
                 )
             )
         );
@@ -232,39 +192,21 @@ public class SimulatorTests extends ESTestCase {
     public void testEvalSub() throws IOException {
         assertThat(
             simulate("ROW x=10, y=3 | eval z = x - y"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(10)),
-                    new Simulator.Column("y", DataType.INTEGER, List.of(3)),
-                    new Simulator.Column("z", DataType.INTEGER, List.of(7L))
-                )
-            )
+            equalTo(new Result(Column.ofInt("x", 10), Column.ofInt("y", 3), Column.ofInt("z", 7L)))
         );
     }
 
     public void testEvalMul() throws IOException {
         assertThat(
             simulate("ROW x=3, y=4 | eval z = x * y"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(3)),
-                    new Simulator.Column("y", DataType.INTEGER, List.of(4)),
-                    new Simulator.Column("z", DataType.INTEGER, List.of(12L))
-                )
-            )
+            equalTo(new Result(Column.ofInt("x", 3), Column.ofInt("y", 4), Column.ofInt("z", 12L)))
         );
     }
 
     public void testEvalChainedReferences() throws IOException {
         assertThat(
             simulate("ROW x=1 | EVAL y = x + 1 | EVAL z = y + 1"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(1)),
-                    new Simulator.Column("y", DataType.INTEGER, List.of(2L)),
-                    new Simulator.Column("z", DataType.INTEGER, List.of(3L))
-                )
-            )
+            equalTo(new Result(Column.ofInt("x", 1), Column.ofInt("y", 2L), Column.ofInt("z", 3L)))
         );
     }
 
@@ -272,12 +214,7 @@ public class SimulatorTests extends ESTestCase {
         // When multiple EVALs assign to the same column name, ES shadows (replaces) the earlier column.
         assertThat(
             simulate("ROW x=1 | EVAL _col_0 = 9 | EVAL _col_0 = 4"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(1)),
-                    new Simulator.Column("_col_0", DataType.INTEGER, List.of(4))
-                )
-            )
+            equalTo(new Result(Column.ofInt("x", 1), Column.ofInt("_col_0", 4)))
         );
     }
 
@@ -290,25 +227,16 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testEsRelationInMemory() throws IOException {
-        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "foo"), Map.of("a", 2, "b", "bar"));
         assertThat(
-            new Simulator(AB_SCHEMA, data).simulate(LogicalPlanGenerator.buildEsRelation(AB_SCHEMA)),
-            equalTo(
-                new Result(
-                    new Simulator.Column("a", DataType.INTEGER, List.of(1L, 2L)),
-                    new Simulator.Column("b", DataType.KEYWORD, List.of("foo", "bar"))
-                )
-            )
+            new Simulator(AB_SCHEMA, List.of(Map.of("a", 1, "b", "foo"), Map.of("a", 2, "b", "bar"))).simulate(
+                LogicalPlanGenerator.buildEsRelation(AB_SCHEMA)
+            ),
+            equalTo(new Result(Column.ofInt("a", 1L, 2L), Column.ofKeyword("b", "foo", "bar")))
         );
     }
 
     public void testLimit() throws IOException {
-        assertThat(
-            simulate("ROW x=1, y=2 | LIMIT 1"),
-            equalTo(
-                new Result(new Simulator.Column("x", DataType.INTEGER, List.of(1)), new Simulator.Column("y", DataType.INTEGER, List.of(2)))
-            )
-        );
+        assertThat(simulate("ROW x=1, y=2 | LIMIT 1"), equalTo(new Result(Column.ofInt("x", 1), Column.ofInt("y", 2))));
     }
 
     public void testSort() throws IOException {
@@ -316,14 +244,15 @@ public class SimulatorTests extends ESTestCase {
             simulate("FROM sample_data | SORT event_duration ASC | LIMIT 3"),
             equalTo(
                 new Result(
-                    new Simulator.Column(
+                    Column.ofDatetime(
                         "@timestamp",
-                        DataType.DATETIME,
-                        List.of(dt("2023-10-23T13:51:54.732Z"), dt("2023-10-23T13:33:34.937Z"), dt("2023-10-23T13:55:01.543Z"))
+                        DATETIME.convert("2023-10-23T13:51:54.732Z"),
+                        DATETIME.convert("2023-10-23T13:33:34.937Z"),
+                        DATETIME.convert("2023-10-23T13:55:01.543Z")
                     ),
-                    new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.0.5", "172.21.3.15")),
-                    new Simulator.Column("event_duration", DataType.LONG, List.of(725448L, 1232382L, 1756467L)),
-                    new Simulator.Column("message", DataType.KEYWORD, List.of("Connection error", "Disconnected", "Connected to 10.1.0.1"))
+                    Column.ofIp("client_ip", "172.21.3.15", "172.21.0.5", "172.21.3.15"),
+                    Column.ofLong("event_duration", 725448L, 1232382L, 1756467L),
+                    Column.ofKeyword("message", "Connection error", "Disconnected", "Connected to 10.1.0.1")
                 )
             )
         );
@@ -334,14 +263,14 @@ public class SimulatorTests extends ESTestCase {
             simulate("FROM sample_data | SORT event_duration DESC | LIMIT 2"),
             equalTo(
                 new Result(
-                    new Simulator.Column(
+                    Column.ofDatetime(
                         "@timestamp",
-                        DataType.DATETIME,
-                        List.of(dt("2023-10-23T13:52:55.015Z"), dt("2023-10-23T13:53:55.832Z"))
+                        DATETIME.convert("2023-10-23T13:52:55.015Z"),
+                        DATETIME.convert("2023-10-23T13:53:55.832Z")
                     ),
-                    new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.3.15")),
-                    new Simulator.Column("event_duration", DataType.LONG, List.of(8268153L, 5033755L)),
-                    new Simulator.Column("message", DataType.KEYWORD, List.of("Connection error", "Connection error"))
+                    Column.ofIp("client_ip", "172.21.3.15", "172.21.3.15"),
+                    Column.ofLong("event_duration", 8268153L, 5033755L),
+                    Column.ofKeyword("message", "Connection error", "Connection error")
                 )
             )
         );
@@ -352,14 +281,15 @@ public class SimulatorTests extends ESTestCase {
             simulate("FROM sample_data | WHERE event_duration < 2000000"),
             equalTo(
                 new Result(
-                    new Simulator.Column(
+                    Column.ofDatetime(
                         "@timestamp",
-                        DataType.DATETIME,
-                        List.of(dt("2023-10-23T13:55:01.543Z"), dt("2023-10-23T13:51:54.732Z"), dt("2023-10-23T13:33:34.937Z"))
+                        DATETIME.convert("2023-10-23T13:55:01.543Z"),
+                        DATETIME.convert("2023-10-23T13:51:54.732Z"),
+                        DATETIME.convert("2023-10-23T13:33:34.937Z")
                     ),
-                    new Simulator.Column("client_ip", DataType.IP, List.of("172.21.3.15", "172.21.3.15", "172.21.0.5")),
-                    new Simulator.Column("event_duration", DataType.LONG, List.of(1756467L, 725448L, 1232382L)),
-                    new Simulator.Column("message", DataType.KEYWORD, List.of("Connected to 10.1.0.1", "Connection error", "Disconnected"))
+                    Column.ofIp("client_ip", "172.21.3.15", "172.21.3.15", "172.21.0.5"),
+                    Column.ofLong("event_duration", 1756467L, 725448L, 1232382L),
+                    Column.ofKeyword("message", "Connected to 10.1.0.1", "Connection error", "Disconnected")
                 )
             )
         );
@@ -368,57 +298,35 @@ public class SimulatorTests extends ESTestCase {
     public void testStatsSumWithGrouping() throws IOException {
         assertThat(
             simulateAggByB(AB_DATA, Sum::new, "s0"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("s0", DataType.LONG, List.of(3L, 3L)),
-                    new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
-                )
-            )
+            equalTo(new Result(Column.ofLong("s0", 3L, 3L), Column.ofKeyword("b", "x", "y")))
         );
     }
 
     public void testStatsCountWithGrouping() throws IOException {
         assertThat(
             simulateAggByB(AB_DATA, Count::new, "cnt"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("cnt", DataType.LONG, List.of(2L, 1L)),
-                    new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
-                )
-            )
+            equalTo(new Result(Column.ofLong("cnt", 2L, 1L), Column.ofKeyword("b", "x", "y")))
         );
     }
 
     public void testStatsMin() throws IOException {
-        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 5, "b", "x"), Map.of("a", 3, "b", "y"));
         assertThat(
-            simulateAggByB(data, Min::new, "lo"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("lo", DataType.INTEGER, List.of(1L, 3L)),
-                    new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
-                )
-            )
+            simulateAggByB(List.of(Map.of("a", 1, "b", "x"), Map.of("a", 5, "b", "x"), Map.of("a", 3, "b", "y")), Min::new, "lo"),
+            equalTo(new Result(Column.ofInt("lo", 1L, 3L), Column.ofKeyword("b", "x", "y")))
         );
     }
 
     public void testStatsMax() throws IOException {
-        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 5, "b", "x"), Map.of("a", 3, "b", "y"));
         assertThat(
-            simulateAggByB(data, Max::new, "hi"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("hi", DataType.INTEGER, List.of(5L, 3L)),
-                    new Simulator.Column("b", DataType.KEYWORD, List.of("x", "y"))
-                )
-            )
+            simulateAggByB(List.of(Map.of("a", 1, "b", "x"), Map.of("a", 5, "b", "x"), Map.of("a", 3, "b", "y")), Max::new, "hi"),
+            equalTo(new Result(Column.ofInt("hi", 5L, 3L), Column.ofKeyword("b", "x", "y")))
         );
     }
 
     public void testStatsNoGrouping() throws IOException {
         assertThat(
             new Simulator(A_SCHEMA, A_DATA).simulate(buildSumNoGroupingAggregate()),
-            equalTo(new Result(new Simulator.Column("total", DataType.LONG, List.of(10L))))
+            equalTo(new Result(Column.ofLong("total", 10L)))
         );
     }
 
@@ -450,25 +358,14 @@ public class SimulatorTests extends ESTestCase {
                     )
                 )
             ),
-            equalTo(
-                new Result(
-                    new Simulator.Column("a", DataType.INTEGER, List.of(1L, 2L, 3L)),
-                    new Simulator.Column("s0", DataType.LONG, List.of(3L, 3L, 3L)),
-                    new Simulator.Column("b", DataType.KEYWORD, List.of("x", "x", "y"))
-                )
-            )
+            equalTo(new Result(Column.ofInt("a", 1L, 2L, 3L), Column.ofLong("s0", 3L, 3L, 3L), Column.ofKeyword("b", "x", "x", "y")))
         );
     }
 
     public void testInlineStatsNoGrouping() throws IOException {
         assertThat(
             new Simulator(A_SCHEMA, A_DATA).simulate(new InlineStats(Source.EMPTY, buildSumNoGroupingAggregate())),
-            equalTo(
-                new Result(
-                    new Simulator.Column("a", DataType.INTEGER, List.of(2L, 3L, 5L)),
-                    new Simulator.Column("total", DataType.LONG, List.of(10L, 10L, 10L))
-                )
-            )
+            equalTo(new Result(Column.ofInt("a", 2L, 3L, 5L), Column.ofLong("total", 10L, 10L, 10L)))
         );
     }
 
@@ -479,12 +376,11 @@ public class SimulatorTests extends ESTestCase {
             "test_idx",
             List.of(new SimSchema.SimColumn("s1", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
         );
-        var data = List.<Map<String, Object>>of(Map.of("s1", 1, "b", "x"), Map.of("s1", 1, "b", "y"), Map.of("s1", 2, "b", "x"));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var s1Attr = from.output().getFirst();
         var bAttr = from.output().get(1);
         assertThat(
-            new Simulator(schema, data).simulate(
+            new Simulator(schema, List.of(Map.of("s1", 1, "b", "x"), Map.of("s1", 1, "b", "y"), Map.of("s1", 2, "b", "x"))).simulate(
                 new Aggregate(
                     Source.EMPTY,
                     from,
@@ -496,12 +392,7 @@ public class SimulatorTests extends ESTestCase {
                     )
                 )
             ),
-            equalTo(
-                new Result(
-                    new Simulator.Column("s0", DataType.LONG, List.of(2L, 1L)),
-                    new Simulator.Column("s1", DataType.INTEGER, List.of(1L, 2L))
-                )
-            )
+            equalTo(new Result(Column.ofLong("s0", 2L, 1L), Column.ofInt("s1", 1L, 2L)))
         );
     }
 
@@ -511,7 +402,6 @@ public class SimulatorTests extends ESTestCase {
         // Example: INLINE STATS s1 = MAX(b + 5) BY b | INLINE STATS s1 = COUNT(b) BY s1
         // After the second INLINE STATS, s1 should retain the MAX result (6), not become COUNT (1).
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("b", DataType.INTEGER)));
-        var data = List.<Map<String, Object>>of(Map.of("b", 1));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var bAttr = from.output().getFirst(); // b:INTEGER
 
@@ -521,17 +411,9 @@ public class SimulatorTests extends ESTestCase {
             bAttr
         );
 
-        var sim = new Simulator(schema, data);
+        var sim = Simulator.singleRow(schema, Map.of("b", 1));
         Result result1 = sim.simulate(new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, from, List.of(bAttr), aggregates)));
-        assertThat(
-            result1,
-            equalTo(
-                new Result(
-                    new Simulator.Column("b", DataType.INTEGER, List.of(1L)),
-                    new Simulator.Column("s1", DataType.INTEGER, List.of(6L))
-                )
-            )
-        );
+        assertThat(result1, equalTo(new Result(Column.ofInt("b", 1L), Column.ofInt("s1", 6L))));
 
         // Second INLINE STATS: s1 = COUNT(b) BY s1
         // The grouping key s1 has value 6; COUNT(b) = 1.
@@ -546,12 +428,7 @@ public class SimulatorTests extends ESTestCase {
         );
         assertThat(
             sim.simulate(new InlineStats(Source.EMPTY, aggregate)),
-            equalTo(
-                new Result(
-                    new Simulator.Column("b", DataType.INTEGER, List.of(1L)),
-                    new Simulator.Column("s1", DataType.INTEGER, List.of(6L))
-                )
-            )
+            equalTo(new Result(Column.ofInt("b", 1L), Column.ofInt("s1", 6L)))
         );
     }
 
@@ -646,16 +523,16 @@ public class SimulatorTests extends ESTestCase {
     public void testNestedStringFunctions() throws IOException {
         // " hi " -> TRIM -> "hi" -> TO_UPPER -> "HI"
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
-        var data = List.<Map<String, Object>>of(Map.of("x", " hi "));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var xAttr = from.output().getFirst();
-        Result result = new Simulator(schema, data).simulate(
-            new Eval(
-                Source.EMPTY,
-                from,
-                List.of(new Alias(Source.EMPTY, "y", new ToUpper(Source.EMPTY, new Trim(Source.EMPTY, xAttr), EsqlTestUtils.TEST_CFG)))
-            )
-        );
+        Result result = Simulator.singleRow(schema, Map.of("x", " hi "))
+            .simulate(
+                new Eval(
+                    Source.EMPTY,
+                    from,
+                    List.of(new Alias(Source.EMPTY, "y", new ToUpper(Source.EMPTY, new Trim(Source.EMPTY, xAttr), EsqlTestUtils.TEST_CFG)))
+                )
+            );
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().getFirst(), equalTo("HI"));
     }
@@ -678,13 +555,14 @@ public class SimulatorTests extends ESTestCase {
             List.of(new SimSchema.SimColumn("a", DataType.KEYWORD), new SimSchema.SimColumn("b", DataType.KEYWORD))
         );
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        Result result = new Simulator(schema, List.of(Map.of("a", "foo", "b", "bar"))).simulate(
-            new Eval(
-                Source.EMPTY,
-                from,
-                List.of(new Alias(Source.EMPTY, "c", new Concat(Source.EMPTY, from.output().getFirst(), List.of(from.output().get(1)))))
-            )
-        );
+        Result result = Simulator.singleRow(schema, Map.of("a", "foo", "b", "bar"))
+            .simulate(
+                new Eval(
+                    Source.EMPTY,
+                    from,
+                    List.of(new Alias(Source.EMPTY, "c", new Concat(Source.EMPTY, from.output().getFirst(), List.of(from.output().get(1)))))
+                )
+            );
         assertThat(result.getColumn("c").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("c").values().getFirst(), equalTo("foobar"));
     }
@@ -717,7 +595,7 @@ public class SimulatorTests extends ESTestCase {
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         Alias alias = new Alias(Source.EMPTY, "y", new Substring(Source.EMPTY, from.output().getFirst(), of(2), of(3)));
-        Result result = new Simulator(schema, List.of(Map.of("x", "hello"))).simulate(new Eval(Source.EMPTY, from, List.of(alias)));
+        Result result = Simulator.singleRow(schema, Map.of("x", "hello")).simulate(new Eval(Source.EMPTY, from, List.of(alias)));
         assertThat(result.getColumn("y").type(), equalTo(DataType.KEYWORD));
         assertThat(result.getColumn("y").values().getFirst(), equalTo("ell"));
     }
@@ -725,13 +603,7 @@ public class SimulatorTests extends ESTestCase {
     public void testEvalMod() throws IOException {
         assertThat(
             simulate("ROW x=7, y=3 | EVAL z = x % y"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(7)),
-                    new Simulator.Column("y", DataType.INTEGER, List.of(3)),
-                    new Simulator.Column("z", DataType.INTEGER, List.of(1L))
-                )
-            )
+            equalTo(new Result(Column.ofInt("x", 7), Column.ofInt("y", 3), Column.ofInt("z", 1L)))
         );
     }
 
@@ -746,25 +618,15 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testEvalNeg() throws IOException {
-        assertThat(
-            simulate("ROW x=3 | EVAL z = -x"),
-            equalTo(
-                new Result(
-                    new Simulator.Column("x", DataType.INTEGER, List.of(3)),
-                    new Simulator.Column("z", DataType.INTEGER, List.of(-3L))
-                )
-            )
-        );
+        assertThat(simulate("ROW x=3 | EVAL z = -x"), equalTo(new Result(Column.ofInt("x", 3), Column.ofInt("z", -3L))));
     }
 
     public void testNegOverflow() throws IOException {
         // -Integer.MIN_VALUE overflows 32-bit; ES|QL returns null
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.INTEGER)));
-        var data = List.<Map<String, Object>>of(Map.of("a", Integer.MIN_VALUE));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        Result result = new Simulator(schema, data).simulate(
-            new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "z", new Neg(Source.EMPTY, from.output().getFirst()))))
-        );
+        Result result = Simulator.singleRow(schema, Map.of("a", Integer.MIN_VALUE))
+            .simulate(new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "z", new Neg(Source.EMPTY, from.output().getFirst())))));
         assertNull(result.getColumn("z").values().getFirst());
     }
 
@@ -791,17 +653,14 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testWhereNotEquals() throws IOException {
-        // Build programmatically because the ES|QL parser represents != as Not(Equals(...)),
-        // not as NotEquals directly.
+        // Build programmatically because the ES|QL parser represents != as Not(Equals(...)), not as NotEquals directly.
         var schema = new SimSchema(
             "test_idx",
             List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("b", DataType.KEYWORD))
         );
-        var data = List.<Map<String, Object>>of(Map.of("a", 1, "b", "x"), Map.of("a", 2, "b", "y"), Map.of("a", 3, "b", "z"));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        Result result = new Simulator(schema, data).simulate(
-            new Filter(Source.EMPTY, from, new NotEquals(Source.EMPTY, from.output().getFirst(), of(2)))
-        );
+        Result result = new Simulator(schema, List.of(Map.of("a", 1, "b", "x"), Map.of("a", 2, "b", "y"), Map.of("a", 3, "b", "z")))
+            .simulate(new Filter(Source.EMPTY, from, new NotEquals(Source.EMPTY, from.output().getFirst(), of(2))));
         assertThat(result.numRows(), equalTo(2));
         assertThat(result.getColumn("a").values(), equalTo(List.of(1L, 3L)));
     }
@@ -825,39 +684,34 @@ public class SimulatorTests extends ESTestCase {
     private static Result evalLeftOrRight(BiFunction<Expression, Expression, Expression> fn) throws IOException {
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        return new Simulator(schema, List.of(Map.of("x", "hello"))).simulate(
-            new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", fn.apply(from.output().getFirst(), of(3)))))
-        );
+        return Simulator.singleRow(schema, Map.of("x", "hello"))
+            .simulate(new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", fn.apply(from.output().getFirst(), of(3))))));
     }
 
     private static Result filterKeywordColumn(UnaryOperator<Expression> predicateFn) throws IOException {
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
-        var data = List.<Map<String, Object>>of(Map.of("x", "foobar"), Map.of("x", "bazqux"));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        return new Simulator(schema, data).simulate(new Filter(Source.EMPTY, from, predicateFn.apply(from.output().getFirst())));
+        return new Simulator(schema, List.of(Map.of("x", "foobar"), Map.of("x", "bazqux"))).simulate(
+            new Filter(Source.EMPTY, from, predicateFn.apply(from.output().getFirst()))
+        );
     }
 
     private static Aggregate buildSumNoGroupingAggregate() {
-        var from = LogicalPlanGenerator.buildEsRelation(A_SCHEMA);
-        var aAttr = from.output().getFirst();
         return new Aggregate(
             Source.EMPTY,
-            from,
+            LogicalPlanGenerator.buildEsRelation(A_SCHEMA),
             List.of(),
-            List.<NamedExpression>of(new Alias(Source.EMPTY, "total", new Sum(Source.EMPTY, aAttr)))
+            List.of(
+                new Alias(Source.EMPTY, "total", new Sum(Source.EMPTY, LogicalPlanGenerator.buildEsRelation(A_SCHEMA).output().getFirst()))
+            )
         );
     }
 
     private static Result evalUnaryStringFn(String input, UnaryOperator<Expression> fn) throws IOException {
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        return new Simulator(schema, List.of(Map.of("x", input))).simulate(
-            new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", fn.apply(from.output().getFirst()))))
-        );
-    }
-
-    private static Object dt(String ts) {
-        return CsvTestUtils.Type.DATETIME.convert(ts);
+        return Simulator.singleRow(schema, Map.of("x", input))
+            .simulate(new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", fn.apply(from.output().getFirst())))));
     }
 
     private Result simulate(String statement) throws IOException {
