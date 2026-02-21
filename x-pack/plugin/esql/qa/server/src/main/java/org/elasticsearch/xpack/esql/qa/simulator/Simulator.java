@@ -270,15 +270,15 @@ public class Simulator {
         if (activeBug == SimBug.INLINE_STATS_DROPS_ROWS) {
             return visit(inlineStats.aggregate());
         }
-        var aggregate = inlineStats.aggregate();
-        Result childResult = simulate(aggregate.child());
+        Aggregate innerAggregate = inlineStats.aggregate();
+        Result childResult = simulate(innerAggregate.child());
         int numRows = childResult.numRows();
-        var groups = buildGroups(aggregate, childResult);
+        var groups = buildGroups(innerAggregate, childResult);
         // Deduplicate by name (keep last): matches ES mergeOutputExpressions semantics where
         // the last entry wins. For INLINE STATS, grouping keys appear after aggregate functions
         // in the aggregates list, so the grouping key's original child value takes precedence
         // over an aggregate output with the same name.
-        List<Column> allAggColumns = aggregate.aggregates().stream().map(namedExpr -> {
+        List<Column> allAggColumns = innerAggregate.aggregates().stream().map(namedExpr -> {
             Expression unwrapped = Alias.unwrap(namedExpr);
             if (unwrapped instanceof AggregateFunction aggFunc) {
                 Object[] broadcast = new Object[numRows];

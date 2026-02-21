@@ -46,6 +46,10 @@ import java.util.function.IntPredicate;
 import java.util.function.UnaryOperator;
 import java.util.stream.IntStream;
 
+/**
+ * Columnar result of a simulated ES|QL query execution. Also serves as the expression evaluator:
+ * given an {@link Expression} tree, {@link #evaluate} walks it and produces a column of output values.
+ */
 public record Result(List<Simulator.Column> columns) {
     public Result(Simulator.Column first, Simulator.Column... rest) {
         this(Arrays.asList(ArrayUtils.prepend(first, rest)));
@@ -56,7 +60,7 @@ public record Result(List<Simulator.Column> columns) {
     }
 
     public Simulator.Column getColumn(String name) {
-        // Last match wins, respecting column shadowing
+        // ES|QL EVAL can shadow columns; iterating in reverse returns the live value.
         for (int i = columns.size() - 1; i >= 0; i--) {
             Simulator.Column c = columns.get(i);
             if (c.name().equals(name)) {
@@ -104,6 +108,7 @@ public record Result(List<Simulator.Column> columns) {
             case Reverse rev -> evalUnaryString(rev.field(), activeBug, s -> new StringBuilder(s).reverse().toString());
             case Length length -> {
                 Simulator.UnnamedColumn input = evaluate(length.field(), activeBug);
+                // The simulator stores all integer values as Long internally, even when DataType is INTEGER.
                 yield new Simulator.UnnamedColumn(
                     DataType.INTEGER,
                     input.values().stream().<Object>map(o -> o == null ? null : (long) o.toString().length()).toList()
@@ -155,6 +160,7 @@ public record Result(List<Simulator.Column> columns) {
             case Substring substring -> {
                 Simulator.UnnamedColumn strCol = evaluate(substring.children().get(0), activeBug);
                 Simulator.UnnamedColumn startCol = evaluate(substring.children().get(1), activeBug);
+                // SUBSTRING(str, start) with no length arg returns to end-of-string; lenCol == null encodes that.
                 Simulator.UnnamedColumn lenCol = substring.children().size() > 2 ? evaluate(substring.children().get(2), activeBug) : null;
                 yield new Simulator.UnnamedColumn(DataType.KEYWORD, IntStream.range(0, strCol.values().size()).<Object>mapToObj(i -> {
                     Object strVal = strCol.values().get(i);

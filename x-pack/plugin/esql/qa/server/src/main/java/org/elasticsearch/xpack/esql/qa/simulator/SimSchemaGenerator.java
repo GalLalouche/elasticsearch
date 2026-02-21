@@ -37,7 +37,10 @@ class SimSchemaGenerator {
         return new SimSchema(indexName, columns);
     }
 
-    /** Retries {@link #generate} until the schema contains at least one INTEGER column. */
+    /**
+     * Retries {@link #generate} until the schema contains at least one INTEGER column.
+     * Terminates quickly since INTEGER is one of two types in the pool.
+     */
     static SimSchema generateWithInteger(SourceOfRandomness random) {
         SimSchema schema;
         do {
@@ -50,7 +53,7 @@ class SimSchemaGenerator {
         int len = random.nextInt(minLen, maxLen);
         StringBuilder sb = new StringBuilder(len);
         for (int i = 0; i < len; i++) {
-            sb.append((char) ('a' + random.nextInt(0, 25)));
+            sb.append((char) ('a' + random.nextInt(0, 'z' - 'a')));
         }
         return sb.toString();
     }

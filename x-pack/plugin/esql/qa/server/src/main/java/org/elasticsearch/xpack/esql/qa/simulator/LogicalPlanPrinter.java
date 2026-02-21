@@ -114,6 +114,7 @@ public class LogicalPlanPrinter {
 
     private static void printSpecific(Limit limit, StringBuilder sb) {
         printCommon(limit.child(), sb);
+        // The generator always constructs Limit with a Literal argument
         sb.append(" | LIMIT ").append(((Literal) limit.limit()).value());
     }
 
@@ -149,6 +150,7 @@ public class LogicalPlanPrinter {
             );
     }
 
+    /** Wraps arithmetic sub-expressions in parentheses to avoid operator-precedence bugs in the printed query. */
     private static String parenthesizeArithmetic(Expression expr) {
         return expr instanceof ArithmeticOperation ? "(" + printExpression(expr) + ")" : printExpression(expr);
     }

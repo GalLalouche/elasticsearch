@@ -324,14 +324,11 @@ public class SimulatorPropertyIT {
                     List<SimSchema.SimColumn> reducedCols = new ArrayList<>(larger.schema().columns());
                     reducedCols.remove(c);
                     SimSchema reducedSchema = new SimSchema(larger.schema().indexName(), reducedCols);
-                    List<Map<String, Object>> reducedData = larger.data()
-                        .stream()
-                        .<Map<String, Object>>map(row -> {
-                            var copy = new LinkedHashMap<>(row);
-                            copy.remove(colName);
-                            return copy;
-                        })
-                        .toList();
+                    List<Map<String, Object>> reducedData = larger.data().stream().<Map<String, Object>>map(row -> {
+                        var copy = new LinkedHashMap<>(row);
+                        copy.remove(colName);
+                        return copy;
+                    }).toList();
                     candidates.add(new TestCase(reducedSchema, reducedData, larger.plan(), larger.query()));
                 }
             }
@@ -410,16 +407,14 @@ public class SimulatorPropertyIT {
                     }
                 }
                 case Aggregate agg -> result.addAll(aggExpressionCandidates(agg, exprCandidates));
-                default -> {}
+                default -> {
+                }
             }
             return result;
         }
 
         /** Returns candidate Aggregates where one aggregate field expression has been replaced. */
-        private static List<Aggregate> aggExpressionCandidates(
-            Aggregate agg,
-            Function<Expression, List<Expression>> exprCandidates
-        ) {
+        private static List<Aggregate> aggExpressionCandidates(Aggregate agg, Function<Expression, List<Expression>> exprCandidates) {
             List<Aggregate> result = new ArrayList<>();
             for (int a = 0; a < agg.aggregates().size(); a++) {
                 if (agg.aggregates().get(a) instanceof Alias alias && alias.child() instanceof AggregateFunction aggFunc) {

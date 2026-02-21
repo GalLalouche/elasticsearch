@@ -396,6 +396,11 @@ public class SimulatorTests extends ESTestCase {
         );
     }
 
+    /**
+     * Guards against a regression where chained INLINE STATS incorrectly replaced a grouping key
+     * value with an aggregate result of the same name. When a grouping key collides with an aggregate
+     * output name, ES preserves the grouping key's value (the original child column), not the aggregate.
+     */
     public void testChainedInlineStatsShadowingKeepsGroupingKeyValue() throws IOException {
         // When a second INLINE STATS redefines a column from the first via an aggregate that shares
         // its name with a grouping key, ES preserves the grouping key's (original child) value.
@@ -521,7 +526,6 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testNestedStringFunctions() throws IOException {
-        // " hi " -> TRIM -> "hi" -> TO_UPPER -> "HI"
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var xAttr = from.output().getFirst();
@@ -697,13 +701,12 @@ public class SimulatorTests extends ESTestCase {
     }
 
     private static Aggregate buildSumNoGroupingAggregate() {
+        var from = LogicalPlanGenerator.buildEsRelation(A_SCHEMA);
         return new Aggregate(
             Source.EMPTY,
-            LogicalPlanGenerator.buildEsRelation(A_SCHEMA),
+            from,
             List.of(),
-            List.of(
-                new Alias(Source.EMPTY, "total", new Sum(Source.EMPTY, LogicalPlanGenerator.buildEsRelation(A_SCHEMA).output().getFirst()))
-            )
+            List.of(new Alias(Source.EMPTY, "total", new Sum(Source.EMPTY, from.output().getFirst())))
         );
     }
 

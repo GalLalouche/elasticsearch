@@ -27,19 +27,20 @@ class SimDataGenerator {
     private static final double NULL_PROBABILITY = 0.2;
 
     static List<Map<String, Object>> generate(SimSchema schema, SourceOfRandomness random) {
-        int n = random.nextInt(1, 5);
-        return Stream.generate(() -> generateRow(schema, random)).limit(n).toList();
+        int rowCount = random.nextInt(1, 5);
+        return Stream.generate(() -> generateRow(schema, random)).limit(rowCount).toList();
     }
 
     private static Map<String, Object> generateRow(SimSchema schema, SourceOfRandomness random) {
         Map<String, Object> row = new LinkedHashMap<>();
         for (SimSchema.SimColumn col : schema.columns()) {
             if (random.nextDouble() < NULL_PROBABILITY) {
-                continue; // absent keys appear as null in ES|QL
+                continue; // absent keys are not serialized in JSON, so ES reads them as null
             }
             row.put(col.name(), generateValue(col.type(), random));
         }
-        if (row.isEmpty()) { // ES rejects empty documents
+        if (row.isEmpty()) {
+            // ES rejects empty documents; any column works — we use the first one arbitrarily.
             SimSchema.SimColumn firstCol = schema.columns().getFirst();
             row.put(firstCol.name(), generateValue(firstCol.type(), random));
         }

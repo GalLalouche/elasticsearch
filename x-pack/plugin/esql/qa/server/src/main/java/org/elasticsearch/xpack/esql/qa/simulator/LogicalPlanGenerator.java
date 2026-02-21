@@ -399,9 +399,9 @@ public class LogicalPlanGenerator {
     }
 
     private static Concat generateConcat(List<Attribute> keywordAttrs, int depth, SourceOfRandomness random, Expression child) {
-        int nRest = random.nextInt(1, 2);
-        List<Expression> rest = new ArrayList<>(nRest);
-        for (int j = 0; j < nRest; j++) {
+        int extraArgs = random.nextInt(1, 2);
+        List<Expression> rest = new ArrayList<>(extraArgs);
+        for (int j = 0; j < extraArgs; j++) {
             rest.add(generateKeywordExpression(keywordAttrs, depth - 1, random));
         }
         return new Concat(Source.EMPTY, child, rest);
