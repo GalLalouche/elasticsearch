@@ -70,7 +70,6 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import static java.util.function.Function.identity;
 import static org.elasticsearch.xpack.esql.core.util.TestUtils.of;
 
 /**
@@ -78,7 +77,7 @@ import static org.elasticsearch.xpack.esql.core.util.TestUtils.of;
  * is wrapped in randomly chosen layers (KEEP, DROP, EVAL, FILTER, LIMIT, SORT, STATS, INLINE STATS)
  * up to a configurable depth.
  */
-public class LogicalPlanGenerator {
+class LogicalPlanGenerator {
     private LogicalPlanGenerator() { /* static class */ }
 
     private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", 5);
@@ -122,7 +121,7 @@ public class LogicalPlanGenerator {
             return plan;
         }
         LogicalPlan resolvedChild = resolveReferences(unaryPlan.child());
-        Map<String, Attribute> canonical = resolvedChild.output().stream().collect(Collectors.toMap(Attribute::name, identity()));
+        Map<String, Attribute> canonical = resolvedChild.output().stream().collect(Collectors.toMap(Attribute::name, a -> a, (a, b) -> b));
         return switch (plan) {
             case Keep keep -> new Keep(
                 keep.source(),
@@ -242,18 +241,14 @@ public class LogicalPlanGenerator {
 
     private static LogicalPlan wrapKeep(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> kept = generateSubset(random, current.output(), 1, current.output().size());
-        return new Keep(Source.EMPTY, current, kept.stream().<NamedExpression>map(identity()).toList());
+        return new Keep(Source.EMPTY, current, List.copyOf(kept));
     }
 
     // DROP is implemented as KEEP of the complement — the resolver does the same conversion
     private static LogicalPlan wrapDrop(LogicalPlan current, List<Attribute> available, SourceOfRandomness random) {
         List<Attribute> dropped = generateSubset(random, available, 1, available.size() - 1);
         Set<String> dropNames = dropped.stream().map(Attribute::name).collect(Collectors.toSet());
-        return new Keep(
-            Source.EMPTY,
-            current,
-            available.stream().filter(a -> dropNames.contains(a.name()) == false).<NamedExpression>map(identity()).toList()
-        );
+        return new Keep(Source.EMPTY, current, available.stream().filter(a -> dropNames.contains(a.name()) == false).toList());
     }
 
     private static LogicalPlan wrapEval(

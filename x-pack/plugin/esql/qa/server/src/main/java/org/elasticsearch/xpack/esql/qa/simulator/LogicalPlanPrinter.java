@@ -52,7 +52,7 @@ import static java.util.stream.Collectors.joining;
  * Converts a {@link LogicalPlan} tree back into an ES|QL query string.
  * Used to send generated plans to Elasticsearch for comparison with the simulator.
  */
-public class LogicalPlanPrinter {
+class LogicalPlanPrinter {
     private LogicalPlanPrinter() { /* static class */ }
 
     public static String print(LogicalPlan plan) {

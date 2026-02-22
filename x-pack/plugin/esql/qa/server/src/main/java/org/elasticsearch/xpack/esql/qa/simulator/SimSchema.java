@@ -10,7 +10,6 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 record SimSchema(String indexName, List<SimColumn> columns) {
     record SimColumn(String name, DataType type) {
@@ -22,6 +21,6 @@ record SimSchema(String indexName, List<SimColumn> columns) {
 
     @Override
     public String toString() {
-        return indexName + "(" + columns.stream().map(SimColumn::toString).collect(Collectors.joining(", ")) + ")";
+        return indexName + "(" + String.join(", ", columns.stream().map(SimColumn::toString).toList()) + ")";
     }
 }

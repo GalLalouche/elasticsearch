@@ -11,7 +11,7 @@ package org.elasticsearch.xpack.esql.qa.simulator;
  * Named simulator bugs for meta-testing. When active, each variant causes the {@link Simulator} to behave incorrectly in a specific way.
  * Property tests verify that these bugs produce detectable, minimal counter-examples after shrinking.
  */
-public enum SimBug {
+enum SimBug {
     BUG_FREE,
     ADD_IS_SUB,
     KEEP_DROPS_FIRST,

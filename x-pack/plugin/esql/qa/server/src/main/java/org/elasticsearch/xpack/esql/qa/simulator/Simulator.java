@@ -65,7 +65,7 @@ import static org.elasticsearch.xpack.esql.EsqlTestUtils.reader;
  * Acts as a reference implementation for ES|QL semantics: property tests compare its output
  * against a real Elasticsearch cluster to detect divergences.
  */
-public class Simulator {
+class Simulator {
     @Nullable
     private final SimSchema schema;
     @Nullable
@@ -438,7 +438,7 @@ public class Simulator {
         return ((Number) object).longValue();
     }
 
-    public record Column(String name, DataType type, List<Object> values) {
+    record Column(String name, DataType type, List<Object> values) {
         public static Column ofInt(String name, Object... values) {
             return new Column(name, DataType.INTEGER, List.of(values));
         }
@@ -461,7 +461,7 @@ public class Simulator {
     }
 
     /** An unnamed column of values, e.g. for literals or inline expressions. */
-    public record UnnamedColumn(DataType type, List<Object> values) {
+    record UnnamedColumn(DataType type, List<Object> values) {
         public UnnamedColumn(Column column) {
             this(column.type(), column.values());
         }

@@ -71,6 +71,7 @@ public class SimulatorTests extends ESTestCase {
     );
     private static final SimSchema A_SCHEMA = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.INTEGER)));
     private static final List<Map<String, Object>> A_DATA = List.of(Map.of("a", 2), Map.of("a", 3), Map.of("a", 5));
+    private static final SimSchema X_KEYWORD_SCHEMA = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
 
     public void testRow() throws IOException {
         assertThat(simulate("ROW x=1, y=2, z=3"), equalTo(new Result(Column.ofInt("x", 1), Column.ofInt("y", 2), Column.ofInt("z", 3))));
@@ -528,7 +529,7 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testNestedStringFunctions() throws IOException {
-        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
+        var schema = X_KEYWORD_SCHEMA;
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         var xAttr = from.output().getFirst();
         Result result = Simulator.singleRow(schema, Map.of("x", " hi "))
@@ -598,7 +599,7 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testEvalSubstring() throws IOException {
-        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
+        var schema = X_KEYWORD_SCHEMA;
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         Result result = Simulator.singleRow(schema, Map.of("x", "hello"))
             .simulate(
@@ -694,14 +695,14 @@ public class SimulatorTests extends ESTestCase {
     }
 
     private static Result evalLeftOrRight(BiFunction<Expression, Expression, Expression> fn) throws IOException {
-        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
+        var schema = X_KEYWORD_SCHEMA;
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         return Simulator.singleRow(schema, Map.of("x", "hello"))
             .simulate(new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", fn.apply(from.output().getFirst(), of(3))))));
     }
 
     private static Result filterKeywordColumn(UnaryOperator<Expression> predicateFn) throws IOException {
-        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
+        var schema = X_KEYWORD_SCHEMA;
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         return new Simulator(schema, List.of(Map.of("x", "foobar"), Map.of("x", "bazqux"))).simulate(
             new Filter(Source.EMPTY, from, predicateFn.apply(from.output().getFirst()))
@@ -719,7 +720,7 @@ public class SimulatorTests extends ESTestCase {
     }
 
     private static Result evalUnaryStringFn(String input, UnaryOperator<Expression> fn) throws IOException {
-        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
+        var schema = X_KEYWORD_SCHEMA;
         var from = LogicalPlanGenerator.buildEsRelation(schema);
         return Simulator.singleRow(schema, Map.of("x", input))
             .simulate(new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "y", fn.apply(from.output().getFirst())))));
