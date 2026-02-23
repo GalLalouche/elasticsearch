@@ -772,6 +772,135 @@ public class SimulatorTests extends ESTestCase {
         assertNull(result.getColumn("neg_n").values().getFirst());
     }
 
+    public void testRowDouble() throws IOException {
+        assertThat(
+            simulate("ROW x=1.5, y=2.5"),
+            equalTo(new Result(Column.ofDouble("x", 1.5), Column.ofDouble("y", 2.5)))
+        );
+    }
+
+    public void testEvalDoubleAdd() throws IOException {
+        assertThat(
+            simulate("ROW x=1.5, y=2.5 | EVAL z = x + y"),
+            equalTo(new Result(Column.ofDouble("x", 1.5), Column.ofDouble("y", 2.5), Column.ofDouble("z", 4.0)))
+        );
+    }
+
+    public void testEvalDoubleSub() throws IOException {
+        assertThat(
+            simulate("ROW x=5.0, y=1.5 | EVAL z = x - y"),
+            equalTo(new Result(Column.ofDouble("x", 5.0), Column.ofDouble("y", 1.5), Column.ofDouble("z", 3.5)))
+        );
+    }
+
+    public void testEvalDoubleMul() throws IOException {
+        assertThat(
+            simulate("ROW x=2.0, y=3.5 | EVAL z = x * y"),
+            equalTo(new Result(Column.ofDouble("x", 2.0), Column.ofDouble("y", 3.5), Column.ofDouble("z", 7.0)))
+        );
+    }
+
+    public void testEvalDoubleDiv() throws IOException {
+        assertThat(
+            simulate("ROW x=7.0, y=2.0 | EVAL z = x / y"),
+            equalTo(new Result(Column.ofDouble("x", 7.0), Column.ofDouble("y", 2.0), Column.ofDouble("z", 3.5)))
+        );
+    }
+
+    public void testEvalDoubleDivByZero() throws IOException {
+        // DOUBLE division by zero → Infinity → null (ES|QL maps Infinity/NaN to null)
+        Result result = simulate("ROW x=5.0 | EVAL z = x / 0.0");
+        assertNull(result.getColumn("z").values().getFirst());
+    }
+
+    public void testEvalDoubleNeg() throws IOException {
+        assertThat(
+            simulate("ROW x=3.5 | EVAL z = -x"),
+            equalTo(new Result(Column.ofDouble("x", 3.5), Column.ofDouble("z", -3.5)))
+        );
+    }
+
+    public void testEvalMixedIntDouble() throws IOException {
+        // INTEGER + DOUBLE promotes to DOUBLE
+        assertThat(
+            simulate("ROW x=1, y=2.5 | EVAL z = x + y"),
+            equalTo(new Result(Column.ofInt("x", 1), Column.ofDouble("y", 2.5), Column.ofDouble("z", 3.5)))
+        );
+    }
+
+    public void testWhereDoubleComparison() throws IOException {
+        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.DOUBLE)));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5)))
+            .simulate(new Filter(Source.EMPTY, from, new GreaterThan(Source.EMPTY, from.output().getFirst(), of(1.0))));
+        assertThat(result.numRows(), equalTo(2));
+        assertThat(result.getColumn("a").values(), equalTo(List.of(1.5, 3.0)));
+    }
+
+    public void testStatsSumDouble() throws IOException {
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.DOUBLE), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        Result result = new Simulator(schema, List.of(Map.of("a", 1.5, "b", "x"), Map.of("a", 2.5, "b", "x"), Map.of("a", 3.0, "b", "y")))
+            .simulate(
+                new Aggregate(
+                    Source.EMPTY,
+                    from,
+                    List.of(from.output().get(1)),
+                    List.of(new Alias(Source.EMPTY, "s0", new Sum(Source.EMPTY, from.output().getFirst())), from.output().get(1))
+                )
+            );
+        assertThat(result.getColumn("s0").type(), equalTo(DataType.DOUBLE));
+        assertThat(result.getColumn("s0").values(), equalTo(List.of(4.0, 3.0)));
+    }
+
+    public void testStatsMinDouble() throws IOException {
+        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.DOUBLE)));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5)))
+            .simulate(
+                new Aggregate(
+                    Source.EMPTY,
+                    from,
+                    List.of(),
+                    List.<NamedExpression>of(new Alias(Source.EMPTY, "lo", new Min(Source.EMPTY, from.output().getFirst())))
+                )
+            );
+        assertThat(result.getColumn("lo").type(), equalTo(DataType.DOUBLE));
+        assertThat(result.getColumn("lo").values().getFirst(), equalTo(0.5));
+    }
+
+    public void testStatsMaxDouble() throws IOException {
+        var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.DOUBLE)));
+        var from = LogicalPlanGenerator.buildEsRelation(schema);
+        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5)))
+            .simulate(
+                new Aggregate(
+                    Source.EMPTY,
+                    from,
+                    List.of(),
+                    List.<NamedExpression>of(new Alias(Source.EMPTY, "hi", new Max(Source.EMPTY, from.output().getFirst())))
+                )
+            );
+        assertThat(result.getColumn("hi").type(), equalTo(DataType.DOUBLE));
+        assertThat(result.getColumn("hi").values().getFirst(), equalTo(3.0));
+    }
+
+    public void testEsRelationDoubleInMemory() throws IOException {
+        var schema = new SimSchema(
+            "test_idx",
+            List.of(new SimSchema.SimColumn("a", DataType.DOUBLE), new SimSchema.SimColumn("b", DataType.KEYWORD))
+        );
+        assertThat(
+            new Simulator(schema, List.of(Map.of("a", 1.5, "b", "foo"), Map.of("a", 2.5, "b", "bar"))).simulate(
+                LogicalPlanGenerator.buildEsRelation(schema)
+            ),
+            equalTo(new Result(Column.ofDouble("a", 1.5, 2.5), Column.ofKeyword("b", "foo", "bar")))
+        );
+    }
+
     private static Result simulateAggByB(
         List<Map<String, Object>> data,
         BiFunction<Source, Expression, AggregateFunction> aggFn,

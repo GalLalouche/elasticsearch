@@ -51,6 +51,7 @@ class SimDataGenerator {
         return switch (type) {
             case INTEGER -> random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE);
             case LONG -> random.nextLong(Long.MIN_VALUE, Long.MAX_VALUE);
+            case DOUBLE -> random.nextDouble(-Double.MAX_VALUE / 2, Double.MAX_VALUE / 2);
             case KEYWORD -> random.choose(KEYWORD_POOL);
             default -> throw new UnsupportedOperationException("Unsupported data type for data generation: " + type);
         };

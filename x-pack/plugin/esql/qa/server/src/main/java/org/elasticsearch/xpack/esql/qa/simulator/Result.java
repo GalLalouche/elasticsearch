@@ -42,6 +42,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.BiFunction;
+import java.util.function.DoubleBinaryOperator;
 import java.util.function.IntPredicate;
 import java.util.function.UnaryOperator;
 import java.util.stream.IntStream;
@@ -82,22 +83,30 @@ record Result(List<Simulator.Column> columns) {
                     return rt == DataType.INTEGER ? (Long) (l - r) : Simulator.safeExact(() -> Math.subtractExact(l, r));
                 }
                 return rt == DataType.INTEGER ? (Long) (l + r) : Simulator.safeExact(() -> Math.addExact(l, r));
-            });
+            }, (l, r) -> activeBug == SimBug.ADD_IS_SUB ? l - r : l + r);
             case Sub sub -> evalBinaryLong(sub.left(), sub.right(), activeBug, (l, r, rt) ->
-                rt == DataType.INTEGER ? (Long) (l - r) : Simulator.safeExact(() -> Math.subtractExact(l, r)));
+                rt == DataType.INTEGER ? (Long) (l - r) : Simulator.safeExact(() -> Math.subtractExact(l, r)),
+                (l, r) -> l - r);
             case Mul mul -> evalBinaryLong(mul.left(), mul.right(), activeBug, (l, r, rt) ->
-                rt == DataType.INTEGER ? (Long) (l * r) : Simulator.safeExact(() -> Math.multiplyExact(l, r)));
+                rt == DataType.INTEGER ? (Long) (l * r) : Simulator.safeExact(() -> Math.multiplyExact(l, r)),
+                (l, r) -> l * r);
             case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r, rt) -> {
                 if (r == 0) return null;
                 return rt == DataType.INTEGER ? (Long) (l / r) : Simulator.safeExact(() -> Math.divideExact(l, r));
-            });
+            }, (l, r) -> l / r);
             case Mod mod -> evalBinaryLong(mod.left(), mod.right(), activeBug,
-                (l, r, rt) -> r == 0 ? null : l % r);
+                (l, r, rt) -> r == 0 ? null : l % r,
+                (l, r) -> l % r);
             case Neg neg -> {
                 Simulator.UnnamedColumn input = evaluate(neg.field(), activeBug);
                 yield new Simulator.UnnamedColumn(input.type(), input.values().stream().<Object>map(o -> {
                     if (o == null) {
                         return null;
+                    }
+                    if (input.type() == DataType.DOUBLE) {
+                        double result = -Simulator.toDouble(o);
+                        // ES|QL maps Infinity/NaN to null (not IEEE 754 propagation)
+                        return Double.isFinite(result) ? result : null;
                     }
                     long val = Simulator.toLong(o);
                     if (input.type() == DataType.INTEGER) {
@@ -211,11 +220,15 @@ record Result(List<Simulator.Column> columns) {
     }
 
     /**
-     * Determines the numeric result type for binary arithmetic: LONG if either operand is LONG, INTEGER otherwise.
+     * Determines the numeric result type for binary arithmetic: DOUBLE if either operand is DOUBLE,
+     * LONG if either operand is LONG, INTEGER otherwise.
      * This mirrors ES|QL type promotion without calling {@code op.dataType()} on the AST node, which would
      * fail for string-parsed plans containing {@code UnresolvedAttribute} nodes.
      */
     private static DataType numericResultType(DataType leftType, DataType rightType) {
+        if (leftType == DataType.DOUBLE || rightType == DataType.DOUBLE) {
+            return DataType.DOUBLE;
+        }
         if (leftType == DataType.LONG || rightType == DataType.LONG) {
             return DataType.LONG;
         }
@@ -226,11 +239,22 @@ record Result(List<Simulator.Column> columns) {
         Expression leftExpr,
         Expression rightExpr,
         SimBug activeBug,
-        ArithOp op
+        ArithOp op,
+        DoubleBinaryOperator doubleOp
     ) {
         Simulator.UnnamedColumn left = evaluate(leftExpr, activeBug);
         Simulator.UnnamedColumn right = evaluate(rightExpr, activeBug);
         DataType resultType = numericResultType(left.type(), right.type());
+        if (resultType == DataType.DOUBLE) {
+            return new Simulator.UnnamedColumn(DataType.DOUBLE, zipWith(left.values(), right.values(), (l, r) -> {
+                if (l == null || r == null) {
+                    return null;
+                }
+                double result = doubleOp.applyAsDouble(Simulator.toDouble(l), Simulator.toDouble(r));
+                // ES|QL maps Infinity/NaN to null (not IEEE 754 propagation)
+                return Double.isFinite(result) ? result : null;
+            }));
+        }
         return new Simulator.UnnamedColumn(resultType, zipWith(left.values(), right.values(), (l, r) -> {
             if (l == null || r == null) {
                 return null;
@@ -255,16 +279,25 @@ record Result(List<Simulator.Column> columns) {
         );
     }
 
-    // Both INTEGER and LONG values are stored as Java long internally, so Long.compare handles all numeric comparisons.
+    // Compares numeric values, handling DOUBLE (Double.compare) and INTEGER/LONG (Long.compare).
     private Simulator.UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
         Simulator.UnnamedColumn left = evaluate(leftExpr, activeBug);
         Simulator.UnnamedColumn right = evaluate(rightExpr, activeBug);
+        boolean isDouble = left.type() == DataType.DOUBLE || right.type() == DataType.DOUBLE;
         return new Simulator.UnnamedColumn(
             DataType.BOOLEAN,
             zipWith(
                 left.values(),
                 right.values(),
-                (l, r) -> l == null || r == null ? null : test.test(Long.compare(Simulator.toLong(l), Simulator.toLong(r)))
+                (l, r) -> {
+                    if (l == null || r == null) {
+                        return null;
+                    }
+                    int cmp = isDouble
+                        ? Double.compare(Simulator.toDouble(l), Simulator.toDouble(r))
+                        : Long.compare(Simulator.toLong(l), Simulator.toLong(r));
+                    return test.test(cmp);
+                }
             )
         );
     }

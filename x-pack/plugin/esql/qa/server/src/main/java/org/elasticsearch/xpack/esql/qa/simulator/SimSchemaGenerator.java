@@ -23,9 +23,9 @@ import java.util.Set;
 class SimSchemaGenerator {
     private SimSchemaGenerator() { /* static class */ }
 
-    private static final Set<DataType> NUMERIC_TYPES = Set.of(DataType.INTEGER, DataType.LONG);
+    private static final Set<DataType> NUMERIC_TYPES = Set.of(DataType.INTEGER, DataType.LONG, DataType.DOUBLE);
     private static final List<String> COLUMN_NAME_POOL = List.of("a", "b", "c", "d", "x", "y");
-    private static final List<DataType> TYPE_POOL = List.of(DataType.INTEGER, DataType.LONG, DataType.KEYWORD);
+    private static final List<DataType> TYPE_POOL = List.of(DataType.INTEGER, DataType.LONG, DataType.DOUBLE, DataType.KEYWORD);
 
     static SimSchema generate(SourceOfRandomness random) {
         String indexName = "sim_" + randomAlpha(random, 3, 6);

@@ -174,7 +174,7 @@ class Simulator {
         // ES|QL returns integers as Long internally, so promote Integer values to match
         return new Result(schema.columns().stream().map(col -> new Column(col.name(), col.type(), data.stream().map(row -> {
             Object v = row.get(col.name());
-            return v instanceof Integer i ? i.longValue() : v;
+            return v instanceof Integer i ? i.longValue() : v instanceof Float f ? f.doubleValue() : v;
         }).toList())).toList());
     }
 
@@ -360,17 +360,48 @@ class Simulator {
             }
             case Sum sum -> {
                 List<Object> nonNull = nonNullValues(indices, childResult, sum.field(), activeBug);
-                yield nonNull.isEmpty() ? null : nonNull.stream().mapToLong(Simulator::toLong).sum();
+                if (nonNull.isEmpty()) {
+                    yield null;
+                }
+                if (sum.dataType() == DataType.DOUBLE) {
+                    double result = nonNull.stream().mapToDouble(v -> toDouble(v)).sum();
+                    // ES|QL maps Infinity/NaN to null
+                    yield Double.isFinite(result) ? result : null;
+                }
+                // LONG SUM: use Math.addExact to detect overflow → null
+                long acc = 0;
+                boolean overflowed = false;
+                for (Object v : nonNull) {
+                    try {
+                        acc = Math.addExact(acc, toLong(v));
+                    } catch (ArithmeticException e) {
+                        overflowed = true;
+                        break;
+                    }
+                }
+                yield overflowed ? null : acc;
             }
             case Min min -> {
                 List<Object> nonNull = nonNullValues(indices, childResult, min.field(), activeBug);
                 // ES constant-folds MIN(constant) to the constant — return it even for empty groups.
-                yield nonNull.isEmpty() ? evaluateConstant(min.field()) : nonNull.stream().mapToLong(Simulator::toLong).min().orElseThrow();
+                if (nonNull.isEmpty()) {
+                    yield evaluateConstant(min.field());
+                }
+                if (min.dataType() == DataType.DOUBLE) {
+                    yield nonNull.stream().mapToDouble(v -> toDouble(v)).min().orElseThrow();
+                }
+                yield nonNull.stream().mapToLong(Simulator::toLong).min().orElseThrow();
             }
             case Max max -> {
                 List<Object> nonNull = nonNullValues(indices, childResult, max.field(), activeBug);
                 // ES constant-folds MAX(constant) to the constant — return it even for empty groups.
-                yield nonNull.isEmpty() ? evaluateConstant(max.field()) : nonNull.stream().mapToLong(Simulator::toLong).max().orElseThrow();
+                if (nonNull.isEmpty()) {
+                    yield evaluateConstant(max.field());
+                }
+                if (max.dataType() == DataType.DOUBLE) {
+                    yield nonNull.stream().mapToDouble(v -> toDouble(v)).max().orElseThrow();
+                }
+                yield nonNull.stream().mapToLong(Simulator::toLong).max().orElseThrow();
             }
             default -> throw new UnsupportedOperationException(Strings.format("Unsupported aggregate function: %s", aggFunc.getClass()));
         };
@@ -394,6 +425,20 @@ class Simulator {
                 Object r = evaluateConstant(op.right());
                 if (l == null || r == null) {
                     yield null;
+                }
+                if (op.dataType() == DataType.DOUBLE) {
+                    // ES|QL maps Infinity/NaN to null (not IEEE 754 propagation)
+                    double result = switch (op) {
+                        case Add ignored -> toDouble(l) + toDouble(r);
+                        case Sub ignored -> toDouble(l) - toDouble(r);
+                        case Mul ignored -> toDouble(l) * toDouble(r);
+                        case Div ignored -> toDouble(l) / toDouble(r);
+                        case Mod ignored -> toDouble(l) % toDouble(r);
+                        default -> throw new UnsupportedOperationException(
+                            Strings.format("Unsupported arithmetic in evaluateConstant: %s", op.getClass())
+                        );
+                    };
+                    yield Double.isFinite(result) ? result : null;
                 }
                 if (op.dataType() == DataType.INTEGER) {
                     // INTEGER: compute in long, range-check
@@ -425,6 +470,10 @@ class Simulator {
                 Object v = evaluateConstant(neg.field());
                 if (v == null) {
                     yield null;
+                }
+                if (neg.dataType() == DataType.DOUBLE) {
+                    double result = -toDouble(v);
+                    yield Double.isFinite(result) ? result : null;
                 }
                 long val = toLong(v);
                 if (neg.dataType() == DataType.INTEGER) {
@@ -466,6 +515,10 @@ class Simulator {
         return ((Number) object).longValue();
     }
 
+    static double toDouble(Object object) {
+        return ((Number) object).doubleValue();
+    }
+
     record Column(String name, DataType type, List<Object> values) {
         public static Column ofInt(String name, Object... values) {
             return new Column(name, DataType.INTEGER, List.of(values));
@@ -477,6 +530,10 @@ class Simulator {
 
         public static Column ofKeyword(String name, Object... values) {
             return new Column(name, DataType.KEYWORD, List.of(values));
+        }
+
+        public static Column ofDouble(String name, Object... values) {
+            return new Column(name, DataType.DOUBLE, List.of(values));
         }
 
         public static Column ofIp(String name, Object... values) {

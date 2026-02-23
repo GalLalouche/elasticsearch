@@ -80,7 +80,7 @@ import static org.elasticsearch.xpack.esql.core.util.TestUtils.of;
 class LogicalPlanGenerator {
     private LogicalPlanGenerator() { /* static class */ }
 
-    private static final Set<DataType> NUMERIC_TYPES = Set.of(DataType.INTEGER, DataType.LONG);
+    private static final Set<DataType> NUMERIC_TYPES = Set.of(DataType.INTEGER, DataType.LONG, DataType.DOUBLE);
     private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", 5);
     private static final int EXPR_DEPTH = Integer.getInteger("simulator.exprDepth", 2);
 
@@ -203,6 +203,7 @@ class LogicalPlanGenerator {
         return switch (type) {
             case INTEGER -> random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE);
             case LONG -> random.nextLong(Long.MIN_VALUE, Long.MAX_VALUE);
+            case DOUBLE -> random.nextDouble(-Double.MAX_VALUE / 2, Double.MAX_VALUE / 2);
             // Literal requires BytesRef (not String) for KEYWORD values
             case KEYWORD -> new BytesRef(random.choose(KEYWORD_POOL));
             default -> throw new UnsupportedOperationException("Unsupported type for ROW literal: " + type);
@@ -300,9 +301,7 @@ class LogicalPlanGenerator {
         Expression left = generateExpression(numericAttrs, keywordAttrs, EXPR_DEPTH, random);
         Expression right = random.nextBoolean()
             ? generateExpression(numericAttrs, keywordAttrs, EXPR_DEPTH, random)
-            : numericAttrs.stream().anyMatch(a -> a.dataType() == DataType.LONG)
-                ? new Literal(Source.EMPTY, random.nextLong(Long.MIN_VALUE, Long.MAX_VALUE), DataType.LONG)
-                : of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE));
+            : generateNumericLiteral(numericAttrs, random);
         return new Filter(
             Source.EMPTY,
             current,
@@ -377,10 +376,20 @@ class LogicalPlanGenerator {
         if (random.nextBoolean()) {
             return random.choose(numericAttrs);
         }
-        if (numericAttrs.stream().anyMatch(a -> a.dataType() == DataType.LONG)) {
-            return new Literal(Source.EMPTY, random.nextLong(Long.MIN_VALUE, Long.MAX_VALUE), DataType.LONG);
-        }
-        return of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE));
+        return generateNumericLiteral(numericAttrs, random);
+    }
+
+    /**
+     * Generates a numeric literal whose type is randomly chosen from the types present in the given attributes.
+     * This avoids DOUBLE always winning in mixed-type schemas, ensuring LONG overflow paths get exercised too.
+     */
+    private static Expression generateNumericLiteral(List<Attribute> numericAttrs, SourceOfRandomness random) {
+        List<DataType> present = numericAttrs.stream().map(Attribute::dataType).distinct().toList();
+        return switch (random.choose(present)) {
+            case DOUBLE -> new Literal(Source.EMPTY, random.nextDouble(-Double.MAX_VALUE / 2, Double.MAX_VALUE / 2), DataType.DOUBLE);
+            case LONG -> new Literal(Source.EMPTY, random.nextLong(Long.MIN_VALUE, Long.MAX_VALUE), DataType.LONG);
+            default -> of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE));
+        };
     }
 
     /** Generates a keyword expression: either a leaf (attribute or string literal) or a function call. */
