@@ -49,7 +49,7 @@ class SimDataGenerator {
 
     private static Object generateValue(DataType type, SourceOfRandomness random) {
         return switch (type) {
-            case INTEGER -> random.nextInt(1, 10);
+            case INTEGER -> random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE);
             case KEYWORD -> random.choose(KEYWORD_POOL);
             default -> throw new UnsupportedOperationException("Unsupported data type for data generation: " + type);
         };

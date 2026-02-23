@@ -317,6 +317,27 @@ public class SimulatorPropertyIT {
                 }
             }
 
+            // Strategy 7.5: Shrink integer values in data toward smaller magnitudes
+            if (larger.data() != null) {
+                for (int r = 0; r < larger.data().size(); r++) {
+                    for (Map.Entry<String, Object> entry : larger.data().get(r).entrySet()) {
+                        if (entry.getValue() instanceof Integer intVal) {
+                            for (int candidate : intShrinkCandidates(intVal)) {
+                                List<Map<String, Object>> shrunkData = larger.data()
+                                    .stream()
+                                    .<Map<String, Object>>map(LinkedHashMap::new)
+                                    .toList();
+                                shrunkData.get(r).put(entry.getKey(), candidate);
+                                candidates.add(new TestCase(larger.schema(), shrunkData, larger.plan(), larger.query()));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Strategy 7.6: Shrink integer literals in the plan toward smaller magnitudes
+            addIntegerLiteralShrinks(candidates, larger);
+
             // Strategy 8: Remove unused schema columns
             if (larger.schema() != null && larger.schema().columns().size() > 1) {
                 for (int c = 0; c < larger.schema().columns().size(); c++) {
@@ -553,6 +574,77 @@ public class SimulatorPropertyIT {
                 case BOOLEAN -> new Literal(Source.EMPTY, true, DataType.BOOLEAN);
                 default -> null; // Can't simplify unknown types
             };
+        }
+
+        /**
+         * Returns candidate shrink values for an integer, ordered from smallest to largest magnitude.
+         * Tries: 0, 1, -1, value/2, -(value/2) — skipping any that equal the original.
+         */
+        private static List<Integer> intShrinkCandidates(int value) {
+            List<Integer> candidates = new ArrayList<>();
+            if (value != 0) { candidates.add(0); }
+            if (value != 1) { candidates.add(1); }
+            if (value != -1) { candidates.add(-1); }
+            int half = value / 2;
+            if (half != value && half != 0 && half != 1 && half != -1) { candidates.add(half); }
+            int negHalf = -half;
+            if (negHalf != value && negHalf != 0 && negHalf != 1 && negHalf != -1) { candidates.add(negHalf); }
+            return candidates;
+        }
+
+        /**
+         * Tries shrinking each INTEGER literal in the plan toward smaller magnitudes.
+         * Reuses addExpressionShrinksWith for non-leaf stages, then handles the leaf (ROW) separately.
+         */
+        private static void addIntegerLiteralShrinks(List<TestCase> candidates, TestCase larger) {
+            addExpressionShrinksWith(candidates, larger, TestCaseGenerator::shrinkIntegerLiteralsInExpr);
+            // Include the leaf (ROW) stage — ROW literals need shrinking too
+            List<LogicalPlan> stages = flattenStages(larger.plan());
+            LogicalPlan leaf = stages.getLast();
+            if (leaf instanceof Row row) {
+                for (int f = 0; f < row.fields().size(); f++) {
+                    Alias alias = row.fields().get(f);
+                    if (alias.child() instanceof Literal lit
+                        && lit.dataType() == DataType.INTEGER
+                        && lit.value() instanceof Integer intVal) {
+                        for (int candidate : intShrinkCandidates(intVal)) {
+                            List<Alias> newFields = new ArrayList<>(row.fields());
+                            newFields.set(f, new Alias(alias.source(), alias.name(),
+                                new Literal(Source.EMPTY, candidate, DataType.INTEGER)));
+                            List<LogicalPlan> newStages = new ArrayList<>(stages);
+                            newStages.set(stages.size() - 1, new Row(row.source(), newFields));
+                            addPlanCandidate(candidates, larger,
+                                LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                        }
+                    }
+                }
+            }
+        }
+
+        /**
+         * Returns candidate expressions where exactly one INTEGER literal has been replaced
+         * with a smaller-magnitude value, preserving the surrounding expression structure.
+         */
+        private static List<Expression> shrinkIntegerLiteralsInExpr(Expression expr) {
+            List<Expression> result = new ArrayList<>();
+            // If the expression itself is an INTEGER literal, try shrinking it directly
+            if (expr instanceof Literal lit && lit.dataType() == DataType.INTEGER && lit.value() instanceof Integer intVal) {
+                for (int candidate : intShrinkCandidates(intVal)) {
+                    result.add(new Literal(Source.EMPTY, candidate, DataType.INTEGER));
+                }
+                return result;
+            }
+            // Otherwise, try shrinking each child and rebuilding the parent
+            List<Expression> children = expr.children();
+            for (int i = 0; i < children.size(); i++) {
+                Expression child = children.get(i);
+                for (Expression shrunkChild : shrinkIntegerLiteralsInExpr(child)) {
+                    List<Expression> newChildren = new ArrayList<>(children);
+                    newChildren.set(i, shrunkChild);
+                    result.add(expr.replaceChildren(newChildren));
+                }
+            }
+            return result;
         }
     }
 

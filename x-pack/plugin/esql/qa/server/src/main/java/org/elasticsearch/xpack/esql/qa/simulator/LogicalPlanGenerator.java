@@ -200,7 +200,7 @@ class LogicalPlanGenerator {
 
     private static Object generateLiteralValue(DataType type, SourceOfRandomness random) {
         return switch (type) {
-            case INTEGER -> random.nextInt(1, 10);
+            case INTEGER -> random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE);
             // Literal requires BytesRef (not String) for KEYWORD values
             case KEYWORD -> new BytesRef(random.choose(KEYWORD_POOL));
             default -> throw new UnsupportedOperationException("Unsupported type for ROW literal: " + type);
@@ -296,7 +296,7 @@ class LogicalPlanGenerator {
         Expression left = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
         Expression right = random.nextBoolean()
             ? generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random)
-            : of(random.nextInt(1, 10));
+            : of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE));
         return new Filter(
             Source.EMPTY,
             current,
@@ -362,7 +362,7 @@ class LogicalPlanGenerator {
     private static Expression generateLeaf(List<Attribute> integerAttrs, List<Attribute> keywordAttrs, SourceOfRandomness random) {
         // If no integer columns, fall back to LENGTH(keyword) if available, or a literal
         if (integerAttrs.isEmpty()) {
-            return keywordAttrs.isEmpty() ? of(random.nextInt(1, 10)) : new Length(Source.EMPTY, random.choose(keywordAttrs));
+            return keywordAttrs.isEmpty() ? of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE)) : new Length(Source.EMPTY, random.choose(keywordAttrs));
         }
         // 20% chance of LENGTH(keyword) if keyword columns exist
         if (keywordAttrs.isEmpty() == false && random.nextInt(0, 4) == 0) {
@@ -371,7 +371,7 @@ class LogicalPlanGenerator {
         if (random.nextBoolean()) {
             return random.choose(integerAttrs);
         }
-        return of(random.nextInt(1, 10));
+        return of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE));
     }
 
     /** Generates a keyword expression: either a leaf (attribute or string literal) or a function call. */
