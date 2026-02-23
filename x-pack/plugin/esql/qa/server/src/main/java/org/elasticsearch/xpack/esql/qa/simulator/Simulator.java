@@ -364,7 +364,7 @@ class Simulator {
                     yield null;
                 }
                 if (sum.dataType() == DataType.DOUBLE) {
-                    double result = nonNull.stream().mapToDouble(v -> toDouble(v)).sum();
+                    double result = nonNull.stream().mapToDouble(Simulator::toDouble).sum();
                     // ES|QL maps Infinity/NaN to null
                     yield Double.isFinite(result) ? result : null;
                 }
@@ -388,7 +388,7 @@ class Simulator {
                     yield evaluateConstant(min.field());
                 }
                 if (min.dataType() == DataType.DOUBLE) {
-                    yield nonNull.stream().mapToDouble(v -> toDouble(v)).min().orElseThrow();
+                    yield nonNull.stream().mapToDouble(Simulator::toDouble).min().orElseThrow();
                 }
                 yield nonNull.stream().mapToLong(Simulator::toLong).min().orElseThrow();
             }
@@ -399,7 +399,7 @@ class Simulator {
                     yield evaluateConstant(max.field());
                 }
                 if (max.dataType() == DataType.DOUBLE) {
-                    yield nonNull.stream().mapToDouble(v -> toDouble(v)).max().orElseThrow();
+                    yield nonNull.stream().mapToDouble(Simulator::toDouble).max().orElseThrow();
                 }
                 yield nonNull.stream().mapToLong(Simulator::toLong).max().orElseThrow();
             }
@@ -472,8 +472,8 @@ class Simulator {
                     yield null;
                 }
                 if (neg.dataType() == DataType.DOUBLE) {
-                    double result = -toDouble(v);
-                    yield Double.isFinite(result) ? result : null;
+                    double d = -toDouble(v);
+                    yield Double.isFinite(d) ? d : null;
                 }
                 long val = toLong(v);
                 if (neg.dataType() == DataType.INTEGER) {

@@ -381,7 +381,7 @@ class LogicalPlanGenerator {
 
     /**
      * Generates a numeric literal whose type is randomly chosen from the types present in the given attributes.
-     * This avoids DOUBLE always winning in mixed-type schemas, ensuring LONG overflow paths get exercised too.
+     * Randomly selects among the numeric types present in the schema so all types (INTEGER, LONG, DOUBLE) are exercised proportionally.
      */
     private static Expression generateNumericLiteral(List<Attribute> numericAttrs, SourceOfRandomness random) {
         List<DataType> present = numericAttrs.stream().map(Attribute::dataType).distinct().toList();

@@ -76,8 +76,8 @@ public class ForcedShrinkerIT extends ESRestTestCase {
     }
 
     public void testShrink() throws Exception {
-        String queryStr = System.getProperty("simulator.query");
-        String dataStr = System.getProperty("simulator.data");
+        String queryStr = firstNonEmpty("simulator.query", "simulator.queryJson");
+        String dataStr = firstNonEmpty("simulator.dataJson");
         // Support reading query/data from files (for platforms where shell quoting of JSON is painful)
         String queryFile = System.getProperty("simulator.queryFile");
         String dataFile = System.getProperty("simulator.dataFile");
@@ -244,6 +244,17 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         logger.info("=== SHRUNK RESULT (after {} steps) ===", step);
         logger.info("Query: {}", LogicalPlanPrinter.print(plan));
         logger.info("Data: {}", toDataJson(schema, rows));
+    }
+
+    /** Returns the first non-empty system property value among the given property names, or null. */
+    private static String firstNonEmpty(String... propertyNames) {
+        for (String name : propertyNames) {
+            String value = System.getProperty(name);
+            if (value != null && value.isEmpty() == false) {
+                return value;
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

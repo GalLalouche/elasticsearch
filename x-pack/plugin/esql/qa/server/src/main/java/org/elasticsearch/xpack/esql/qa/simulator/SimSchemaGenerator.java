@@ -40,8 +40,8 @@ class SimSchemaGenerator {
     }
 
     /**
-     * Retries {@link #generate} until the schema contains at least one numeric (INTEGER or LONG) column.
-     * Terminates quickly since INTEGER and LONG together are two of three types in the pool.
+     * Retries {@link #generate} until the schema contains at least one numeric (INTEGER, LONG, or DOUBLE) column.
+     * Terminates quickly since three of the four types in the pool are numeric.
      */
     static SimSchema generateWithNumeric(SourceOfRandomness random) {
         SimSchema schema;

@@ -331,7 +331,7 @@ public class SimulatorPropertyIT {
                 }
             }
 
-            // Strategy 7.5: Shrink integer values in data toward smaller magnitudes
+            // Strategy 7.5: Shrink numeric values in data toward smaller magnitudes
             if (larger.data() != null) {
                 for (int r = 0; r < larger.data().size(); r++) {
                     for (Map.Entry<String, Object> entry : larger.data().get(r).entrySet()) {
@@ -344,13 +344,31 @@ public class SimulatorPropertyIT {
                                 shrunkData.get(r).put(entry.getKey(), candidate);
                                 candidates.add(new TestCase(larger.schema(), shrunkData, larger.plan(), larger.query()));
                             }
+                        } else if (entry.getValue() instanceof Long longVal) {
+                            for (long candidate : longShrinkCandidates(longVal)) {
+                                List<Map<String, Object>> shrunkData = larger.data()
+                                    .stream()
+                                    .<Map<String, Object>>map(LinkedHashMap::new)
+                                    .toList();
+                                shrunkData.get(r).put(entry.getKey(), candidate);
+                                candidates.add(new TestCase(larger.schema(), shrunkData, larger.plan(), larger.query()));
+                            }
+                        } else if (entry.getValue() instanceof Double doubleVal) {
+                            for (double candidate : doubleShrinkCandidates(doubleVal)) {
+                                List<Map<String, Object>> shrunkData = larger.data()
+                                    .stream()
+                                    .<Map<String, Object>>map(LinkedHashMap::new)
+                                    .toList();
+                                shrunkData.get(r).put(entry.getKey(), candidate);
+                                candidates.add(new TestCase(larger.schema(), shrunkData, larger.plan(), larger.query()));
+                            }
                         }
                     }
                 }
             }
 
-            // Strategy 7.6: Shrink integer literals in the plan toward smaller magnitudes
-            addIntegerLiteralShrinks(candidates, larger);
+            // Strategy 7.6: Shrink numeric literals in the plan toward smaller magnitudes
+            addNumericLiteralShrinks(candidates, larger);
 
             // Strategy 8: Remove unused schema columns
             if (larger.schema() != null && larger.schema().columns().size() > 1) {
@@ -606,29 +624,74 @@ public class SimulatorPropertyIT {
             return candidates;
         }
 
+        private static List<Long> longShrinkCandidates(long value) {
+            List<Long> candidates = new ArrayList<>();
+            if (value != 0L) { candidates.add(0L); }
+            if (value != 1L) { candidates.add(1L); }
+            if (value != -1L) { candidates.add(-1L); }
+            long half = value / 2;
+            if (half != value && half != 0L && half != 1L && half != -1L) { candidates.add(half); }
+            long negHalf = -half;
+            if (negHalf != value && negHalf != 0L && negHalf != 1L && negHalf != -1L) { candidates.add(negHalf); }
+            return candidates;
+        }
+
+        private static List<Double> doubleShrinkCandidates(double value) {
+            List<Double> candidates = new ArrayList<>();
+            if (value != 0.0) { candidates.add(0.0); }
+            if (value != 1.0) { candidates.add(1.0); }
+            if (value != -1.0) { candidates.add(-1.0); }
+            double half = value / 2;
+            if (half != value && half != 0.0 && half != 1.0 && half != -1.0) { candidates.add(half); }
+            double negHalf = -half;
+            if (negHalf != value && negHalf != 0.0 && negHalf != 1.0 && negHalf != -1.0) { candidates.add(negHalf); }
+            return candidates;
+        }
+
         /**
-         * Tries shrinking each INTEGER literal in the plan toward smaller magnitudes.
+         * Tries shrinking each numeric literal in the plan toward smaller magnitudes.
          * Reuses addExpressionShrinksWith for non-leaf stages, then handles the leaf (ROW) separately.
          */
-        private static void addIntegerLiteralShrinks(List<TestCase> candidates, TestCase larger) {
-            addExpressionShrinksWith(candidates, larger, TestCaseGenerator::shrinkIntegerLiteralsInExpr);
+        private static void addNumericLiteralShrinks(List<TestCase> candidates, TestCase larger) {
+            addExpressionShrinksWith(candidates, larger, TestCaseGenerator::shrinkNumericLiteralsInExpr);
             // Include the leaf (ROW) stage — ROW literals need shrinking too
             List<LogicalPlan> stages = flattenStages(larger.plan());
             LogicalPlan leaf = stages.getLast();
             if (leaf instanceof Row row) {
                 for (int f = 0; f < row.fields().size(); f++) {
                     Alias alias = row.fields().get(f);
-                    if (alias.child() instanceof Literal lit
-                        && lit.dataType() == DataType.INTEGER
-                        && lit.value() instanceof Integer intVal) {
-                        for (int candidate : intShrinkCandidates(intVal)) {
-                            List<Alias> newFields = new ArrayList<>(row.fields());
-                            newFields.set(f, new Alias(alias.source(), alias.name(),
-                                new Literal(Source.EMPTY, candidate, DataType.INTEGER)));
-                            List<LogicalPlan> newStages = new ArrayList<>(stages);
-                            newStages.set(stages.size() - 1, new Row(row.source(), newFields));
-                            addPlanCandidate(candidates, larger,
-                                LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                    if (alias.child() instanceof Literal lit) {
+                        List<Alias> newFields;
+                        if (lit.dataType() == DataType.INTEGER && lit.value() instanceof Integer intVal) {
+                            for (int candidate : intShrinkCandidates(intVal)) {
+                                newFields = new ArrayList<>(row.fields());
+                                newFields.set(f, new Alias(alias.source(), alias.name(),
+                                    new Literal(Source.EMPTY, candidate, DataType.INTEGER)));
+                                List<LogicalPlan> newStages = new ArrayList<>(stages);
+                                newStages.set(stages.size() - 1, new Row(row.source(), newFields));
+                                addPlanCandidate(candidates, larger,
+                                    LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                            }
+                        } else if (lit.dataType() == DataType.LONG && lit.value() instanceof Long longVal) {
+                            for (long candidate : longShrinkCandidates(longVal)) {
+                                newFields = new ArrayList<>(row.fields());
+                                newFields.set(f, new Alias(alias.source(), alias.name(),
+                                    new Literal(Source.EMPTY, candidate, DataType.LONG)));
+                                List<LogicalPlan> newStages = new ArrayList<>(stages);
+                                newStages.set(stages.size() - 1, new Row(row.source(), newFields));
+                                addPlanCandidate(candidates, larger,
+                                    LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                            }
+                        } else if (lit.dataType() == DataType.DOUBLE && lit.value() instanceof Double doubleVal) {
+                            for (double candidate : doubleShrinkCandidates(doubleVal)) {
+                                newFields = new ArrayList<>(row.fields());
+                                newFields.set(f, new Alias(alias.source(), alias.name(),
+                                    new Literal(Source.EMPTY, candidate, DataType.DOUBLE)));
+                                List<LogicalPlan> newStages = new ArrayList<>(stages);
+                                newStages.set(stages.size() - 1, new Row(row.source(), newFields));
+                                addPlanCandidate(candidates, larger,
+                                    LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                            }
                         }
                     }
                 }
@@ -636,23 +699,35 @@ public class SimulatorPropertyIT {
         }
 
         /**
-         * Returns candidate expressions where exactly one INTEGER literal has been replaced
+         * Returns candidate expressions where exactly one numeric literal has been replaced
          * with a smaller-magnitude value, preserving the surrounding expression structure.
          */
-        private static List<Expression> shrinkIntegerLiteralsInExpr(Expression expr) {
+        private static List<Expression> shrinkNumericLiteralsInExpr(Expression expr) {
             List<Expression> result = new ArrayList<>();
-            // If the expression itself is an INTEGER literal, try shrinking it directly
-            if (expr instanceof Literal lit && lit.dataType() == DataType.INTEGER && lit.value() instanceof Integer intVal) {
-                for (int candidate : intShrinkCandidates(intVal)) {
-                    result.add(new Literal(Source.EMPTY, candidate, DataType.INTEGER));
+            // If the expression itself is a numeric literal, try shrinking it directly
+            if (expr instanceof Literal lit) {
+                if (lit.dataType() == DataType.INTEGER && lit.value() instanceof Integer intVal) {
+                    for (int candidate : intShrinkCandidates(intVal)) {
+                        result.add(new Literal(Source.EMPTY, candidate, DataType.INTEGER));
+                    }
+                    return result;
+                } else if (lit.dataType() == DataType.LONG && lit.value() instanceof Long longVal) {
+                    for (long candidate : longShrinkCandidates(longVal)) {
+                        result.add(new Literal(Source.EMPTY, candidate, DataType.LONG));
+                    }
+                    return result;
+                } else if (lit.dataType() == DataType.DOUBLE && lit.value() instanceof Double doubleVal) {
+                    for (double candidate : doubleShrinkCandidates(doubleVal)) {
+                        result.add(new Literal(Source.EMPTY, candidate, DataType.DOUBLE));
+                    }
+                    return result;
                 }
-                return result;
             }
             // Otherwise, try shrinking each child and rebuilding the parent
             List<Expression> children = expr.children();
             for (int i = 0; i < children.size(); i++) {
                 Expression child = children.get(i);
-                for (Expression shrunkChild : shrinkIntegerLiteralsInExpr(child)) {
+                for (Expression shrunkChild : shrinkNumericLiteralsInExpr(child)) {
                     List<Expression> newChildren = new ArrayList<>(children);
                     newChildren.set(i, shrunkChild);
                     result.add(expr.replaceChildren(newChildren));

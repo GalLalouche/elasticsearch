@@ -54,7 +54,8 @@ The forced shrinker skips silently when no input is provided. Supply a failing q
 | Property | Description |
 |---|---|
 | `simulator.query` | The ES\|QL query string (e.g., `FROM idx \| EVAL z = x + 1`). |
-| `simulator.data` | JSON object with `index`, `schema`, and `rows` fields (see format below). |
+| `simulator.queryJson` | Alias for `simulator.query`. |
+| `simulator.dataJson` | JSON object with `index`, `schema`, and `rows` fields (see format below). |
 | `simulator.queryFile` | Path to a file containing the query (avoids shell quoting issues). |
 | `simulator.dataFile` | Path to a file containing the data JSON. |
 | `simulator.failureMode` | `crash` (default) checks for HTTP 500; `mismatch` compares ES vs simulator results. |

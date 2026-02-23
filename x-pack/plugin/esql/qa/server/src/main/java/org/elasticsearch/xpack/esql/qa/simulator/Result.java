@@ -279,7 +279,6 @@ record Result(List<Simulator.Column> columns) {
         );
     }
 
-    // Compares numeric values, handling DOUBLE (Double.compare) and INTEGER/LONG (Long.compare).
     private Simulator.UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
         Simulator.UnnamedColumn left = evaluate(leftExpr, activeBug);
         Simulator.UnnamedColumn right = evaluate(rightExpr, activeBug);
