@@ -10,6 +10,7 @@ package org.elasticsearch.xpack.esql.qa.simulator;
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.qa.simulator.SimSchema.SimColumn;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -27,13 +28,12 @@ class SimDataGenerator {
     private static final double NULL_PROBABILITY = 0.2;
 
     static List<Map<String, Object>> generate(SimSchema schema, SourceOfRandomness random) {
-        int rowCount = random.nextInt(1, 5);
-        return IntStream.range(0, rowCount).mapToObj(i -> generateRow(schema, random)).toList();
+        return IntStream.range(0, random.nextInt(1, 5)).mapToObj(i -> generateRow(schema, random)).toList();
     }
 
     private static Map<String, Object> generateRow(SimSchema schema, SourceOfRandomness random) {
         Map<String, Object> row = new LinkedHashMap<>();
-        for (SimSchema.SimColumn col : schema.columns()) {
+        for (SimColumn col : schema.columns()) {
             if (random.nextDouble() < NULL_PROBABILITY) {
                 continue; // absent keys are not serialized in JSON, so ES reads them as null
             }
@@ -41,7 +41,7 @@ class SimDataGenerator {
         }
         if (row.isEmpty()) {
             // ES rejects empty documents; any column works — we use the first one arbitrarily.
-            SimSchema.SimColumn firstCol = schema.columns().getFirst();
+            SimColumn firstCol = schema.columns().getFirst();
             row.put(firstCol.name(), generateValue(firstCol.type(), random));
         }
         return row;
