@@ -306,6 +306,7 @@ public class SimulatorPropertyIT {
                                 .toList();
                             Object fillValue = switch (col.type()) {
                                 case INTEGER -> 1;
+                                case LONG -> 1L;
                                 case KEYWORD -> "foo";
                                 default -> throw new UnsupportedOperationException("Unsupported type: " + col.type());
                             };

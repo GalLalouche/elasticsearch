@@ -54,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -394,25 +395,44 @@ class Simulator {
                 if (l == null || r == null) {
                     yield null;
                 }
-                Long result = switch (op) {
-                    case Add ignored -> toLong(l) + toLong(r);
-                    case Sub ignored -> toLong(l) - toLong(r);
-                    case Mul ignored -> toLong(l) * toLong(r);
-                    case Div ignored -> toLong(r) == 0 ? null : toLong(l) / toLong(r);
+                if (op.dataType() == DataType.INTEGER) {
+                    // INTEGER: compute in long, range-check
+                    Long result = switch (op) {
+                        case Add ignored -> toLong(l) + toLong(r);
+                        case Sub ignored -> toLong(l) - toLong(r);
+                        case Mul ignored -> toLong(l) * toLong(r);
+                        case Div ignored -> toLong(r) == 0 ? null : toLong(l) / toLong(r);
+                        case Mod ignored -> toLong(r) == 0 ? null : toLong(l) % toLong(r);
+                        default -> throw new UnsupportedOperationException(
+                            Strings.format("Unsupported arithmetic in evaluateConstant: %s", op.getClass())
+                        );
+                    };
+                    yield result == null || result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
+                }
+                // LONG: use Math.*Exact, return null on overflow
+                yield switch (op) {
+                    case Add ignored -> safeExact(() -> Math.addExact(toLong(l), toLong(r)));
+                    case Sub ignored -> safeExact(() -> Math.subtractExact(toLong(l), toLong(r)));
+                    case Mul ignored -> safeExact(() -> Math.multiplyExact(toLong(l), toLong(r)));
+                    case Div ignored -> toLong(r) == 0 ? null : safeExact(() -> Math.divideExact(toLong(l), toLong(r)));
                     case Mod ignored -> toLong(r) == 0 ? null : toLong(l) % toLong(r);
                     default -> throw new UnsupportedOperationException(
                         Strings.format("Unsupported arithmetic in evaluateConstant: %s", op.getClass())
                     );
                 };
-                yield result == null || result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
             }
             case Neg neg -> {
                 Object v = evaluateConstant(neg.field());
                 if (v == null) {
                     yield null;
                 }
-                long result = -toLong(v);
-                yield result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
+                long val = toLong(v);
+                if (neg.dataType() == DataType.INTEGER) {
+                    long result = -val;
+                    yield result < Integer.MIN_VALUE || result > Integer.MAX_VALUE ? null : result;
+                }
+                // LONG: detect -Long.MIN_VALUE overflow
+                yield safeExact(() -> Math.negateExact(val));
             }
             default -> null;
         };
@@ -432,6 +452,14 @@ class Simulator {
         }
         int cmp = ((Comparable<Object>) a).compareTo(b);
         return asc ? cmp : -cmp;
+    }
+
+    static Long safeExact(LongSupplier op) {
+        try {
+            return op.getAsLong();
+        } catch (ArithmeticException e) {
+            return null;
+        }
     }
 
     static long toLong(Object object) {

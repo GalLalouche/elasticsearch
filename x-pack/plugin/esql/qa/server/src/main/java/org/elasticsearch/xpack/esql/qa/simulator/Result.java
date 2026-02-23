@@ -77,19 +77,35 @@ record Result(List<Simulator.Column> columns) {
                 literal.dataType(),
                 Collections.nCopies(numRows(), Simulator.normalizeObject(literal.value()))
             );
-            case Add add -> evalBinaryLong(add.left(), add.right(), activeBug, (l, r) -> activeBug == SimBug.ADD_IS_SUB ? l - r : l + r);
-            case Sub sub -> evalBinaryLong(sub.left(), sub.right(), activeBug, (l, r) -> l - r);
-            case Mul mul -> evalBinaryLong(mul.left(), mul.right(), activeBug, (l, r) -> l * r);
-            case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r) -> r == 0 ? null : l / r);
-            case Mod mod -> evalBinaryLong(mod.left(), mod.right(), activeBug, (l, r) -> r == 0 ? null : l % r);
+            case Add add -> evalBinaryLong(add.left(), add.right(), activeBug, (l, r, rt) -> {
+                if (activeBug == SimBug.ADD_IS_SUB) {
+                    return rt == DataType.INTEGER ? (Long) (l - r) : Simulator.safeExact(() -> Math.subtractExact(l, r));
+                }
+                return rt == DataType.INTEGER ? (Long) (l + r) : Simulator.safeExact(() -> Math.addExact(l, r));
+            });
+            case Sub sub -> evalBinaryLong(sub.left(), sub.right(), activeBug, (l, r, rt) ->
+                rt == DataType.INTEGER ? (Long) (l - r) : Simulator.safeExact(() -> Math.subtractExact(l, r)));
+            case Mul mul -> evalBinaryLong(mul.left(), mul.right(), activeBug, (l, r, rt) ->
+                rt == DataType.INTEGER ? (Long) (l * r) : Simulator.safeExact(() -> Math.multiplyExact(l, r)));
+            case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r, rt) -> {
+                if (r == 0) return null;
+                return rt == DataType.INTEGER ? (Long) (l / r) : Simulator.safeExact(() -> Math.divideExact(l, r));
+            });
+            case Mod mod -> evalBinaryLong(mod.left(), mod.right(), activeBug,
+                (l, r, rt) -> r == 0 ? null : l % r);
             case Neg neg -> {
                 Simulator.UnnamedColumn input = evaluate(neg.field(), activeBug);
                 yield new Simulator.UnnamedColumn(input.type(), input.values().stream().<Object>map(o -> {
                     if (o == null) {
                         return null;
                     }
-                    long result = -Simulator.toLong(o);
-                    return input.type() == DataType.INTEGER && (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) ? null : result;
+                    long val = Simulator.toLong(o);
+                    if (input.type() == DataType.INTEGER) {
+                        long result = -val;
+                        return (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE) ? null : result;
+                    }
+                    // LONG: use negateExact to detect -Long.MIN_VALUE overflow
+                    return Simulator.safeExact(() -> Math.negateExact(val));
                 }).toList());
             }
             case GreaterThan gt -> evalComparison(gt.left(), gt.right(), activeBug, cmp -> cmp > 0);
@@ -189,27 +205,42 @@ record Result(List<Simulator.Column> columns) {
         };
     }
 
+    @FunctionalInterface
+    private interface ArithOp {
+        Object apply(long l, long r, DataType resultType);
+    }
+
+    /**
+     * Determines the numeric result type for binary arithmetic: LONG if either operand is LONG, INTEGER otherwise.
+     * This mirrors ES|QL type promotion without calling {@code op.dataType()} on the AST node, which would
+     * fail for string-parsed plans containing {@code UnresolvedAttribute} nodes.
+     */
+    private static DataType numericResultType(DataType leftType, DataType rightType) {
+        if (leftType == DataType.LONG || rightType == DataType.LONG) {
+            return DataType.LONG;
+        }
+        return DataType.INTEGER;
+    }
+
     private Simulator.UnnamedColumn evalBinaryLong(
         Expression leftExpr,
         Expression rightExpr,
         SimBug activeBug,
-        BiFunction<Long, Long, Object> op
+        ArithOp op
     ) {
         Simulator.UnnamedColumn left = evaluate(leftExpr, activeBug);
         Simulator.UnnamedColumn right = evaluate(rightExpr, activeBug);
-        // ES|QL uses 32-bit integer arithmetic and returns null on overflow; LONG arithmetic can overflow too but is
-        // extremely unlikely with the small values in our generated data, so we only check for INTEGER overflow here.
-        boolean integerArithmetic = left.type() == DataType.INTEGER && right.type() == DataType.INTEGER;
-        return new Simulator.UnnamedColumn(left.type(), zipWith(left.values(), right.values(), (l, r) -> {
+        DataType resultType = numericResultType(left.type(), right.type());
+        return new Simulator.UnnamedColumn(resultType, zipWith(left.values(), right.values(), (l, r) -> {
             if (l == null || r == null) {
                 return null;
             }
-            Object result = op.apply(Simulator.toLong(l), Simulator.toLong(r));
+            Object result = op.apply(Simulator.toLong(l), Simulator.toLong(r), resultType);
             if (result == null) {
                 return null;
             }
             long longResult = ((Number) result).longValue();
-            if (integerArithmetic && (longResult < Integer.MIN_VALUE || longResult > Integer.MAX_VALUE)) {
+            if (resultType == DataType.INTEGER && (longResult < Integer.MIN_VALUE || longResult > Integer.MAX_VALUE)) {
                 return null;
             }
             return longResult;
@@ -224,7 +255,7 @@ record Result(List<Simulator.Column> columns) {
         );
     }
 
-    // Only integer comparisons are generated, so Long.compare is sufficient for all cases.
+    // Both INTEGER and LONG values are stored as Java long internally, so Long.compare handles all numeric comparisons.
     private Simulator.UnnamedColumn evalComparison(Expression leftExpr, Expression rightExpr, SimBug activeBug, IntPredicate test) {
         Simulator.UnnamedColumn left = evaluate(leftExpr, activeBug);
         Simulator.UnnamedColumn right = evaluate(rightExpr, activeBug);

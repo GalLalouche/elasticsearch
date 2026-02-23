@@ -11,6 +11,7 @@ import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
@@ -33,6 +34,7 @@ import org.elasticsearch.xpack.esql.expression.function.scalar.string.ToUpper;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.Trim;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Neg;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.NotEquals;
 import org.elasticsearch.xpack.esql.parser.EsqlParser;
@@ -72,6 +74,19 @@ public class SimulatorTests extends ESTestCase {
     private static final SimSchema A_SCHEMA = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.INTEGER)));
     private static final List<Map<String, Object>> A_DATA = List.of(Map.of("a", 2), Map.of("a", 3), Map.of("a", 5));
     private static final SimSchema X_KEYWORD_SCHEMA = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("x", DataType.KEYWORD)));
+
+    private static final SimSchema L_SCHEMA = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("n", DataType.LONG)));
+    private static final List<Map<String, Object>> L_DATA = List.of(Map.of("n", 100_000L), Map.of("n", 200_000L), Map.of("n", 500_000L));
+
+    private static final SimSchema AL_SCHEMA = new SimSchema(
+        "test_idx",
+        List.of(new SimSchema.SimColumn("a", DataType.INTEGER), new SimSchema.SimColumn("n", DataType.LONG))
+    );
+    private static final List<Map<String, Object>> AL_DATA = List.of(
+        Map.of("a", 2, "n", 100_000L),
+        Map.of("a", 3, "n", 200_000L),
+        Map.of("a", 5, "n", 500_000L)
+    );
 
     public void testRow() throws IOException {
         assertThat(simulate("ROW x=1, y=2, z=3"), equalTo(new Result(Column.ofInt("x", 1), Column.ofInt("y", 2), Column.ofInt("z", 3))));
@@ -419,7 +434,7 @@ public class SimulatorTests extends ESTestCase {
 
         var sim = Simulator.singleRow(schema, Map.of("b", 1));
         Result result1 = sim.simulate(new InlineStats(Source.EMPTY, new Aggregate(Source.EMPTY, from, List.of(bAttr), aggregates)));
-        assertThat(result1, equalTo(new Result(Column.ofInt("b", 1L), Column.ofInt("s1", 6L))));
+        assertThat(result1, equalTo(new Result(Column.ofInt("s1", 6L), Column.ofInt("b", 1L))));
 
         // Second INLINE STATS: s1 = COUNT(b) BY s1
         // The grouping key s1 has value 6; COUNT(b) = 1.
@@ -676,6 +691,85 @@ public class SimulatorTests extends ESTestCase {
             .simulate(new Filter(Source.EMPTY, from, new NotEquals(Source.EMPTY, from.output().getFirst(), of(2))));
         assertThat(result.numRows(), equalTo(2));
         assertThat(result.getColumn("a").values(), equalTo(List.of(1L, 3L)));
+    }
+
+    public void testEvalLongAddition() throws IOException {
+        var from = LogicalPlanGenerator.buildEsRelation(L_SCHEMA);
+        var nAttr = from.output().getFirst();
+        Result result = new Simulator(L_SCHEMA, L_DATA).simulate(
+            new Eval(Source.EMPTY, from, List.of(
+                new Alias(Source.EMPTY, "doubled", new Add(Source.EMPTY, nAttr, nAttr, EsqlTestUtils.TEST_CFG))
+            ))
+        );
+        assertThat(result.getColumn("doubled").type(), equalTo(DataType.LONG));
+        assertThat(result.getColumn("doubled").values(), equalTo(List.of(200_000L, 400_000L, 1_000_000L)));
+    }
+
+    public void testEvalMixedIntegerLongPromotion() throws IOException {
+        var from = LogicalPlanGenerator.buildEsRelation(AL_SCHEMA);
+        var aAttr = from.output().getFirst();   // INTEGER
+        var nAttr = from.output().get(1);        // LONG
+        Result result = new Simulator(AL_SCHEMA, AL_DATA).simulate(
+            new Eval(Source.EMPTY, from, List.of(
+                new Alias(Source.EMPTY, "sum", new Add(Source.EMPTY, aAttr, nAttr, EsqlTestUtils.TEST_CFG))
+            ))
+        );
+        assertThat(result.getColumn("sum").type(), equalTo(DataType.LONG));
+        assertThat(result.getColumn("sum").values(), equalTo(List.of(100_002L, 200_003L, 500_005L)));
+    }
+
+    public void testStatsLongSum() throws IOException {
+        var from = LogicalPlanGenerator.buildEsRelation(L_SCHEMA);
+        Result result = new Simulator(L_SCHEMA, L_DATA).simulate(
+            new Aggregate(
+                Source.EMPTY,
+                from,
+                List.of(),
+                List.<NamedExpression>of(new Alias(Source.EMPTY, "total", new Sum(Source.EMPTY, from.output().getFirst())))
+            )
+        );
+        assertThat(result.getColumn("total").type(), equalTo(DataType.LONG));
+        assertThat(result.getColumn("total").values().getFirst(), equalTo(800_000L));
+    }
+
+    public void testWhereLongComparison() throws IOException {
+        var from = LogicalPlanGenerator.buildEsRelation(L_SCHEMA);
+        var nAttr = from.output().getFirst();
+        Result result = new Simulator(L_SCHEMA, L_DATA).simulate(
+            new Filter(Source.EMPTY, from, new GreaterThan(Source.EMPTY, nAttr, new Literal(Source.EMPTY, 150_000L, DataType.LONG)))
+        );
+        assertThat(result.numRows(), equalTo(2));
+        assertThat(result.getColumn("n").values(), equalTo(List.of(200_000L, 500_000L)));
+    }
+
+    public void testNegLong() throws IOException {
+        var from = LogicalPlanGenerator.buildEsRelation(L_SCHEMA);
+        var nAttr = from.output().getFirst();
+        Result result = new Simulator(L_SCHEMA, List.of(Map.of("n", 42L))).simulate(
+            new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "neg_n", new Neg(Source.EMPTY, nAttr))))
+        );
+        assertThat(result.getColumn("neg_n").type(), equalTo(DataType.LONG));
+        assertThat(result.getColumn("neg_n").values().getFirst(), equalTo(-42L));
+    }
+
+    public void testAddLongOverflow() throws IOException {
+        var from = LogicalPlanGenerator.buildEsRelation(L_SCHEMA);
+        var nAttr = from.output().getFirst();
+        Result result = new Simulator(L_SCHEMA, List.of(Map.of("n", Long.MAX_VALUE))).simulate(
+            new Eval(Source.EMPTY, from, List.of(
+                new Alias(Source.EMPTY, "sum", new Add(Source.EMPTY, nAttr, nAttr, EsqlTestUtils.TEST_CFG))
+            ))
+        );
+        assertNull(result.getColumn("sum").values().getFirst());
+    }
+
+    public void testNegLongOverflow() throws IOException {
+        var from = LogicalPlanGenerator.buildEsRelation(L_SCHEMA);
+        var nAttr = from.output().getFirst();
+        Result result = new Simulator(L_SCHEMA, List.of(Map.of("n", Long.MIN_VALUE))).simulate(
+            new Eval(Source.EMPTY, from, List.of(new Alias(Source.EMPTY, "neg_n", new Neg(Source.EMPTY, nAttr))))
+        );
+        assertNull(result.getColumn("neg_n").values().getFirst());
     }
 
     private static Result simulateAggByB(

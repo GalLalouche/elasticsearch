@@ -14,6 +14,7 @@ import org.elasticsearch.xpack.esql.core.type.DataType;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Generates random {@link SimSchema} instances: an index name plus a variable number of columns
@@ -22,8 +23,9 @@ import java.util.List;
 class SimSchemaGenerator {
     private SimSchemaGenerator() { /* static class */ }
 
+    private static final Set<DataType> NUMERIC_TYPES = Set.of(DataType.INTEGER, DataType.LONG);
     private static final List<String> COLUMN_NAME_POOL = List.of("a", "b", "c", "d", "x", "y");
-    private static final List<DataType> TYPE_POOL = List.of(DataType.INTEGER, DataType.KEYWORD);
+    private static final List<DataType> TYPE_POOL = List.of(DataType.INTEGER, DataType.LONG, DataType.KEYWORD);
 
     static SimSchema generate(SourceOfRandomness random) {
         String indexName = "sim_" + randomAlpha(random, 3, 6);
@@ -38,14 +40,14 @@ class SimSchemaGenerator {
     }
 
     /**
-     * Retries {@link #generate} until the schema contains at least one INTEGER column.
-     * Terminates quickly since INTEGER is one of two types in the pool.
+     * Retries {@link #generate} until the schema contains at least one numeric (INTEGER or LONG) column.
+     * Terminates quickly since INTEGER and LONG together are two of three types in the pool.
      */
-    static SimSchema generateWithInteger(SourceOfRandomness random) {
+    static SimSchema generateWithNumeric(SourceOfRandomness random) {
         SimSchema schema;
         do {
             schema = generate(random);
-        } while (schema.columns().stream().noneMatch(c -> c.type() == DataType.INTEGER));
+        } while (schema.columns().stream().noneMatch(c -> NUMERIC_TYPES.contains(c.type())));
         return schema;
     }
 

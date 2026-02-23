@@ -80,6 +80,7 @@ import static org.elasticsearch.xpack.esql.core.util.TestUtils.of;
 class LogicalPlanGenerator {
     private LogicalPlanGenerator() { /* static class */ }
 
+    private static final Set<DataType> NUMERIC_TYPES = Set.of(DataType.INTEGER, DataType.LONG);
     private static final int PLAN_DEPTH = Integer.getInteger("simulator.planDepth", 5);
     private static final int EXPR_DEPTH = Integer.getInteger("simulator.exprDepth", 2);
 
@@ -201,6 +202,7 @@ class LogicalPlanGenerator {
     private static Object generateLiteralValue(DataType type, SourceOfRandomness random) {
         return switch (type) {
             case INTEGER -> random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE);
+            case LONG -> random.nextLong(Long.MIN_VALUE, Long.MAX_VALUE);
             // Literal requires BytesRef (not String) for KEYWORD values
             case KEYWORD -> new BytesRef(random.choose(KEYWORD_POOL));
             default -> throw new UnsupportedOperationException("Unsupported type for ROW literal: " + type);
@@ -213,7 +215,9 @@ class LogicalPlanGenerator {
      */
     static LogicalPlan wrapLayer(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> available = current.output();
-        List<Attribute> integerAttrs = available.stream().filter(a -> a.dataType() == DataType.INTEGER).toList();
+        List<Attribute> numericAttrs = available.stream()
+            .filter(a -> NUMERIC_TYPES.contains(a.dataType()))
+            .toList();
         List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
 
         List<Supplier<LogicalPlan>> options = new ArrayList<>();
@@ -222,15 +226,15 @@ class LogicalPlanGenerator {
         if (available.size() > 1) {
             options.add(() -> wrapDrop(current, available, random));
         }
-        if (integerAttrs.isEmpty() == false || keywordAttrs.isEmpty() == false) {
-            options.add(() -> wrapEval(current, integerAttrs, keywordAttrs, random));
-            options.add(() -> wrapFilter(current, integerAttrs, keywordAttrs, random));
+        if (numericAttrs.isEmpty() == false || keywordAttrs.isEmpty() == false) {
+            options.add(() -> wrapEval(current, numericAttrs, keywordAttrs, random));
+            options.add(() -> wrapFilter(current, numericAttrs, keywordAttrs, random));
         }
-        if (integerAttrs.isEmpty() == false) {
-            options.add(() -> generateAggregate(current, integerAttrs, keywordAttrs, available, random));
+        if (numericAttrs.isEmpty() == false) {
+            options.add(() -> generateAggregate(current, numericAttrs, keywordAttrs, available, random));
             // INLINE STATS after LIMIT is not supported by the ES|QL engine
             if (current.anyMatch(Limit.class::isInstance) == false) {
-                options.add(() -> new InlineStats(Source.EMPTY, generateAggregate(current, integerAttrs, keywordAttrs, available, random)));
+                options.add(() -> new InlineStats(Source.EMPTY, generateAggregate(current, numericAttrs, keywordAttrs, available, random)));
             }
         }
         // LIMIT and SORT are excluded: SORT always wraps in LIMIT, and when LIMIT cuts within a group of
@@ -253,7 +257,7 @@ class LogicalPlanGenerator {
 
     private static LogicalPlan wrapEval(
         LogicalPlan current,
-        List<Attribute> integerAttrs,
+        List<Attribute> numericAttrs,
         List<Attribute> keywordAttrs,
         SourceOfRandomness random
     ) {
@@ -267,10 +271,10 @@ class LogicalPlanGenerator {
         List<Alias> fields = new ArrayList<>(nAliases);
         for (int i = 0; i < nAliases; i++) {
             Expression expr;
-            if (keywordAttrs.isEmpty() == false && (integerAttrs.isEmpty() || random.nextBoolean())) {
+            if (keywordAttrs.isEmpty() == false && (numericAttrs.isEmpty() || random.nextBoolean())) {
                 expr = generateKeywordExpression(keywordAttrs, EXPR_DEPTH, random);
             } else {
-                expr = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
+                expr = generateExpression(numericAttrs, keywordAttrs, EXPR_DEPTH, random);
             }
             fields.add(new Alias(Source.EMPTY, shuffled.get(i), expr));
         }
@@ -279,12 +283,12 @@ class LogicalPlanGenerator {
 
     private static LogicalPlan wrapFilter(
         LogicalPlan current,
-        List<Attribute> integerAttrs,
+        List<Attribute> numericAttrs,
         List<Attribute> keywordAttrs,
         SourceOfRandomness random
     ) {
-        // When no integer columns, or sometimes when keywords exist, generate a string predicate
-        if (keywordAttrs.isEmpty() == false && (integerAttrs.isEmpty() || random.nextBoolean())) {
+        // When no numeric columns, or sometimes when keywords exist, generate a string predicate
+        if (keywordAttrs.isEmpty() == false && (numericAttrs.isEmpty() || random.nextBoolean())) {
             Expression str = random.choose(keywordAttrs);
             String pattern = random.choose(List.of("f", "B", "ba", "foo"));
             Expression patternLit = of(pattern);
@@ -293,10 +297,12 @@ class LogicalPlanGenerator {
                 : new EndsWith(Source.EMPTY, str, patternLit);
             return new Filter(Source.EMPTY, current, cond);
         }
-        Expression left = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
+        Expression left = generateExpression(numericAttrs, keywordAttrs, EXPR_DEPTH, random);
         Expression right = random.nextBoolean()
-            ? generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random)
-            : of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE));
+            ? generateExpression(numericAttrs, keywordAttrs, EXPR_DEPTH, random)
+            : numericAttrs.stream().anyMatch(a -> a.dataType() == DataType.LONG)
+                ? new Literal(Source.EMPTY, random.nextLong(Long.MIN_VALUE, Long.MAX_VALUE), DataType.LONG)
+                : of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE));
         return new Filter(
             Source.EMPTY,
             current,
@@ -314,7 +320,7 @@ class LogicalPlanGenerator {
 
     private static Aggregate generateAggregate(
         LogicalPlan current,
-        List<Attribute> integerAttrs,
+        List<Attribute> numericAttrs,
         List<Attribute> keywordAttrs,
         List<Attribute> available,
         SourceOfRandomness random
@@ -327,9 +333,9 @@ class LogicalPlanGenerator {
         int nNames = random.nextInt(1, STATS_ALIAS_POOL.size());
         List<NamedExpression> aggregates = new ArrayList<>();
         for (int i = 0; i < nNames; i++) {
-            Expression field = generateExpression(integerAttrs, keywordAttrs, EXPR_DEPTH, random);
+            Expression field = generateExpression(numericAttrs, keywordAttrs, EXPR_DEPTH, random);
             // Constant-only aggregate expressions crash INLINE STATS (ES planner bug)
-            Expression aggField = field.references().isEmpty() ? random.choose(integerAttrs) : field;
+            Expression aggField = field.references().isEmpty() ? random.choose(numericAttrs) : field;
             aggregates.add(new Alias(Source.EMPTY, shuffledNames.get(i), random.choose(AGG_FUNC_POOL).apply(Source.EMPTY, aggField)));
         }
         aggregates.addAll(groupKeys);
@@ -337,16 +343,16 @@ class LogicalPlanGenerator {
     }
 
     private static Expression generateExpression(
-        List<Attribute> integerAttrs,
+        List<Attribute> numericAttrs,
         List<Attribute> keywordAttrs,
         int depth,
         SourceOfRandomness random
     ) {
         if (depth == 0 || random.nextBoolean()) {
-            return generateLeaf(integerAttrs, keywordAttrs, random);
+            return generateLeaf(numericAttrs, keywordAttrs, random);
         }
-        Expression left = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
-        Expression right = generateExpression(integerAttrs, keywordAttrs, depth - 1, random);
+        Expression left = generateExpression(numericAttrs, keywordAttrs, depth - 1, random);
+        Expression right = generateExpression(numericAttrs, keywordAttrs, depth - 1, random);
         Expression result = GenUtils.<Expression>choose(
             random,
             new Add(Source.EMPTY, left, right, EsqlTestUtils.TEST_CFG),
@@ -359,9 +365,9 @@ class LogicalPlanGenerator {
         return random.nextInt(0, 4) == 0 ? new Neg(Source.EMPTY, result) : result;
     }
 
-    private static Expression generateLeaf(List<Attribute> integerAttrs, List<Attribute> keywordAttrs, SourceOfRandomness random) {
-        // If no integer columns, fall back to LENGTH(keyword) if available, or a literal
-        if (integerAttrs.isEmpty()) {
+    private static Expression generateLeaf(List<Attribute> numericAttrs, List<Attribute> keywordAttrs, SourceOfRandomness random) {
+        // If no numeric columns, fall back to LENGTH(keyword) if available, or a literal
+        if (numericAttrs.isEmpty()) {
             return keywordAttrs.isEmpty() ? of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE)) : new Length(Source.EMPTY, random.choose(keywordAttrs));
         }
         // 20% chance of LENGTH(keyword) if keyword columns exist
@@ -369,7 +375,10 @@ class LogicalPlanGenerator {
             return new Length(Source.EMPTY, random.choose(keywordAttrs));
         }
         if (random.nextBoolean()) {
-            return random.choose(integerAttrs);
+            return random.choose(numericAttrs);
+        }
+        if (numericAttrs.stream().anyMatch(a -> a.dataType() == DataType.LONG)) {
+            return new Literal(Source.EMPTY, random.nextLong(Long.MIN_VALUE, Long.MAX_VALUE), DataType.LONG);
         }
         return of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE));
     }
