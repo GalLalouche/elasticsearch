@@ -82,7 +82,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static java.util.stream.Collectors.toSet;
 import static org.elasticsearch.xpack.esql.CsvTestsDataLoader.CSV_DATASET;
 import static org.elasticsearch.xpack.esql.EsqlTestUtils.TEST_PARSER;
 import static org.elasticsearch.xpack.esql.EsqlTestUtils.analyzer;
@@ -781,16 +780,7 @@ public abstract class GoldenTestCase extends ESTestCase {
             .map(ds -> new MappingPerIndex(ds.indexName(), createMappingForIndex(ds)))
             .toList();
         var mergedMappings = mergeMappings(mappings);
-        return IndexResolution.valid(
-            new EsIndex(
-                datasets.indexPattern(),
-                mergedMappings.mapping,
-                indexModes,
-                Map.of(),
-                Map.of(),
-                mergedMappings.fieldToUnmappedIndices
-            )
-        );
+        return IndexResolution.valid(new EsIndex(datasets.indexPattern(), mergedMappings.mapping, indexModes, Map.of(), Map.of()));
     }
 
     // TODO should de-duplicate, strong overlap with CsvTestsDataLoader#readMappingFile
@@ -844,33 +834,20 @@ public abstract class GoldenTestCase extends ESTestCase {
 
     record MappingPerIndex(String index, Map<String, EsField> mapping) {}
 
-    record MergedResult(Map<String, EsField> mapping, Map<String, Set<String>> fieldToUnmappedIndices) {}
+    record MergedResult(Map<String, EsField> mapping) {}
 
     private static MergedResult mergeMappings(List<MappingPerIndex> mappingsPerIndex) {
-        int numberOfIndices = mappingsPerIndex.size();
-        Set<String> allIndices = mappingsPerIndex.stream().map(MappingPerIndex::index).collect(toSet());
         Map<String, Map<String, EsField>> columnNamesToFieldByIndices = new HashMap<>();
         for (var mappingPerIndex : mappingsPerIndex) {
             for (var entry : mappingPerIndex.mapping().entrySet()) {
-                String columnName = entry.getKey();
-                EsField field = entry.getValue();
-                columnNamesToFieldByIndices.computeIfAbsent(columnName, k -> new HashMap<>()).put(mappingPerIndex.index(), field);
-            }
-        }
-
-        Map<String, Set<String>> fieldToUnmappedIndices = new HashMap<>();
-        for (var e : columnNamesToFieldByIndices.entrySet()) {
-            if (e.getValue().size() < numberOfIndices) {
-                Set<String> unmappedIndices = allIndices.stream().filter(i -> e.getValue().containsKey(i) == false).collect(toSet());
-                if (unmappedIndices.isEmpty() == false) {
-                    fieldToUnmappedIndices.put(e.getKey(), unmappedIndices);
-                }
+                columnNamesToFieldByIndices.computeIfAbsent(entry.getKey(), k -> new HashMap<>())
+                    .put(mappingPerIndex.index(), entry.getValue());
             }
         }
         var mappings = columnNamesToFieldByIndices.entrySet()
             .stream()
             .collect(Collectors.toMap(Map.Entry::getKey, e -> mergeFields(e.getKey(), e.getValue())));
-        return new MergedResult(mappings, fieldToUnmappedIndices);
+        return new MergedResult(mappings);
     }
 
     private static EsField mergeFields(String index, Map<String, EsField> columnNameToField) {

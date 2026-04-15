@@ -15,7 +15,6 @@ import org.elasticsearch.xpack.esql.TestAnalyzer;
 import org.elasticsearch.xpack.esql.VerificationException;
 import org.elasticsearch.xpack.esql.action.EsqlCapabilities;
 import org.elasticsearch.xpack.esql.core.expression.Expressions;
-import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.core.expression.FoldContext;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
 import org.elasticsearch.xpack.esql.core.expression.UnresolvedTimestamp;
@@ -32,17 +31,16 @@ import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.Limit;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
-import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 import org.elasticsearch.xpack.esql.plan.logical.Project;
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
 import static org.elasticsearch.xpack.esql.EsqlTestUtils.analyzer;
@@ -862,43 +860,44 @@ public class AnalyzerUnmappedTests extends ESTestCase {
             if (excludedTypes.contains(dataType)) {
                 continue;
             }
-            // Build a minimal mapping: one keyword field (emp_no stand-in for SORT) and one field of the type under test
-            Map<String, EsField> mapping = Map.of(
-                "sort_field",
-                new EsField("sort_field", DataType.INTEGER, Map.of(), true, EsField.TimeSeriesFieldType.NONE),
-                "test_field",
-                new EsField("test_field", dataType, Map.of(), true, EsField.TimeSeriesFieldType.NONE)
+            // Build a minimal mapping: one keyword field (emp_no stand-in for SORT) and one field of the type under test,
+            // wrapped as InvalidMappedField.potentiallyUnmapped since it's partially unmapped.
+            Set<String> mappedIndices = Set.of("test1");
+            Map<String, EsField> mapping = new HashMap<>(
+                Map.of(
+                    "sort_field",
+                    new EsField("sort_field", DataType.INTEGER, Map.of(), true, EsField.TimeSeriesFieldType.NONE),
+                    "test_field",
+                    InvalidMappedField.potentiallyUnmapped("test_field", Map.of(dataType.widenSmallNumeric().typeName(), mappedIndices))
+                )
             );
 
             var plan = analyzer().addIndex(
-                new EsIndex(
-                    "test*",
-                    mapping,
-                    Map.of("test1", IndexMode.STANDARD, "test2", IndexMode.STANDARD),
-                    Map.of(),
-                    Map.of(),
-                    Map.of("test_field", Set.of("test2")) // partially unmapped
-                )
+                new EsIndex("test*", mapping, Map.of("test1", IndexMode.STANDARD, "test2", IndexMode.STANDARD), Map.of(), Map.of())
             ).statement(setUnmappedLoad("""
                 FROM test*
                 | SORT sort_field
                 """));
 
-            var limit = as(plan, Limit.class);
-            var order = as(limit.child(), OrderBy.class);
-            var relation = as(order.child(), EsRelation.class);
+            as(plan, Limit.class);
 
-            var testFieldAttr = relation.output().stream().filter(a -> a.name().equals("test_field")).findFirst().orElseThrow();
-            var fieldAttr = as(testFieldAttr, FieldAttribute.class);
+            // After analysis, cleanTypeConflicts reverts single-type potentiallyUnmapped fields in the plan,
+            // so we verify the source mapping directly.
+            EsField mappingField = mapping.get("test_field");
             assertThat(
                 "Partially-mapped " + dataType + " field should not be converted to PotentiallyUnmappedKeywordEsField",
-                fieldAttr.field(),
+                mappingField,
                 not(instanceOf(PotentiallyUnmappedKeywordEsField.class))
             );
             assertThat(
-                "Partially-mapped " + dataType + " field should be reverted to a regular field with its original type",
-                fieldAttr.dataType(),
-                is(dataType.widenSmallNumeric())
+                "Partially-mapped " + dataType + " field should be marked as InvalidMappedField in the mapping",
+                mappingField,
+                instanceOf(InvalidMappedField.class)
+            );
+            assertThat(
+                "Partially-mapped " + dataType + " field should be marked as potentially unmapped",
+                ((InvalidMappedField) mappingField).isPotentiallyUnmapped(),
+                is(true)
             );
         }
     }
@@ -1146,13 +1145,16 @@ public class AnalyzerUnmappedTests extends ESTestCase {
             "conflicted",
             Map.of(DataType.LONG.typeName(), Set.of("idx_a"), DataType.DOUBLE.typeName(), Set.of("idx_b"))
         );
+        var partialLong = InvalidMappedField.potentiallyUnmapped(
+            "partial_long",
+            Map.of(DataType.LONG.typeName(), Set.of("idx_a", "idx_b"))
+        );
         var merged = new EsIndex(
             "idx*",
-            Map.of("partial_long", longField("partial_long"), "conflicted", conflicted),
+            Map.of("partial_long", partialLong, "conflicted", conflicted),
             Map.of("idx_a", IndexMode.STANDARD, "idx_b", IndexMode.STANDARD, "idx_unmapped", IndexMode.STANDARD),
             Map.of(),
-            Map.of(),
-            Map.of("partial_long", Set.of("idx_unmapped"))
+            Map.of()
         );
         assertUnmappedLoadError(
             analyzer().addIndex("idx*", IndexResolution.valid(merged)),
@@ -1187,13 +1189,13 @@ public class AnalyzerUnmappedTests extends ESTestCase {
         assumeTrue("Requires OPTIONAL_FIELDS_V5", EsqlCapabilities.Cap.OPTIONAL_FIELDS_V5.isEnabled());
 
         var pattern = "idx_a,idx_b";
+        var partialLong = InvalidMappedField.potentiallyUnmapped("partial_long", Map.of(DataType.LONG.typeName(), Set.of("idx_a")));
         var merged = new EsIndex(
             pattern,
-            Map.of("partial_long", longField("partial_long"), "common", keywordField("common")),
+            Map.of("partial_long", partialLong, "common", keywordField("common")),
             Map.of("idx_a", IndexMode.STANDARD, "idx_b", IndexMode.STANDARD),
             Map.of(),
-            Map.of(),
-            Map.of("partial_long", Set.of("idx_b"))
+            Map.of()
         );
         var plan = analyzer().addIndex(pattern, IndexResolution.valid(merged))
             .statement(setUnmappedLoad("FROM idx_a, idx_b | KEEP common"));
@@ -1204,13 +1206,13 @@ public class AnalyzerUnmappedTests extends ESTestCase {
         assumeTrue("Requires OPTIONAL_FIELDS_V5", EsqlCapabilities.Cap.OPTIONAL_FIELDS_V5.isEnabled());
 
         var pattern = "idx_a,idx_b";
+        var partialLong = InvalidMappedField.potentiallyUnmapped("partial_long", Map.of(DataType.LONG.typeName(), Set.of("idx_a")));
         var merged = new EsIndex(
             pattern,
-            Map.of("partial_long", longField("partial_long"), "common", keywordField("common")),
+            Map.of("partial_long", partialLong, "common", keywordField("common")),
             Map.of("idx_a", IndexMode.STANDARD, "idx_b", IndexMode.STANDARD),
             Map.of(),
-            Map.of(),
-            Map.of("partial_long", Set.of("idx_b"))
+            Map.of()
         );
         assertUnmappedLoadError(
             analyzer().addIndex(pattern, IndexResolution.valid(merged)),
@@ -1310,7 +1312,7 @@ public class AnalyzerUnmappedTests extends ESTestCase {
         assumeTrue("Requires OPTIONAL_FIELDS_V5", EsqlCapabilities.Cap.OPTIONAL_FIELDS_V5.isEnabled());
 
         var pattern = "sample_data,sample_data_ts_nanos,no_mapping_sample_data";
-        var tsField = new InvalidMappedField(
+        var tsField = InvalidMappedField.potentiallyUnmapped(
             "@timestamp",
             Map.of(DataType.DATETIME.typeName(), Set.of("sample_data"), DataType.DATE_NANOS.typeName(), Set.of("sample_data_ts_nanos"))
         );
@@ -1326,8 +1328,7 @@ public class AnalyzerUnmappedTests extends ESTestCase {
                 IndexMode.STANDARD
             ),
             Map.of(),
-            Map.of(),
-            Map.of("@timestamp", Set.of("no_mapping_sample_data"))
+            Map.of()
         );
         assertUnmappedLoadError(
             analyzer().addIndex(pattern, IndexResolution.valid(merged)),
@@ -1423,7 +1424,7 @@ public class AnalyzerUnmappedTests extends ESTestCase {
 
     private static TestAnalyzer index1() {
         Map<String, EsField> mapping = Map.of("field", new UnsupportedEsField("field", List.of("flattened")));
-        return analyzer().addIndex(new EsIndex("test", mapping, Map.of("test", IndexMode.STANDARD), Map.of(), Map.of(), Map.of()));
+        return analyzer().addIndex(new EsIndex("test", mapping, Map.of("test", IndexMode.STANDARD), Map.of(), Map.of()));
     }
 
     private static void assertUnmappedLoadError(TestAnalyzer analyzer, String query, Matcher<String> matcher) {
@@ -1445,9 +1446,40 @@ public class AnalyzerUnmappedTests extends ESTestCase {
     }
 
     private static EsIndex partialIndex(Map<String, EsField> mapping, Set<String> partialFieldNames) {
-        Map<String, Set<String>> fieldToUnmappedIndices = partialFieldNames.stream()
-            .collect(Collectors.toMap(f -> f, f -> Set.of("idx_unmapped")));
-        return new EsIndex("idx*", mapping, Map.of("idx_mapped", IndexMode.STANDARD), Map.of(), Map.of(), fieldToUnmappedIndices);
+        Map<String, EsField> wrappedMapping = new HashMap<>(mapping);
+        Set<String> mappedIndices = Set.of("idx_mapped");
+        for (String fieldName : partialFieldNames) {
+            wrapPartiallyUnmappedFieldInMapping(wrappedMapping, fieldName, mappedIndices);
+        }
+        return new EsIndex("idx*", wrappedMapping, Map.of("idx_mapped", IndexMode.STANDARD), Map.of(), Map.of());
+    }
+
+    private static void wrapPartiallyUnmappedFieldInMapping(Map<String, EsField> mapping, String fieldName, Set<String> mappedIndices) {
+        String[] parts = fieldName.split("\\.");
+        Map<String, EsField> current = mapping;
+        for (int i = 0; i < parts.length - 1; i++) {
+            EsField parent = current.get(parts[i]);
+            if (parent.getProperties() instanceof HashMap == false) {
+                parent = new EsField(
+                    parent.getName(),
+                    parent.getDataType(),
+                    new HashMap<>(parent.getProperties()),
+                    parent.isAggregatable(),
+                    parent.getTimeSeriesFieldType()
+                );
+                current.put(parts[i], parent);
+            }
+            current = parent.getProperties();
+        }
+        String leafName = parts[parts.length - 1];
+        EsField field = current.get(leafName);
+        if (field.getDataType() == DataType.KEYWORD) {
+            current.put(leafName, new PotentiallyUnmappedKeywordEsField(leafName));
+        } else if (field instanceof InvalidMappedField imf) {
+            current.put(leafName, InvalidMappedField.potentiallyUnmapped(leafName, imf.getTypesToIndices()));
+        } else {
+            current.put(leafName, InvalidMappedField.potentiallyUnmapped(leafName, Map.of(field.getDataType().typeName(), mappedIndices)));
+        }
     }
 
     private static EsField longField(String name) {
