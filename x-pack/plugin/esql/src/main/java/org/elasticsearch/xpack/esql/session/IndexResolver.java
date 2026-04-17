@@ -511,7 +511,9 @@ public class IndexResolver {
         return new EsField(name, type, new HashMap<>(), aggregatable, isAlias, timeSeriesFieldType);
     }
 
-    private static EsField wrapPartiallyUnmappedField(EsField field, String name, String fullName, Set<String> mappedIndices) {
+    public static EsField wrapPartiallyUnmappedField(EsField field, String name, String fullName, Set<String> mappedIndices) {
+        // OBJECT fields are containers for subfields, not leaf fields that get queried directly.
+        // Wrapping them would break downstream code that doesn't expect OBJECT as a data type in InvalidMappedField.
         if (field.getDataType() == OBJECT) {
             return field;
         }

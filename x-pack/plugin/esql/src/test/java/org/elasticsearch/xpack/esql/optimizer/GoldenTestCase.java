@@ -27,6 +27,7 @@ import org.elasticsearch.xpack.esql.LoadMapping;
 import org.elasticsearch.xpack.esql.TestAnalyzer;
 import org.elasticsearch.xpack.esql.analysis.Analyzer;
 import org.elasticsearch.xpack.esql.analysis.PreAnalyzer;
+import org.elasticsearch.xpack.esql.analysis.UnmappedResolution;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.core.expression.FoldContext;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
@@ -42,6 +43,7 @@ import org.elasticsearch.xpack.esql.index.IndexResolution;
 import org.elasticsearch.xpack.esql.plan.EsqlStatement;
 import org.elasticsearch.xpack.esql.plan.IndexPattern;
 import org.elasticsearch.xpack.esql.plan.QueryPlan;
+import org.elasticsearch.xpack.esql.plan.logical.Insist;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.physical.ExchangeExec;
 import org.elasticsearch.xpack.esql.plan.physical.ExchangeSinkExec;
@@ -55,6 +57,7 @@ import org.elasticsearch.xpack.esql.plugin.ComputeService;
 import org.elasticsearch.xpack.esql.plugin.EsqlFlags;
 import org.elasticsearch.xpack.esql.plugin.ReductionPlan;
 import org.elasticsearch.xpack.esql.session.Configuration;
+import org.elasticsearch.xpack.esql.session.IndexResolver;
 import org.elasticsearch.xpack.esql.session.Versioned;
 import org.elasticsearch.xpack.esql.stats.SearchStats;
 import org.junit.internal.AssumptionViolatedException;
@@ -243,13 +246,16 @@ public abstract class GoldenTestCase extends ESTestCase {
             Path queryPath = PathUtils.get(basePath.toString(), queryPathParts);
             Files.createDirectories(queryPath.getParent());
             Files.writeString(queryPath, esqlQuery);
+            UnmappedResolution unmappedResolution = statement.setting(UNMAPPED_FIELDS);
             TestAnalyzer testAnalyzer = analyzer().addLanguagesLookup()
                 .addTestLookup()
                 .addAnalysisTestsEnrichResolution()
                 .addAnalysisTestsInferenceResolution()
                 .minimumTransportVersion(transportVersion)
-                .unmappedResolution(statement.setting(UNMAPPED_FIELDS));
-            loadIndexResolution(testDatasets(parsedPlan)).forEach(
+                .unmappedResolution(unmappedResolution);
+            boolean trackUnmappedFieldIndices = unmappedResolution == UnmappedResolution.LOAD
+                || parsedPlan.anyMatch(p -> p instanceof Insist);
+            loadIndexResolution(testDatasets(parsedPlan), trackUnmappedFieldIndices).forEach(
                 (pattern, resolution) -> testAnalyzer.addIndex(pattern.indexPattern(), resolution)
             );
             Analyzer analyzer = testAnalyzer.buildAnalyzer();
@@ -763,23 +769,37 @@ public abstract class GoldenTestCase extends ESTestCase {
     }
 
     public static Map<IndexPattern, IndexResolution> loadIndexResolution(
-        Map<IndexPattern, CsvTestsDataLoader.MultiIndexTestDataset> datasets
+        Map<IndexPattern, CsvTestsDataLoader.MultiIndexTestDataset> datasets,
+        boolean trackUnmappedFieldIndices
     ) {
         Map<IndexPattern, IndexResolution> indexResolutions = new HashMap<>();
         for (var entry : datasets.entrySet()) {
-            indexResolutions.put(entry.getKey(), loadIndexResolution(entry.getValue()));
+            indexResolutions.put(entry.getKey(), loadIndexResolution(entry.getValue(), trackUnmappedFieldIndices));
         }
         return indexResolutions;
     }
 
+    public static Map<IndexPattern, IndexResolution> loadIndexResolution(
+        Map<IndexPattern, CsvTestsDataLoader.MultiIndexTestDataset> datasets
+    ) {
+        return loadIndexResolution(datasets, false);
+    }
+
     public static IndexResolution loadIndexResolution(CsvTestsDataLoader.MultiIndexTestDataset datasets) {
+        return loadIndexResolution(datasets, false);
+    }
+
+    public static IndexResolution loadIndexResolution(
+        CsvTestsDataLoader.MultiIndexTestDataset datasets,
+        boolean trackUnmappedFieldIndices
+    ) {
         var indexNames = datasets.datasets().stream().map(CsvTestsDataLoader.TestDataset::indexName);
         Map<String, IndexMode> indexModes = indexNames.collect(Collectors.toMap(x -> x, x -> IndexMode.STANDARD));
         List<MappingPerIndex> mappings = datasets.datasets()
             .stream()
             .map(ds -> new MappingPerIndex(ds.indexName(), createMappingForIndex(ds)))
             .toList();
-        var mergedMappings = mergeMappings(mappings);
+        var mergedMappings = mergeMappings(mappings, trackUnmappedFieldIndices);
         return IndexResolution.valid(new EsIndex(datasets.indexPattern(), mergedMappings.mapping, indexModes, Map.of(), Map.of()));
     }
 
@@ -836,7 +856,7 @@ public abstract class GoldenTestCase extends ESTestCase {
 
     record MergedResult(Map<String, EsField> mapping) {}
 
-    private static MergedResult mergeMappings(List<MappingPerIndex> mappingsPerIndex) {
+    private static MergedResult mergeMappings(List<MappingPerIndex> mappingsPerIndex, boolean trackUnmappedFieldIndices) {
         Map<String, Map<String, EsField>> columnNamesToFieldByIndices = new HashMap<>();
         for (var mappingPerIndex : mappingsPerIndex) {
             for (var entry : mappingPerIndex.mapping().entrySet()) {
@@ -844,9 +864,14 @@ public abstract class GoldenTestCase extends ESTestCase {
                     .put(mappingPerIndex.index(), entry.getValue());
             }
         }
-        var mappings = columnNamesToFieldByIndices.entrySet()
-            .stream()
-            .collect(Collectors.toMap(Map.Entry::getKey, e -> mergeFields(e.getKey(), e.getValue())));
+        int numberOfIndices = mappingsPerIndex.size();
+        var mappings = columnNamesToFieldByIndices.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> {
+            EsField field = mergeFields(e.getKey(), e.getValue());
+            if (trackUnmappedFieldIndices && e.getValue().size() < numberOfIndices) {
+                field = IndexResolver.wrapPartiallyUnmappedField(field, e.getKey(), e.getKey(), e.getValue().keySet());
+            }
+            return field;
+        }));
         return new MergedResult(mappings);
     }
 
