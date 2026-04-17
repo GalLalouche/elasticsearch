@@ -7,6 +7,7 @@
 
 package org.elasticsearch.xpack.esql.analysis;
 
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.mapper.flattened.FlattenedFieldMapper;
 import org.elasticsearch.license.XPackLicenseState;
@@ -591,12 +592,11 @@ public class Verifier {
         plan.forEachUp(EsRelation.class, relation -> {
             IndexResolution indexResolution = indexResolutions.get(new IndexPattern(relation.source(), relation.indexPattern()));
             if (indexResolution != null && indexResolution.isValid()) {
-                Set<String> punkFieldNames = new HashSet<>();
-                collectPotentiallyUnmappedNonKeywords(indexResolution.get().mapping(), null, punkFieldNames);
+                Set<String> fieldNames = collectPotentiallyUnmappedNonKeywords(indexResolution.get().mapping());
                 for (Attribute attr : relation.output()) {
                     // punk_field::long is fine; in this case, the FieldAttribute contains a MultiTypeEsField with the conversions.
                     if (attr instanceof FieldAttribute fa
-                        && punkFieldNames.contains(fa.fieldName().string())
+                        && fieldNames.contains(fa.fieldName().string())
                         && fa.field() instanceof MultiTypeEsField == false) {
                         punks.add(fa);
                     }
@@ -607,15 +607,25 @@ public class Verifier {
         return punks.build();
     }
 
-    private static void collectPotentiallyUnmappedNonKeywords(Map<String, EsField> mapping, String prefix, Set<String> result) {
+    private static Set<String> collectPotentiallyUnmappedNonKeywords(Map<String, EsField> mapping) {
+        HashSet<String> result = new HashSet<>();
+        collectPotentiallyUnmappedNonKeywordsHelper(mapping, null, result);
+        return result;
+    }
+
+    private static void collectPotentiallyUnmappedNonKeywordsHelper(
+        Map<String, EsField> mapping,
+        @Nullable String prefix,
+        Set<String> aggregator
+    ) {
         for (Map.Entry<String, EsField> entry : mapping.entrySet()) {
             String name = prefix == null ? entry.getKey() : prefix + "." + entry.getKey();
             EsField field = entry.getValue();
             if (field instanceof InvalidMappedField imf && imf.isPotentiallyUnmapped()) {
-                result.add(name);
+                aggregator.add(name);
             }
             if (field.getProperties().isEmpty() == false) {
-                collectPotentiallyUnmappedNonKeywords(field.getProperties(), name, result);
+                collectPotentiallyUnmappedNonKeywordsHelper(field.getProperties(), name, aggregator);
             }
         }
     }

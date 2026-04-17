@@ -511,24 +511,21 @@ public class IndexResolver {
         return new EsField(name, type, new HashMap<>(), aggregatable, isAlias, timeSeriesFieldType);
     }
 
+    // Visible for testing
     public static EsField wrapPartiallyUnmappedField(EsField field, String name, String fullName, Set<String> mappedIndices) {
-        // OBJECT fields are containers for subfields, not leaf fields that get queried directly.
-        // Wrapping them would break downstream code that doesn't expect OBJECT as a data type in InvalidMappedField.
-        if (field.getDataType() == OBJECT) {
-            return field;
-        }
-        if (field.getDataType() == KEYWORD) {
-            // PotentiallyUnmappedKeywordEsField needs the full dotted path because
-            // DefaultShardContextForUnmappedField.fieldType() compares against it.
-            return new PotentiallyUnmappedKeywordEsField(fullName);
-        }
-        if (field instanceof InvalidMappedField imf) {
-            return InvalidMappedField.potentiallyUnmapped(name, imf.getTypesToIndices());
-        }
-        return InvalidMappedField.potentiallyUnmapped(
-            name,
-            Map.of(field.getDataType().widenSmallNumeric().typeName(), new TreeSet<>(mappedIndices))
-        );
+        return switch (field.getDataType()) {
+            // OBJECT fields are containers for subfields, not leaf fields that get queried directly.
+            // Wrapping them would break downstream code that doesn't expect OBJECT as a data type in InvalidMappedField.
+            case OBJECT -> field;
+            // PotentiallyUnmappedKeywordEsField needs the full dotted path for DefaultShardContextForUnmappedField.fieldType().
+            case KEYWORD -> new PotentiallyUnmappedKeywordEsField(fullName);
+            default -> InvalidMappedField.potentiallyUnmapped(
+                name,
+                field instanceof InvalidMappedField imf
+                    ? imf.getTypesToIndices()
+                    : Map.of(field.getDataType().widenSmallNumeric().typeName(), mappedIndices)
+            );
+        };
     }
 
     private static UnsupportedEsField unsupported(String name, IndexFieldCapabilities fc) {
