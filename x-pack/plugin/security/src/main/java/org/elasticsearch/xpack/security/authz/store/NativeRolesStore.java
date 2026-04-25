@@ -192,8 +192,12 @@ public class NativeRolesStore implements BiConsumer<Set<String>, ActionListener<
 
         final SecurityIndexManager frozenSecurityIndex = this.securityIndex.defensiveCopy();
         if (frozenSecurityIndex.indexExists() == false) {
-            // TODO remove this short circuiting and fix tests that fail without this!
-            listener.onResponse(RoleRetrievalResult.success(Collections.emptySet()));
+            // The .security index does not exist (yet, or transiently) - we don't actually know if these roles
+            // exist or not, so report a failure. Reporting success-with-empty-descriptors here would poison the
+            // negative-lookup cache in CompositeRolesStore for these role names (see #147436).
+            listener.onResponse(
+                RoleRetrievalResult.failure(new ElasticsearchException("the [" + SECURITY_MAIN_ALIAS + "] index does not exist"))
+            );
         } else if (frozenSecurityIndex.isAvailable(SEARCH_SHARDS) == false) {
             listener.onResponse(RoleRetrievalResult.failure(frozenSecurityIndex.getUnavailableReason(SEARCH_SHARDS)));
         } else if (names == null || names.isEmpty()) {
@@ -808,8 +812,11 @@ public class NativeRolesStore implements BiConsumer<Set<String>, ActionListener<
     private void getRoleDescriptor(final String roleId, ActionListener<RoleRetrievalResult> resultListener) {
         final SecurityIndexManager frozenSecurityIndex = this.securityIndex.defensiveCopy();
         if (frozenSecurityIndex.indexExists() == false) {
-            // TODO remove this short circuiting and fix tests that fail without this!
-            resultListener.onResponse(RoleRetrievalResult.success(Collections.emptySet()));
+            // See note in getRoleDescriptors above: never poison the negative-lookup cache when the security
+            // index isn't (yet) available.
+            resultListener.onResponse(
+                RoleRetrievalResult.failure(new ElasticsearchException("the [" + SECURITY_MAIN_ALIAS + "] index does not exist"))
+            );
         } else if (frozenSecurityIndex.isAvailable(PRIMARY_SHARDS) == false) {
             resultListener.onResponse(RoleRetrievalResult.failure(frozenSecurityIndex.getUnavailableReason(PRIMARY_SHARDS)));
         } else {
