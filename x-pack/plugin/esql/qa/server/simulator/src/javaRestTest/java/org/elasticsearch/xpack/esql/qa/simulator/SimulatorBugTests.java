@@ -91,7 +91,7 @@ public class SimulatorBugTests {
         List<Map<String, Object>> data = List.of(Map.of("a", 1), Map.of("a", 2));
         EsRelation rel = buildEsRelation(schema);
         Attribute a = firstIntegerAttr(rel);
-        Order order = new Order(Source.EMPTY, a, Order.OrderDirection.ASC, Order.NullsPosition.ANY);
+        Order order = new Order(Source.EMPTY, a, Order.OrderDirection.ASC, Order.NullsPosition.LAST);
         OrderBy orderBy = new OrderBy(Source.EMPTY, rel, List.of(order));
         LogicalPlan plan = new Limit(Source.EMPTY, new Literal(Source.EMPTY, 1, DataType.INTEGER), orderBy);
         assertDivergence(schema, data, plan, SimBug.SORT_REVERSED);

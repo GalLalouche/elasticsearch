@@ -281,10 +281,11 @@ public class EsqlSession {
                 request.profile(),
                 request.tables(),
                 System.nanoTime(),
-                request.allowPartialResults(),
+                Boolean.TRUE.equals(request.allowPartialResults()),
                 analyzerSettings.timeseriesResultTruncationMaxSize(),
                 analyzerSettings.timeseriesResultTruncationDefaultSize(),
                 null, // projectRouting
+                null, // approximationSettings
                 Map.of() // viewQueries
             );
             LogicalPlan plan = deserializePlan(request.planBytes(), binaryPlanConfig);
@@ -292,7 +293,7 @@ public class EsqlSession {
             int limit = plan.collectFirstChildren(Limit.class::isInstance).isEmpty()
                 ? analyzerSettings.resultTruncationDefaultSize()
                 : analyzerSettings.resultTruncationMaxSize();
-            plan = new Limit(EMPTY, new Literal(EMPTY, limit, DataType.INTEGER), plan);
+            plan = new Limit(Source.EMPTY, new Literal(Source.EMPTY, limit, DataType.INTEGER), plan);
             plan.setAnalyzed();
             PlanTimeProfile planTimeProfile = request.profile() ? new PlanTimeProfile() : null;
             FoldContext foldContext = binaryPlanConfig.newFoldContext();

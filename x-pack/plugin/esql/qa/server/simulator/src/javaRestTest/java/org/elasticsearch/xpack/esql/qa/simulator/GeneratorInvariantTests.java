@@ -11,10 +11,10 @@ import com.pholser.junit.quickcheck.From;
 import com.pholser.junit.quickcheck.Property;
 import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 
+import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
-import org.elasticsearch.xpack.esql.parser.EsqlParser;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
@@ -106,7 +106,7 @@ public class GeneratorInvariantTests {
     public void everyPlanPrintsToParseableEsql(@From(SimulatorTestUtils.ResolvedPlanGenerator.class) LogicalPlan plan) {
         var query = LogicalPlanPrinter.print(plan);
         try {
-            EsqlParser.INSTANCE.createStatement(query);
+            EsqlTestUtils.TEST_PARSER.createStatement(query);
         } catch (Exception e) {
             throw new AssertionError("Failed to parse printed query: " + query, e);
         }

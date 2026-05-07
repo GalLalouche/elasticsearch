@@ -879,8 +879,8 @@ public class SimulatorPropertyIT {
     /**
      * Verifies that the result rows are sorted according to the given sort keys.
      * Rows with equal sort key values (ties) may appear in any relative order.
-     * Assumes ES default null ordering (nulls last for ASC, first for DESC);
-     * the generator always uses {@link Order.NullsPosition#ANY}.
+     * Generated queries omit explicit {@code NULLS FIRST/LAST}, so ES defaults apply
+     * (nulls last for ASC, first for DESC).
      */
     private static void verifySortOrder(List<Order> orders, Result result, String label, String query) {
         int numRows = result.numRows();

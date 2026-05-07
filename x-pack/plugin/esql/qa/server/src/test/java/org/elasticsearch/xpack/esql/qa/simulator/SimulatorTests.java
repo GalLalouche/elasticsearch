@@ -37,7 +37,6 @@ import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Neg
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.GreaterThan;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.LessThan;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.NotEquals;
-import org.elasticsearch.xpack.esql.parser.EsqlParser;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
@@ -950,6 +949,6 @@ public class SimulatorTests extends ESTestCase {
     }
 
     private Result simulate(String statement) throws IOException {
-        return simulator.simulate(EsqlParser.INSTANCE.createStatement(statement).plan());
+        return simulator.simulate(EsqlTestUtils.TEST_PARSER.createStatement(statement).plan());
     }
 }
