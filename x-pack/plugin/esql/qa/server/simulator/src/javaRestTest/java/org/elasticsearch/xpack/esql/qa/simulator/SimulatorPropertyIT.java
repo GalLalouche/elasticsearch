@@ -299,6 +299,11 @@ public class SimulatorPropertyIT {
             // Strategy 4: Remove individual aggregates from INLINE STATS / STATS (keep N-1)
             removeIndividualAggregates(candidates, larger);
 
+            // Strategy 4b: Shrink the BY clause of the root STATS / INLINE STATS — drop the entire
+            // BY, or drop one grouping at a time. Root-only mirrors strategies 3 and 4: avoids the
+            // downstream-reference checks middle-stage shrinks require.
+            addGroupingShrinks(candidates, larger);
+
             // Strategy 5: Simplify expressions to sub-expressions (all stages)
             addExpressionShrinks(candidates, larger);
 
@@ -516,6 +521,50 @@ public class SimulatorPropertyIT {
         /** Wraps a new Aggregate in InlineStats if the original plan was InlineStats, otherwise returns it as-is. */
         private static LogicalPlan wrapAggregate(LogicalPlan original, Aggregate newAgg) {
             return original instanceof InlineStats is ? new InlineStats(is.source(), newAgg) : newAgg;
+        }
+
+        /** Drops the BY clause entirely, then each grouping individually, from the root Aggregate / InlineStats. */
+        private static void addGroupingShrinks(List<TestCase> candidates, TestCase larger) {
+            Aggregate agg;
+            if (larger.plan() instanceof InlineStats is) {
+                agg = is.aggregate();
+            } else if (larger.plan() instanceof Aggregate aggregate) {
+                agg = aggregate;
+            } else {
+                return;
+            }
+            if (agg.groupings().isEmpty()) {
+                return;
+            }
+            addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(wrapAggregate(larger.plan(), dropAllGroupings(agg))));
+            // With a single grouping, drop-one collapses to drop-all (already added above).
+            if (agg.groupings().size() > 1) {
+                for (int g = 0; g < agg.groupings().size(); g++) {
+                    addPlanCandidate(
+                        candidates,
+                        larger,
+                        LogicalPlanGenerator.resolveReferences(wrapAggregate(larger.plan(), dropGroupingAt(agg, g)))
+                    );
+                }
+            }
+        }
+
+        /**
+         * {@code agg.aggregates()} ends with one bare {@link Attribute} per grouping (mirroring
+         * {@code agg.groupings()} in order); these helpers preserve that invariant when removing groupings.
+         */
+        private static Aggregate dropAllGroupings(Aggregate agg) {
+            int numAliases = agg.aggregates().size() - agg.groupings().size();
+            return new Aggregate(agg.source(), agg.child(), List.of(), List.copyOf(agg.aggregates().subList(0, numAliases)));
+        }
+
+        private static Aggregate dropGroupingAt(Aggregate agg, int index) {
+            List<Expression> newGroupings = new ArrayList<>(agg.groupings());
+            newGroupings.remove(index);
+            int numAliases = agg.aggregates().size() - agg.groupings().size();
+            List<NamedExpression> newAggs = new ArrayList<>(agg.aggregates());
+            newAggs.remove(numAliases + index);
+            return new Aggregate(agg.source(), agg.child(), newGroupings, newAggs);
         }
 
         /** Flattens the plan into pipeline stages (root first, FROM/ROW last). InlineStats skips its inner Aggregate. */
