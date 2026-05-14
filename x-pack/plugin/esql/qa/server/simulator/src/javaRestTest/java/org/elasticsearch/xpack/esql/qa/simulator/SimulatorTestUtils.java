@@ -17,15 +17,20 @@ import org.elasticsearch.common.logging.LogConfigurator;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.test.junit.annotations.TestLogging;
+import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
+import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
+import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
+import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.Keep;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.OrderBy;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Shared utilities for simulator tests. */
@@ -79,8 +84,29 @@ class SimulatorTestUtils {
             case Filter filter -> collectExprAttrs(filter.condition());
             case Eval eval -> eval.fields().stream().flatMap(a -> collectExprAttrs(a.child()).stream()).toList();
             case OrderBy ob -> ob.order().stream().flatMap(o -> collectExprAttrs(o.child()).stream()).toList();
+            case Aggregate agg -> collectAggregateRefs(agg);
+            case InlineStats is -> collectAggregateRefs(is.aggregate());
             default -> List.of();
         };
+    }
+
+    /**
+     * Aggregate references its input via grouping expressions and aggregate-function fields
+     * (the children of each Alias in {@code aggregates()}). The trailing bare-Attribute entries
+     * in {@code aggregates()} are echoes of the grouping keys the aggregate itself defines,
+     * so they're not collected here.
+     */
+    private static List<Attribute> collectAggregateRefs(Aggregate agg) {
+        List<Attribute> refs = new ArrayList<>();
+        for (Expression g : agg.groupings()) {
+            refs.addAll(collectExprAttrs(g));
+        }
+        for (NamedExpression ne : agg.aggregates()) {
+            if (ne instanceof Alias alias) {
+                refs.addAll(collectExprAttrs(alias.child()));
+            }
+        }
+        return refs;
     }
 
     /** Recursively collect all {@link Attribute} references from an expression tree. */
