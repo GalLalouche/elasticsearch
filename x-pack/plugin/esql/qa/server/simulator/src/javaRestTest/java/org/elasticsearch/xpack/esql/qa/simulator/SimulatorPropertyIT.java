@@ -30,6 +30,7 @@ import org.elasticsearch.test.cluster.local.distribution.DistributionType;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.xcontent.json.JsonXContent;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
+import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
@@ -56,9 +57,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** Integration property test: generates random plans and data, then compares simulator results against a real ES cluster. */
 @RunWith(JUnitQuickcheck.class)
@@ -122,7 +126,9 @@ public class SimulatorPropertyIT {
 
     private static int trialCount;
 
-    @Property(trials = 50, maxShrinkDepth = 100, maxShrinkTime = 120000)
+    // maxShrinks counts every property check during shrinking (not just accepted shrinks); a single
+    // shrink step can generate dozens of candidates, so the default of 100 runs out fast.
+    @Property(trials = 50, maxShrinks = 5000, maxShrinkDepth = 100, maxShrinkTime = 120000)
     public void simulatorMatchesEs(@From(TestCaseGenerator.class) TestCase tc) throws Exception {
         int trial = ++trialCount;
         logger.info("[Trial {}] {}", trial, tc);
@@ -265,10 +271,12 @@ public class SimulatorPropertyIT {
                 addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(unary.child()));
             }
 
-            // Strategy 2: Remove safe operators from the MIDDLE of the pipeline
+            // Strategy 2: Remove operators from the MIDDLE of the pipeline. Keep/Drop/Filter are always
+            // safe (they don't introduce attributes). InlineStats/Aggregate introduce attributes, so
+            // only drop them when no downstream stage references those names.
             List<LogicalPlan> stages = flattenStages(larger.plan());
             for (int i = 1; i < stages.size() - 1; i++) { // skip outermost (Strategy 1) and leaf (FROM/ROW)
-                if (isSafeToRemoveFromMiddle(stages.get(i))) {
+                if (isSafeToRemoveFromMiddle(stages.get(i), stages.subList(0, i))) {
                     List<LogicalPlan> reduced = new ArrayList<>(stages);
                     reduced.remove(i);
                     addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(rebuildFromStages(reduced)));
@@ -544,9 +552,33 @@ public class SimulatorPropertyIT {
             return rebuilt;
         }
 
-        /** Returns true for operators that are safe to remove from the middle of the pipeline. */
-        private static boolean isSafeToRemoveFromMiddle(LogicalPlan plan) {
-            return plan instanceof Keep || plan instanceof Drop || plan instanceof Filter;
+        /**
+         * Returns true if {@code stage} can be removed from the middle of the pipeline.
+         * Keep/Drop/Filter are always safe — they don't introduce attributes. InlineStats and
+         * Aggregate introduce attributes (the aggregate aliases), so they're only safe to remove
+         * when no downstream stage in {@code upstreamStages} references any introduced name.
+         */
+        private static boolean isSafeToRemoveFromMiddle(LogicalPlan stage, List<LogicalPlan> upstreamStages) {
+            if (stage instanceof Keep || stage instanceof Drop || stage instanceof Filter) {
+                return true;
+            }
+            Aggregate agg = stage instanceof InlineStats is ? is.aggregate() : stage instanceof Aggregate a ? a : null;
+            if (agg == null) {
+                return false;
+            }
+            Set<String> introduced = agg.aggregates()
+                .stream()
+                .filter(ne -> ne instanceof Alias)
+                .map(NamedExpression::name)
+                .collect(Collectors.toSet());
+            for (LogicalPlan upstream : upstreamStages) {
+                for (Attribute ref : SimulatorTestUtils.collectAttributeReferences(upstream)) {
+                    if (introduced.contains(ref.name())) {
+                        return false;
+                    }
+                }
+            }
+            return true;
         }
 
         /** Recursively collects all sub-expressions (children and their descendants). */
@@ -609,43 +641,62 @@ public class SimulatorPropertyIT {
         }
 
         /**
-         * Returns candidate shrink values for an integer, ordered from smallest to largest magnitude.
-         * Tries: 0, 1, -1, value/2, -(value/2) — skipping any that equal the original.
+         * Returns candidates whose absolute value is strictly less than {@code |value|}.
+         * Crucial: junit-quickcheck accepts any failing candidate, so non-strictly-smaller
+         * candidates would let the shrinker oscillate (e.g., {@code 0 → 1 → 0 → ...}) and
+         * exhaust its budget without making real progress.
          */
         private static List<Integer> intShrinkCandidates(int value) {
-            List<Integer> candidates = new ArrayList<>();
-            if (value != 0) { candidates.add(0); }
-            if (value != 1) { candidates.add(1); }
-            if (value != -1) { candidates.add(-1); }
+            long abs = Math.abs((long) value);
+            LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
+            if (abs > 0) {
+                candidates.add(0);
+            }
+            if (abs > 1) {
+                candidates.add(1);
+                candidates.add(-1);
+            }
             int half = value / 2;
-            if (half != value && half != 0 && half != 1 && half != -1) { candidates.add(half); }
-            int negHalf = -half;
-            if (negHalf != value && negHalf != 0 && negHalf != 1 && negHalf != -1) { candidates.add(negHalf); }
-            return candidates;
+            if (Math.abs((long) half) < abs) {
+                candidates.add(half);
+            }
+            return new ArrayList<>(candidates);
         }
 
         private static List<Long> longShrinkCandidates(long value) {
-            List<Long> candidates = new ArrayList<>();
-            if (value != 0L) { candidates.add(0L); }
-            if (value != 1L) { candidates.add(1L); }
-            if (value != -1L) { candidates.add(-1L); }
+            // Math.abs(Long.MIN_VALUE) overflows back to Long.MIN_VALUE; clamp it.
+            long abs = value == Long.MIN_VALUE ? Long.MAX_VALUE : Math.abs(value);
+            LinkedHashSet<Long> candidates = new LinkedHashSet<>();
+            if (abs > 0L) {
+                candidates.add(0L);
+            }
+            if (abs > 1L) {
+                candidates.add(1L);
+                candidates.add(-1L);
+            }
             long half = value / 2;
-            if (half != value && half != 0L && half != 1L && half != -1L) { candidates.add(half); }
-            long negHalf = -half;
-            if (negHalf != value && negHalf != 0L && negHalf != 1L && negHalf != -1L) { candidates.add(negHalf); }
-            return candidates;
+            long absHalf = half == Long.MIN_VALUE ? Long.MAX_VALUE : Math.abs(half);
+            if (absHalf < abs) {
+                candidates.add(half);
+            }
+            return new ArrayList<>(candidates);
         }
 
         private static List<Double> doubleShrinkCandidates(double value) {
-            List<Double> candidates = new ArrayList<>();
-            if (value != 0.0) { candidates.add(0.0); }
-            if (value != 1.0) { candidates.add(1.0); }
-            if (value != -1.0) { candidates.add(-1.0); }
+            double abs = Math.abs(value);
+            LinkedHashSet<Double> candidates = new LinkedHashSet<>();
+            if (abs > 0.0) {
+                candidates.add(0.0);
+            }
+            if (abs > 1.0) {
+                candidates.add(1.0);
+                candidates.add(-1.0);
+            }
             double half = value / 2;
-            if (half != value && half != 0.0 && half != 1.0 && half != -1.0) { candidates.add(half); }
-            double negHalf = -half;
-            if (negHalf != value && negHalf != 0.0 && negHalf != 1.0 && negHalf != -1.0) { candidates.add(negHalf); }
-            return candidates;
+            if (Math.abs(half) < abs) {
+                candidates.add(half);
+            }
+            return new ArrayList<>(candidates);
         }
 
         /**
@@ -665,32 +716,35 @@ public class SimulatorPropertyIT {
                         if (lit.dataType() == DataType.INTEGER && lit.value() instanceof Integer intVal) {
                             for (int candidate : intShrinkCandidates(intVal)) {
                                 newFields = new ArrayList<>(row.fields());
-                                newFields.set(f, new Alias(alias.source(), alias.name(),
-                                    new Literal(Source.EMPTY, candidate, DataType.INTEGER)));
+                                newFields.set(
+                                    f,
+                                    new Alias(alias.source(), alias.name(), new Literal(Source.EMPTY, candidate, DataType.INTEGER))
+                                );
                                 List<LogicalPlan> newStages = new ArrayList<>(stages);
                                 newStages.set(stages.size() - 1, new Row(row.source(), newFields));
-                                addPlanCandidate(candidates, larger,
-                                    LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                                addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
                             }
                         } else if (lit.dataType() == DataType.LONG && lit.value() instanceof Long longVal) {
                             for (long candidate : longShrinkCandidates(longVal)) {
                                 newFields = new ArrayList<>(row.fields());
-                                newFields.set(f, new Alias(alias.source(), alias.name(),
-                                    new Literal(Source.EMPTY, candidate, DataType.LONG)));
+                                newFields.set(
+                                    f,
+                                    new Alias(alias.source(), alias.name(), new Literal(Source.EMPTY, candidate, DataType.LONG))
+                                );
                                 List<LogicalPlan> newStages = new ArrayList<>(stages);
                                 newStages.set(stages.size() - 1, new Row(row.source(), newFields));
-                                addPlanCandidate(candidates, larger,
-                                    LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                                addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
                             }
                         } else if (lit.dataType() == DataType.DOUBLE && lit.value() instanceof Double doubleVal) {
                             for (double candidate : doubleShrinkCandidates(doubleVal)) {
                                 newFields = new ArrayList<>(row.fields());
-                                newFields.set(f, new Alias(alias.source(), alias.name(),
-                                    new Literal(Source.EMPTY, candidate, DataType.DOUBLE)));
+                                newFields.set(
+                                    f,
+                                    new Alias(alias.source(), alias.name(), new Literal(Source.EMPTY, candidate, DataType.DOUBLE))
+                                );
                                 List<LogicalPlan> newStages = new ArrayList<>(stages);
                                 newStages.set(stages.size() - 1, new Row(row.source(), newFields));
-                                addPlanCandidate(candidates, larger,
-                                    LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
+                                addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(rebuildFromStages(newStages)));
                             }
                         }
                     }

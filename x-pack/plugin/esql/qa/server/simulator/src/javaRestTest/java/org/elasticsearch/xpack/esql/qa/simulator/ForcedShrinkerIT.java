@@ -98,8 +98,8 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         SimSchema schema = parseSchema(dataStr);
         List<Map<String, Object>> rows = parseRows(dataStr);
 
-        // Parse query and resolve UnresolvedFunction → Count/Sum/Min/Max
-        LogicalPlan plan = parseAndResolve(queryStr);
+        // Parse query, attach an EsRelation built from the schema, and resolve names + UnresolvedFunctions
+        LogicalPlan plan = parseAndResolve(queryStr, schema);
 
         // Verify initial failure reproduces
         if (stillFails(schema, rows, plan, failureMode) == false) {
@@ -311,9 +311,31 @@ public class ForcedShrinkerIT extends ESRestTestCase {
         return sb.toString();
     }
 
-    private static LogicalPlan parseAndResolve(String query) {
-        LogicalPlan plan = EsqlTestUtils.TEST_PARSER.parseQuery(query);
-        return resolveUnresolvedFunctions(plan);
+    /**
+     * Parses the query, replaces the leaf {@link org.elasticsearch.xpack.esql.plan.logical.UnresolvedRelation}
+     * with an {@link org.elasticsearch.xpack.esql.plan.logical.EsRelation} built from {@code schema},
+     * resolves {@link UnresolvedFunction} calls to concrete aggregates, and resolves attribute references
+     * to the leaf's canonical {@link org.elasticsearch.xpack.esql.core.expression.NameId}s so the simulator
+     * can evaluate the plan.
+     */
+    private static LogicalPlan parseAndResolve(String query, SimSchema schema) {
+        LogicalPlan parsed = EsqlTestUtils.TEST_PARSER.parseQuery(query);
+        LogicalPlan withRelation = replaceLeafWithEsRelation(parsed, LogicalPlanGenerator.buildEsRelation(schema));
+        return LogicalPlanGenerator.resolveReferences(resolveUnresolvedFunctions(withRelation));
+    }
+
+    private static LogicalPlan replaceLeafWithEsRelation(LogicalPlan plan, LogicalPlan esRelation) {
+        if (plan instanceof InlineStats is) {
+            Aggregate agg = is.aggregate();
+            return new InlineStats(
+                is.source(),
+                new Aggregate(agg.source(), replaceLeafWithEsRelation(agg.child(), esRelation), agg.groupings(), agg.aggregates())
+            );
+        }
+        if (plan instanceof UnaryPlan unary) {
+            return unary.replaceChild(replaceLeafWithEsRelation(unary.child(), esRelation));
+        }
+        return esRelation;
     }
 
     /** Walks the plan tree, replacing {@link UnresolvedFunction} nodes with resolved aggregate functions. */
@@ -519,6 +541,7 @@ public class ForcedShrinkerIT extends ESRestTestCase {
             Result simResult = new Simulator(schema, rows).simulate(plan);
             return resultsMatch(simResult, esResult) == false;
         } catch (Exception e) {
+            logger.warn("queryMismatches threw for [{}]: {}", query, e.toString());
             return false;
         }
     }
