@@ -696,9 +696,11 @@ public class SimulatorTests extends ESTestCase {
         var from = LogicalPlanGenerator.buildEsRelation(L_SCHEMA);
         var nAttr = from.output().getFirst();
         Result result = new Simulator(L_SCHEMA, L_DATA).simulate(
-            new Eval(Source.EMPTY, from, List.of(
-                new Alias(Source.EMPTY, "doubled", new Add(Source.EMPTY, nAttr, nAttr, EsqlTestUtils.TEST_CFG))
-            ))
+            new Eval(
+                Source.EMPTY,
+                from,
+                List.of(new Alias(Source.EMPTY, "doubled", new Add(Source.EMPTY, nAttr, nAttr, EsqlTestUtils.TEST_CFG)))
+            )
         );
         assertThat(result.getColumn("doubled").type(), equalTo(DataType.LONG));
         assertThat(result.getColumn("doubled").values(), equalTo(List.of(200_000L, 400_000L, 1_000_000L)));
@@ -709,9 +711,11 @@ public class SimulatorTests extends ESTestCase {
         var aAttr = from.output().getFirst();   // INTEGER
         var nAttr = from.output().get(1);        // LONG
         Result result = new Simulator(AL_SCHEMA, AL_DATA).simulate(
-            new Eval(Source.EMPTY, from, List.of(
-                new Alias(Source.EMPTY, "sum", new Add(Source.EMPTY, aAttr, nAttr, EsqlTestUtils.TEST_CFG))
-            ))
+            new Eval(
+                Source.EMPTY,
+                from,
+                List.of(new Alias(Source.EMPTY, "sum", new Add(Source.EMPTY, aAttr, nAttr, EsqlTestUtils.TEST_CFG)))
+            )
         );
         assertThat(result.getColumn("sum").type(), equalTo(DataType.LONG));
         assertThat(result.getColumn("sum").values(), equalTo(List.of(100_002L, 200_003L, 500_005L)));
@@ -755,9 +759,11 @@ public class SimulatorTests extends ESTestCase {
         var from = LogicalPlanGenerator.buildEsRelation(L_SCHEMA);
         var nAttr = from.output().getFirst();
         Result result = new Simulator(L_SCHEMA, List.of(Map.of("n", Long.MAX_VALUE))).simulate(
-            new Eval(Source.EMPTY, from, List.of(
-                new Alias(Source.EMPTY, "sum", new Add(Source.EMPTY, nAttr, nAttr, EsqlTestUtils.TEST_CFG))
-            ))
+            new Eval(
+                Source.EMPTY,
+                from,
+                List.of(new Alias(Source.EMPTY, "sum", new Add(Source.EMPTY, nAttr, nAttr, EsqlTestUtils.TEST_CFG)))
+            )
         );
         assertNull(result.getColumn("sum").values().getFirst());
     }
@@ -772,10 +778,7 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testRowDouble() throws IOException {
-        assertThat(
-            simulate("ROW x=1.5, y=2.5"),
-            equalTo(new Result(Column.ofDouble("x", 1.5), Column.ofDouble("y", 2.5)))
-        );
+        assertThat(simulate("ROW x=1.5, y=2.5"), equalTo(new Result(Column.ofDouble("x", 1.5), Column.ofDouble("y", 2.5))));
     }
 
     public void testEvalDoubleAdd() throws IOException {
@@ -813,10 +816,7 @@ public class SimulatorTests extends ESTestCase {
     }
 
     public void testEvalDoubleNeg() throws IOException {
-        assertThat(
-            simulate("ROW x=3.5 | EVAL z = -x"),
-            equalTo(new Result(Column.ofDouble("x", 3.5), Column.ofDouble("z", -3.5)))
-        );
+        assertThat(simulate("ROW x=3.5 | EVAL z = -x"), equalTo(new Result(Column.ofDouble("x", 3.5), Column.ofDouble("z", -3.5))));
     }
 
     public void testEvalMixedIntDouble() throws IOException {
@@ -830,8 +830,9 @@ public class SimulatorTests extends ESTestCase {
     public void testWhereDoubleComparison() throws IOException {
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.DOUBLE)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5)))
-            .simulate(new Filter(Source.EMPTY, from, new GreaterThan(Source.EMPTY, from.output().getFirst(), of(1.0))));
+        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5))).simulate(
+            new Filter(Source.EMPTY, from, new GreaterThan(Source.EMPTY, from.output().getFirst(), of(1.0)))
+        );
         assertThat(result.numRows(), equalTo(2));
         assertThat(result.getColumn("a").values(), equalTo(List.of(1.5, 3.0)));
     }
@@ -858,15 +859,14 @@ public class SimulatorTests extends ESTestCase {
     public void testStatsMinDouble() throws IOException {
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.DOUBLE)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5)))
-            .simulate(
-                new Aggregate(
-                    Source.EMPTY,
-                    from,
-                    List.of(),
-                    List.<NamedExpression>of(new Alias(Source.EMPTY, "lo", new Min(Source.EMPTY, from.output().getFirst())))
-                )
-            );
+        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5))).simulate(
+            new Aggregate(
+                Source.EMPTY,
+                from,
+                List.of(),
+                List.<NamedExpression>of(new Alias(Source.EMPTY, "lo", new Min(Source.EMPTY, from.output().getFirst())))
+            )
+        );
         assertThat(result.getColumn("lo").type(), equalTo(DataType.DOUBLE));
         assertThat(result.getColumn("lo").values().getFirst(), equalTo(0.5));
     }
@@ -874,15 +874,14 @@ public class SimulatorTests extends ESTestCase {
     public void testStatsMaxDouble() throws IOException {
         var schema = new SimSchema("test_idx", List.of(new SimSchema.SimColumn("a", DataType.DOUBLE)));
         var from = LogicalPlanGenerator.buildEsRelation(schema);
-        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5)))
-            .simulate(
-                new Aggregate(
-                    Source.EMPTY,
-                    from,
-                    List.of(),
-                    List.<NamedExpression>of(new Alias(Source.EMPTY, "hi", new Max(Source.EMPTY, from.output().getFirst())))
-                )
-            );
+        Result result = new Simulator(schema, List.of(Map.of("a", 1.5), Map.of("a", 3.0), Map.of("a", 0.5))).simulate(
+            new Aggregate(
+                Source.EMPTY,
+                from,
+                List.of(),
+                List.<NamedExpression>of(new Alias(Source.EMPTY, "hi", new Max(Source.EMPTY, from.output().getFirst())))
+            )
+        );
         assertThat(result.getColumn("hi").type(), equalTo(DataType.DOUBLE));
         assertThat(result.getColumn("hi").values().getFirst(), equalTo(3.0));
     }

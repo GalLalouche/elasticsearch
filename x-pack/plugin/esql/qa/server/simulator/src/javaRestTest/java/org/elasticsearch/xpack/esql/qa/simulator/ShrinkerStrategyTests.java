@@ -43,12 +43,7 @@ public class ShrinkerStrategyTests {
         EsRelation rel = relation(new SimSchema.SimColumn("d", DataType.INTEGER), new SimSchema.SimColumn("g", DataType.KEYWORD));
         Attribute d = attr(rel, "d");
         Attribute g = attr(rel, "g");
-        Aggregate root = new Aggregate(
-            Source.EMPTY,
-            rel,
-            List.of(g),
-            List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, d)), g)
-        );
+        Aggregate root = new Aggregate(Source.EMPTY, rel, List.of(g), List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, d)), g));
 
         List<List<String>> groupingNamesAfterShrink = groupingShapesOf(shrink(rel, root));
 
@@ -83,12 +78,7 @@ public class ShrinkerStrategyTests {
     public void noGroupingShrinkWhenByClauseEmpty() {
         EsRelation rel = relation(new SimSchema.SimColumn("d", DataType.INTEGER));
         Attribute d = attr(rel, "d");
-        Aggregate root = new Aggregate(
-            Source.EMPTY,
-            rel,
-            List.of(),
-            List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, d)))
-        );
+        Aggregate root = new Aggregate(Source.EMPTY, rel, List.of(), List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, d))));
 
         // Filter for Aggregate-rooted candidates only; Strategy 1 (drop outer) produces an EsRelation root.
         List<List<String>> groupingShapes = groupingShapesOf(shrink(rel, root));
@@ -104,12 +94,7 @@ public class ShrinkerStrategyTests {
         EsRelation rel = relation(new SimSchema.SimColumn("d", DataType.INTEGER), new SimSchema.SimColumn("g", DataType.KEYWORD));
         Attribute d = attr(rel, "d");
         Attribute g = attr(rel, "g");
-        Aggregate inner = new Aggregate(
-            Source.EMPTY,
-            rel,
-            List.of(g),
-            List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, d)), g)
-        );
+        Aggregate inner = new Aggregate(Source.EMPTY, rel, List.of(g), List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, d)), g));
         InlineStats root = new InlineStats(Source.EMPTY, inner);
 
         List<SimulatorPropertyIT.TestCase> candidates = shrink(rel, root);
@@ -148,9 +133,7 @@ public class ShrinkerStrategyTests {
     }
 
     private static List<String> groupingNames(SimulatorPropertyIT.TestCase tc) {
-        Aggregate agg = tc.plan() instanceof InlineStats is
-            ? is.aggregate()
-            : tc.plan() instanceof Aggregate a ? a : null;
+        Aggregate agg = tc.plan() instanceof InlineStats is ? is.aggregate() : tc.plan() instanceof Aggregate a ? a : null;
         if (agg == null) {
             return null;
         }

@@ -84,19 +84,25 @@ record Result(List<Simulator.Column> columns) {
                 }
                 return rt == DataType.INTEGER ? (Long) (l + r) : Simulator.safeExact(() -> Math.addExact(l, r));
             }, (l, r) -> activeBug == SimBug.ADD_IS_SUB ? l - r : l + r);
-            case Sub sub -> evalBinaryLong(sub.left(), sub.right(), activeBug, (l, r, rt) ->
-                rt == DataType.INTEGER ? (Long) (l - r) : Simulator.safeExact(() -> Math.subtractExact(l, r)),
-                (l, r) -> l - r);
-            case Mul mul -> evalBinaryLong(mul.left(), mul.right(), activeBug, (l, r, rt) ->
-                rt == DataType.INTEGER ? (Long) (l * r) : Simulator.safeExact(() -> Math.multiplyExact(l, r)),
-                (l, r) -> l * r);
+            case Sub sub -> evalBinaryLong(
+                sub.left(),
+                sub.right(),
+                activeBug,
+                (l, r, rt) -> rt == DataType.INTEGER ? (Long) (l - r) : Simulator.safeExact(() -> Math.subtractExact(l, r)),
+                (l, r) -> l - r
+            );
+            case Mul mul -> evalBinaryLong(
+                mul.left(),
+                mul.right(),
+                activeBug,
+                (l, r, rt) -> rt == DataType.INTEGER ? (Long) (l * r) : Simulator.safeExact(() -> Math.multiplyExact(l, r)),
+                (l, r) -> l * r
+            );
             case Div div -> evalBinaryLong(div.left(), div.right(), activeBug, (l, r, rt) -> {
                 if (r == 0) return null;
                 return rt == DataType.INTEGER ? (Long) (l / r) : Simulator.safeExact(() -> Math.divideExact(l, r));
             }, (l, r) -> l / r);
-            case Mod mod -> evalBinaryLong(mod.left(), mod.right(), activeBug,
-                (l, r, rt) -> r == 0 ? null : l % r,
-                (l, r) -> l % r);
+            case Mod mod -> evalBinaryLong(mod.left(), mod.right(), activeBug, (l, r, rt) -> r == 0 ? null : l % r, (l, r) -> l % r);
             case Neg neg -> {
                 Simulator.UnnamedColumn input = evaluate(neg.field(), activeBug);
                 yield new Simulator.UnnamedColumn(input.type(), input.values().stream().<Object>map(o -> {
@@ -283,22 +289,15 @@ record Result(List<Simulator.Column> columns) {
         Simulator.UnnamedColumn left = evaluate(leftExpr, activeBug);
         Simulator.UnnamedColumn right = evaluate(rightExpr, activeBug);
         boolean isDouble = left.type() == DataType.DOUBLE || right.type() == DataType.DOUBLE;
-        return new Simulator.UnnamedColumn(
-            DataType.BOOLEAN,
-            zipWith(
-                left.values(),
-                right.values(),
-                (l, r) -> {
-                    if (l == null || r == null) {
-                        return null;
-                    }
-                    int cmp = isDouble
-                        ? Double.compare(Simulator.toDouble(l), Simulator.toDouble(r))
-                        : Long.compare(Simulator.toLong(l), Simulator.toLong(r));
-                    return test.test(cmp);
-                }
-            )
-        );
+        return new Simulator.UnnamedColumn(DataType.BOOLEAN, zipWith(left.values(), right.values(), (l, r) -> {
+            if (l == null || r == null) {
+                return null;
+            }
+            int cmp = isDouble
+                ? Double.compare(Simulator.toDouble(l), Simulator.toDouble(r))
+                : Long.compare(Simulator.toLong(l), Simulator.toLong(r));
+            return test.test(cmp);
+        }));
     }
 
     private Simulator.UnnamedColumn evalBinaryString(

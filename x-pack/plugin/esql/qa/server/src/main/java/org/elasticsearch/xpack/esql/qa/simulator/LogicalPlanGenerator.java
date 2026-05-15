@@ -216,9 +216,7 @@ class LogicalPlanGenerator {
      */
     static LogicalPlan wrapLayer(LogicalPlan current, SourceOfRandomness random) {
         List<Attribute> available = current.output();
-        List<Attribute> numericAttrs = available.stream()
-            .filter(a -> NUMERIC_TYPES.contains(a.dataType()))
-            .toList();
+        List<Attribute> numericAttrs = available.stream().filter(a -> NUMERIC_TYPES.contains(a.dataType())).toList();
         List<Attribute> keywordAttrs = available.stream().filter(a -> a.dataType() == DataType.KEYWORD).toList();
 
         List<Supplier<LogicalPlan>> options = new ArrayList<>();
@@ -367,7 +365,9 @@ class LogicalPlanGenerator {
     private static Expression generateLeaf(List<Attribute> numericAttrs, List<Attribute> keywordAttrs, SourceOfRandomness random) {
         // If no numeric columns, fall back to LENGTH(keyword) if available, or a literal
         if (numericAttrs.isEmpty()) {
-            return keywordAttrs.isEmpty() ? of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE)) : new Length(Source.EMPTY, random.choose(keywordAttrs));
+            return keywordAttrs.isEmpty()
+                ? of(random.nextInt(Integer.MIN_VALUE, Integer.MAX_VALUE))
+                : new Length(Source.EMPTY, random.choose(keywordAttrs));
         }
         // 20% chance of LENGTH(keyword) if keyword columns exist
         if (keywordAttrs.isEmpty() == false && random.nextInt(0, 4) == 0) {

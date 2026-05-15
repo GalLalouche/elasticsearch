@@ -39,12 +39,7 @@ public class SimulatorTestUtilsTests {
         EsRelation rel = relation(new SimSchema.SimColumn("d", DataType.INTEGER), new SimSchema.SimColumn("g", DataType.KEYWORD));
         Attribute d = attr(rel, "d");
         Attribute g = attr(rel, "g");
-        Aggregate agg = new Aggregate(
-            Source.EMPTY,
-            rel,
-            List.of(g),
-            List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, d)), g)
-        );
+        Aggregate agg = new Aggregate(Source.EMPTY, rel, List.of(g), List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, d)), g));
         assertThat(refNames(agg), equalTo(Set.of("d", "g")));
     }
 
@@ -57,12 +52,7 @@ public class SimulatorTestUtilsTests {
     public void aggregateReferencesUpstreamAliasInAggField() {
         EsRelation rel = relation(new SimSchema.SimColumn("s1", DataType.INTEGER));
         Attribute s1 = attr(rel, "s1");
-        Aggregate agg = new Aggregate(
-            Source.EMPTY,
-            rel,
-            List.of(),
-            List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, s1)))
-        );
+        Aggregate agg = new Aggregate(Source.EMPTY, rel, List.of(), List.of(new Alias(Source.EMPTY, "s1", new Max(Source.EMPTY, s1))));
         assertThat(refNames(agg), equalTo(Set.of("s1")));
     }
 

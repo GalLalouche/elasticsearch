@@ -536,7 +536,11 @@ public class SimulatorPropertyIT {
             if (agg.groupings().isEmpty()) {
                 return;
             }
-            addPlanCandidate(candidates, larger, LogicalPlanGenerator.resolveReferences(wrapAggregate(larger.plan(), dropAllGroupings(agg))));
+            addPlanCandidate(
+                candidates,
+                larger,
+                LogicalPlanGenerator.resolveReferences(wrapAggregate(larger.plan(), dropAllGroupings(agg)))
+            );
             // With a single grouping, drop-one collapses to drop-all (already added above).
             if (agg.groupings().size() > 1) {
                 for (int g = 0; g < agg.groupings().size(); g++) {
