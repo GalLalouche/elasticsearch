@@ -24,7 +24,6 @@ import org.elasticsearch.xpack.esql.plan.logical.InlineStats;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.Project;
 import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
-import org.elasticsearch.xpack.esql.plan.logical.UnionAll;
 import org.elasticsearch.xpack.esql.plan.logical.UnmappedFieldsAttribute;
 import org.elasticsearch.xpack.esql.plan.logical.UnmappedFieldsPattern;
 import org.elasticsearch.xpack.esql.plan.logical.join.Join;
@@ -52,7 +51,7 @@ import java.util.stream.Collectors;
  * like {@code LOAD}: a mention in one branch is materialized in every sibling that can surface it, so that
  * name is excluded from {@code $$unmapped_fields}. Extra fields that a branch does not keep (literal
  * {@code KEEP}, {@code STATS}) are not loaded there; a null {@code $$unmapped_fields} is appended so the
- * coordinator can still expand extras from siblings.
+ * coordinator can still expand extras from siblings. UnionAll is walked the same way.
  *
  * <p>Alignment {@link Project}s created during analysis snapshot their projections before this rule runs, so
  * the attribute is re-appended there and {@link Fork#refreshOutput()} unions it for the coordinator.
@@ -119,7 +118,7 @@ public class DetermineUnmappedFieldsToKeep extends ParameterizedRule<LogicalPlan
      * walked to reach those two.
      */
     private static LogicalPlan annotate(LogicalPlan plan, UnmappedFieldsPattern pattern) {
-        if (plan instanceof Fork fork && (plan instanceof UnionAll) == false) {
+        if (plan instanceof Fork fork) {
             return fork.replaceChildren(
                 fork.children().stream().map(c -> annotate(c, computeUnmappedFieldsToKeep(c).intersect(pattern))).toList()
             );
@@ -130,7 +129,7 @@ public class DetermineUnmappedFieldsToKeep extends ParameterizedRule<LogicalPlan
         if (plan instanceof EsRelation esr) {
             return stamp(esr, pattern);
         }
-        if (plan.noneMatch(p -> p instanceof Fork && (p instanceof UnionAll) == false)) {
+        if (plan.noneMatch(p -> p instanceof Fork)) {
             return plan.transformUp(EsRelation.class, esr -> stamp(esr, pattern));
         }
         return plan.replaceChildren(plan.children().stream().map(c -> annotate(c, pattern)).toList());
@@ -165,9 +164,6 @@ public class DetermineUnmappedFieldsToKeep extends ParameterizedRule<LogicalPlan
      * subtype. In other words, we only pad if at least one child has the attribute and at least one does not.
      */
     private static LogicalPlan finishForkUnmappedFields(Fork fork) {
-        if (fork instanceof UnionAll) {
-            return fork;
-        }
         List<LogicalPlan> children = fork.children();
         List<LogicalPlan> newChildren = new ArrayList<>(children.size());
         boolean hasChildWithUnmappedFields = false;
