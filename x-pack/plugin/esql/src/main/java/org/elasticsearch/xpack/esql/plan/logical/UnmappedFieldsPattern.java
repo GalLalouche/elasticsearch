@@ -88,10 +88,7 @@ public final class UnmappedFieldsPattern implements NamedWriteable {
                 case UnresolvedNamePattern unp -> includes.add(unp.pattern());
                 case UnresolvedAttribute ignored -> {
                 }
-                default -> {
-                    // Already-resolved exact name. ResolveUnmapped can resolve KEEP projections
-                    // without converting the node to ResolvingProject, so forKeep must accept them.
-                }
+                default -> throw new IllegalStateException("Unsupported KEEP projection [" + proj + "]");
             }
         }
         return includes(includes);
