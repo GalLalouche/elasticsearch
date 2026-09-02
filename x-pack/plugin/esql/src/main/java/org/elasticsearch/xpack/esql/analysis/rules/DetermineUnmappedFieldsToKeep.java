@@ -28,6 +28,7 @@ import org.elasticsearch.xpack.esql.plan.logical.UnaryPlan;
 import org.elasticsearch.xpack.esql.plan.logical.UnionAll;
 import org.elasticsearch.xpack.esql.plan.logical.UnmappedFieldsAttribute;
 import org.elasticsearch.xpack.esql.plan.logical.UnmappedFieldsPattern;
+import org.elasticsearch.xpack.esql.plan.logical.join.AbstractSubqueryJoin;
 import org.elasticsearch.xpack.esql.plan.logical.join.Join;
 import org.elasticsearch.xpack.esql.plan.logical.local.ResolvingProject;
 import org.elasticsearch.xpack.esql.rule.ParameterizedRule;
@@ -113,9 +114,10 @@ public class DetermineUnmappedFieldsToKeep extends ParameterizedRule<LogicalPlan
     }
 
     /**
-     * Stamps {@link UnmappedFieldsAttribute} onto non-LOOKUP {@link EsRelation}s. {@link Fork} is the
-     * other special case: each branch is annotated with its own pattern. Every other node is only
-     * walked to reach those two.
+     * Stamps {@link UnmappedFieldsAttribute} onto non-LOOKUP {@link EsRelation}s. {@link Fork} is
+     * n-ary (per-branch patterns). {@link AbstractSubqueryJoin} is binary: the join output is the
+     * left side, so the right subquery is annotated from its own plan, not the outer pattern.
+     * Every other node is only walked to reach those.
      */
     private static LogicalPlan annotate(LogicalPlan plan, UnmappedFieldsPattern pattern) {
         if (plan instanceof Fork fork) {
@@ -130,13 +132,16 @@ public class DetermineUnmappedFieldsToKeep extends ParameterizedRule<LogicalPlan
             LogicalPlan replaced = fork.replaceChildren(newChildren);
             return replaced instanceof UnionAll unionAll ? alignUnmappedFields(unionAll) : replaced;
         }
+        if (plan instanceof AbstractSubqueryJoin join) {
+            return join.replaceChildren(annotate(join.left(), pattern), annotate(join.right(), computeUnmappedFieldsToKeep(join.right())));
+        }
         if (pattern.isNone()) {
             return plan;
         }
         if (plan instanceof EsRelation esr) {
             return stamp(esr, pattern);
         }
-        if (plan.noneMatch(p -> p instanceof Fork)) {
+        if (plan.noneMatch(p -> p instanceof Fork || p instanceof AbstractSubqueryJoin)) {
             return plan.transformUp(EsRelation.class, esr -> stamp(esr, pattern));
         }
         return plan.replaceChildren(plan.children().stream().map(c -> annotate(c, pattern)).toList());
