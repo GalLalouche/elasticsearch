@@ -3464,6 +3464,12 @@ public class EsqlCapabilities {
         OPTIONAL_FIELDS_LOAD_ALL_IN_SUBQUERIES(OPTIONAL_FIELDS_LOAD_ALL.isEnabled()),
 
         /**
+         * Support for views under {@code unmapped_fields="LOAD_ALL"}.
+         * Only meaningful when {@link #OPTIONAL_FIELDS_LOAD_ALL} is available.
+         */
+        OPTIONAL_FIELDS_LOAD_ALL_VIEWS(OPTIONAL_FIELDS_LOAD_ALL.isEnabled()),
+
+        /**
          * Support for the {@code ==} operator on the root of a {@code flattened} field in ES|QL.
          */
         FN_EQUALS_FLATTENED,

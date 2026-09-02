@@ -280,7 +280,10 @@ public abstract class EsqlSpecTestCase extends ESRestTestCase {
 
     // Load views only for groups whose tests reference view fixtures
     protected boolean shouldLoadViews() {
-        return "views".equals(groupName) || "approximation".equals(groupName) || "unmapped-load".equals(groupName);
+        return "views".equals(groupName)
+            || "approximation".equals(groupName)
+            || "unmapped-load".equals(groupName)
+            || "unmapped-load-all".equals(groupName);
     }
 
     /**
