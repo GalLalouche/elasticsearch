@@ -1360,7 +1360,7 @@ public class AnalyzerUnmappedGoldenTests extends AnalyzerUnmappedGoldenTestCase 
             """).run();
     }
 
-    // Mapped LONG first so the union type is LONG; KEEP on the unmapped index is a PUNK that gets ToLong.
+    // KEEP names the field, so the keyword conflicts with the mapped long instead of being cast.
     public void testLoadAllSubqueryKeepLongLoadsOnUnmappedSibling() throws Exception {
         loadAll("""
             FROM (FROM partial_mapping_sample_data), (FROM no_mapping_sample_data | KEEP event_duration)
@@ -1368,24 +1368,23 @@ public class AnalyzerUnmappedGoldenTests extends AnalyzerUnmappedGoldenTestCase 
             """).run();
     }
 
-    // Unmapped branch listed first and mentioning the field: its fabricated keyword must yield to the sibling's LONG rather than
-    // leave the column without a common type. ResolveUnionTypesInUnionAll inserts the cast, so branch order does not matter.
-    public void testLoadAllSubqueryUnmappedBranchFirstKeepCastsToSiblingType() throws Exception {
+    // KEEP names the field, so the unmapped keyword conflicts with the mapped long in either branch order.
+    public void testLoadAllSubqueryUnmappedBranchFirstKeepStaysUnsupported() throws Exception {
         loadAll("""
             FROM (FROM no_mapping_sample_data | KEEP event_duration), (FROM partial_mapping_sample_data)
             | KEEP event_duration
             """).run();
     }
 
-    // Same, materialized by a WHERE reference instead of a KEEP.
-    public void testLoadAllSubqueryUnmappedBranchFirstWhereCastsToSiblingType() throws Exception {
+    // WHERE names the field, so it conflicts the same way a KEEP does.
+    public void testLoadAllSubqueryUnmappedBranchFirstWhereStaysUnsupported() throws Exception {
         loadAll("""
             FROM (FROM no_mapping_sample_data | WHERE event_duration IS NOT NULL), (FROM partial_mapping_sample_data)
             | KEEP event_duration
             """).run();
     }
 
-    // Mapped index first so the union type is aggregate_metric_double.
+    // KEEP names the metric, so it conflicts with the unmapped keyword.
     public void testLoadAllSubqueryKeepAmdLoadsOnUnmappedSibling() throws Exception {
         loadAll("""
             FROM (FROM k8s-downsampled), (FROM k8s_nonexistent | KEEP network.eth0.tx)
@@ -1406,6 +1405,7 @@ public class AnalyzerUnmappedGoldenTests extends AnalyzerUnmappedGoldenTestCase 
             """).run();
     }
 
+    // KEEP event_duration, * names event_duration, so that column conflicts while * still loads the extras.
     public void testLoadAllSubqueryKeepStarLongLoadsOnUnmappedSibling() throws Exception {
         loadAll("""
             FROM (FROM partial_mapping_sample_data), (FROM no_mapping_sample_data | KEEP event_duration, *)

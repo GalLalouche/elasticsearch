@@ -1868,40 +1868,91 @@ no_mapping_sample_data      | 2024-10-23T13:55:01.543Z | 173.21.3.15  | 1756466 
 partial_mapping_sample_data | 2024-10-23T13:55:01.543Z | 173.21.3.15  | 1756466             | Connected to 10.1.0.1! | 1                     | a                       | 1756468                         | Disconnected from 10.1.0.1
 ;
 
-// Unmapped-first KEEP used to reject instead of casting the fabricated keyword to the sibling's LONG.
-loadAllSubqueryUnmappedBranchFirstKeepCastsToSiblingType
+// A KEEP names the field, so the unmapped side is a real keyword. That conflicts with the mapped type in either order.
+loadAllSubqueryMentionedLongMappedBranchFirstStaysUnsupported
 required_capability: optional_fields_load_all_subqueries
-required_capability: subquery_in_from_command
+
+SET unmapped_fields="LOAD_ALL"\;
+FROM (FROM partial_mapping_sample_data), (FROM no_mapping_sample_data | KEEP event_duration)
+| KEEP event_duration
+| LIMIT 2
+;
+
+event_duration:unsupported
+null
+null
+;
+
+loadAllSubqueryMentionedLongUnmappedBranchFirstStaysUnsupported
+required_capability: optional_fields_load_all_subqueries
 
 SET unmapped_fields="LOAD_ALL"\;
 FROM (FROM no_mapping_sample_data | KEEP event_duration), (FROM partial_mapping_sample_data)
 | KEEP event_duration
-| SORT event_duration
-| LIMIT 3
+| LIMIT 2
 ;
 
-event_duration:long
-725447
-725447
-1232381
+event_duration:unsupported
+null
+null
 ;
 
-// Same, materialized by a WHERE reference rather than a KEEP: that shape used to yield an all-null unsupported column.
-loadAllSubqueryUnmappedBranchFirstWhereCastsToSiblingType
+loadAllSubqueryMentionedAmdMappedBranchFirstStaysUnsupported
+required_capability: optional_fields_load_all_subqueries
+required_capability: aggregate_metric_double_v0
+
+SET unmapped_fields="LOAD_ALL"\;
+FROM (FROM k8s-downsampled), (FROM k8s_nonexistent | KEEP network.eth0.tx)
+| KEEP network.eth0.tx
+| LIMIT 2
+;
+
+network.eth0.tx:unsupported
+null
+null
+;
+
+loadAllSubqueryMentionedAmdUnmappedBranchFirstStaysUnsupported
+required_capability: optional_fields_load_all_subqueries
+required_capability: aggregate_metric_double_v0
+
+SET unmapped_fields="LOAD_ALL"\;
+FROM (FROM k8s_nonexistent | KEEP network.eth0.tx), (FROM k8s-downsampled)
+| KEEP network.eth0.tx
+| LIMIT 2
+;
+
+network.eth0.tx:unsupported
+null
+null
+;
+
+// WHERE names the field, so the unmapped side is a real keyword and conflicts with the mapped long.
+loadAllSubqueryUnmappedBranchFirstWhereStaysUnsupported
 required_capability: optional_fields_load_all_subqueries
 required_capability: subquery_in_from_command
 
 SET unmapped_fields="LOAD_ALL"\;
 FROM (FROM no_mapping_sample_data METADATA _index | WHERE event_duration IS NOT NULL), (FROM partial_mapping_sample_data METADATA _index)
 | KEEP event_duration, _index
-| SORT event_duration, _index
-| LIMIT 3
+| SORT _index
 ;
 
-event_duration:long | _index:keyword
-725447              | no_mapping_sample_data
-725447              | partial_mapping_sample_data
-1232381             | no_mapping_sample_data
+event_duration:unsupported | _index:keyword
+null                       | no_mapping_sample_data
+null                       | no_mapping_sample_data
+null                       | no_mapping_sample_data
+null                       | no_mapping_sample_data
+null                       | no_mapping_sample_data
+null                       | no_mapping_sample_data
+null                       | no_mapping_sample_data
+null                       | partial_mapping_sample_data
+null                       | partial_mapping_sample_data
+null                       | partial_mapping_sample_data
+null                       | partial_mapping_sample_data
+null                       | partial_mapping_sample_data
+null                       | partial_mapping_sample_data
+null                       | partial_mapping_sample_data
 ;
 
 // Mapped on both sides is an ordinary type conflict, unrelated to LOAD_ALL: no cast, and unsupported in either branch order.
@@ -2282,7 +2333,7 @@ null                     | null         | null                | null            
 null                     | null         | null                | null                   | no_mapping_sample_data      | Disconnected from 10.1.0.1 | null                  | null                    | null
 ;
 
-// Mapped LONG first so the union type is LONG; KEEP on the unmapped index is a PUNK that gets ToLong.
+// KEEP names event_duration, so it conflicts: the other columns are still LOAD_ALL extras.
 loadAllSubqueryKeepLongLoadsOnUnmappedSibling
 required_capability: optional_fields_load_all_subqueries
 required_capability: subquery_in_from_command
@@ -2292,24 +2343,24 @@ FROM (FROM partial_mapping_sample_data), (FROM no_mapping_sample_data | KEEP eve
 ;
 ignoreOrder:true
 
-@timestamp:datetime      | client_ip:ip | event_duration:long | message:keyword        | language_code:keyword | unmapped.nested:keyword | unmapped_event_duration:keyword | unmapped_message:keyword
-2024-10-23T12:15:03.360Z | 173.21.2.162 | 3450232             | Connected to 10.1.0.3! | 4                     | g                       | 3450234                         | Disconnected from 10.1.0.3
-2024-10-23T12:27:28.948Z | 173.21.2.113 | 2764888             | Connected to 10.1.0.2! | 3                     | f                       | 2764890                         | Disconnected from 10.1.0.2
-2024-10-23T13:33:34.937Z | 173.21.0.5   | 1232381             | 42                     | 2                     | e                       | 1232383                         | 43
-2024-10-23T13:51:54.732Z | 173.21.3.15  | 725447              | Connection error?      | 1                     | d                       | 725449                          | Disconnection error
-2024-10-23T13:52:55.015Z | 173.21.3.15  | 8268152             | Connection error?      | 3                     | c                       | 8268154                         | Disconnection error
-2024-10-23T13:53:55.832Z | 173.21.3.15  | 5033754             | Connection error?      | 2                     | b                       | 5033756                         | Disconnection error
-2024-10-23T13:55:01.543Z | 173.21.3.15  | 1756466             | Connected to 10.1.0.1! | 1                     | a                       | 1756468                         | Disconnected from 10.1.0.1
-null                     | null         | 3450232             | null                   | null                  | null                    | null                            | null
-null                     | null         | 2764888             | null                   | null                  | null                    | null                            | null
-null                     | null         | 1232381             | null                   | null                  | null                    | null                            | null
-null                     | null         | 725447              | null                   | null                  | null                    | null                            | null
-null                     | null         | 8268152             | null                   | null                  | null                    | null                            | null
-null                     | null         | 5033754             | null                   | null                  | null                    | null                            | null
-null                     | null         | 1756466             | null                   | null                  | null                    | null                            | null
+@timestamp:datetime      | client_ip:ip | event_duration:unsupported | message:keyword        | language_code:keyword | unmapped.nested:keyword | unmapped_event_duration:keyword | unmapped_message:keyword
+2024-10-23T12:15:03.360Z | 173.21.2.162 | null                    | Connected to 10.1.0.3! | 4                     | g                       | 3450234                         | Disconnected from 10.1.0.3
+2024-10-23T12:27:28.948Z | 173.21.2.113 | null                    | Connected to 10.1.0.2! | 3                     | f                       | 2764890                         | Disconnected from 10.1.0.2
+2024-10-23T13:33:34.937Z | 173.21.0.5   | null                    | 42                     | 2                     | e                       | 1232383                         | 43
+2024-10-23T13:51:54.732Z | 173.21.3.15  | null                    | Connection error?      | 1                     | d                       | 725449                          | Disconnection error
+2024-10-23T13:52:55.015Z | 173.21.3.15  | null                    | Connection error?      | 3                     | c                       | 8268154                         | Disconnection error
+2024-10-23T13:53:55.832Z | 173.21.3.15  | null                    | Connection error?      | 2                     | b                       | 5033756                         | Disconnection error
+2024-10-23T13:55:01.543Z | 173.21.3.15  | null                    | Connected to 10.1.0.1! | 1                     | a                       | 1756468                         | Disconnected from 10.1.0.1
+null                     | null         | null                    | null                   | null                  | null                    | null                            | null
+null                     | null         | null                    | null                   | null                  | null                    | null                            | null
+null                     | null         | null                    | null                   | null                  | null                    | null                            | null
+null                     | null         | null                    | null                   | null                  | null                    | null                            | null
+null                     | null         | null                    | null                   | null                  | null                    | null                            | null
+null                     | null         | null                    | null                   | null                  | null                    | null                            | null
+null                     | null         | null                    | null                   | null                  | null                    | null                            | null
 ;
 
-// Mapped index first so the union type is aggregate_metric_double.
+// KEEP names the metric, so it conflicts with the unmapped keyword instead of staying aggregate_metric_double.
 loadAllSubqueryKeepAmdLoadsOnUnmappedSibling
 required_capability: optional_fields_load_all_subqueries
 required_capability: subquery_in_from_command
@@ -2320,36 +2371,35 @@ FROM (FROM k8s-downsampled), (FROM k8s_nonexistent | KEEP network.eth0.tx)
 | KEEP network.eth0.tx
 ;
 ignoreOrder:true
-warning:Field [network.eth0.tx] of type [aggregate_metric_double] is unmapped in some indices and has no implicit conversion from KEYWORD, so it will not be loaded from _source; values will be null in those indices
 
-network.eth0.tx:aggregate_metric_double
-{"min":263.0,"max":740.0,"sum":5390.0,"value_count":10}
-{"min":442.0,"max":1011.0,"sum":3850.0,"value_count":7}
-{"min":341.0,"max":592.0,"sum":1956.0,"value_count":5}
-{"min":565.0,"max":829.0,"sum":7290.0,"value_count":10}
-{"min":20.0,"max":190.0,"sum":370.0,"value_count":10}
-{"min":201.0,"max":582.0,"sum":1794.0,"value_count":6}
-{"min":346.0,"max":356.0,"sum":1765.0,"value_count":5}
-{"min":304.0,"max":1148.0,"sum":8590.0,"value_count":10}
-{"min":605.0,"max":605.0,"sum":605.0,"value_count":1}
-{"min":231.0,"max":795.0,"sum":4096.0,"value_count":8}
-{"min":604.0,"max":664.0,"sum":3100.0,"value_count":5}
-{"min":172.0,"max":411.0,"sum":755.0,"value_count":3}
-{"min":94.0,"max":94.0,"sum":94.0,"value_count":1}
-{"min":663.0,"max":1419.0,"sum":11259.0,"value_count":9}
-{"min":113.0,"max":341.0,"sum":1112.0,"value_count":4}
-{"min":176.0,"max":1042.0,"sum":5579.0,"value_count":7}
-{"min":441.0,"max":1248.0,"sum":11960.0,"value_count":10}
-{"min":321.0,"max":685.0,"sum":1932.0,"value_count":3}
-{"min":157.0,"max":193.0,"sum":1232.0,"value_count":7}
-{"min":315.0,"max":815.0,"sum":4320.0,"value_count":8}
-{"min":690.0,"max":824.0,"sum":2936.0,"value_count":4}
-{"min":598.0,"max":1060.0,"sum":6986.0,"value_count":7}
-{"min":377.0,"max":602.0,"sum":2190.0,"value_count":5}
-{"min":162.0,"max":715.0,"sum":1912.0,"value_count":8}
-{"min":468.0,"max":694.0,"sum":3075.0,"value_count":5}
-{"min":75.0,"max":594.0,"sum":5760.0,"value_count":10}
-{"min":243.0,"max":398.0,"sum":2585.0,"value_count":10}
+network.eth0.tx:unsupported
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
 null
 null
 ;
@@ -2407,6 +2457,7 @@ ignoreOrder:true
 2024-10-23T13:55:01.543Z | 173.21.3.15  | 1756466             | Connected to 10.1.0.1! | Disconnected from 10.1.0.1 | 1                     | a                       | 1756468
 ;
 
+// KEEP event_duration, * still names event_duration, so that column conflicts while * keeps the extras.
 loadAllSubqueryKeepStarLongLoadsOnUnmappedSibling
 required_capability: optional_fields_load_all_subqueries
 required_capability: subquery_in_from_command
@@ -2416,23 +2467,24 @@ FROM (FROM partial_mapping_sample_data), (FROM no_mapping_sample_data | KEEP eve
 ;
 ignoreOrder:true
 
-@timestamp:datetime      | client_ip:ip | event_duration:long | message:keyword        | language_code:keyword | unmapped.nested:keyword | unmapped_event_duration:keyword | unmapped_message:keyword
-2024-10-23T12:15:03.360Z | 173.21.2.162 | 3450232             | Connected to 10.1.0.3! | 4                     | g                       | 3450234                         | Disconnected from 10.1.0.3
-2024-10-23T12:15:03.360Z | 173.21.2.162 | 3450232             | Connected to 10.1.0.3! | 4                     | g                       | 3450234                         | Disconnected from 10.1.0.3
-2024-10-23T12:27:28.948Z | 173.21.2.113 | 2764888             | Connected to 10.1.0.2! | 3                     | f                       | 2764890                         | Disconnected from 10.1.0.2
-2024-10-23T12:27:28.948Z | 173.21.2.113 | 2764888             | Connected to 10.1.0.2! | 3                     | f                       | 2764890                         | Disconnected from 10.1.0.2
-2024-10-23T13:33:34.937Z | 173.21.0.5   | 1232381             | 42                     | 2                     | e                       | 1232383                         | 43
-2024-10-23T13:33:34.937Z | 173.21.0.5   | 1232381             | 42                     | 2                     | e                       | 1232383                         | 43
-2024-10-23T13:51:54.732Z | 173.21.3.15  | 725447              | Connection error?      | 1                     | d                       | 725449                          | Disconnection error
-2024-10-23T13:51:54.732Z | 173.21.3.15  | 725447              | Connection error?      | 1                     | d                       | 725449                          | Disconnection error
-2024-10-23T13:52:55.015Z | 173.21.3.15  | 8268152             | Connection error?      | 3                     | c                       | 8268154                         | Disconnection error
-2024-10-23T13:52:55.015Z | 173.21.3.15  | 8268152             | Connection error?      | 3                     | c                       | 8268154                         | Disconnection error
-2024-10-23T13:53:55.832Z | 173.21.3.15  | 5033754             | Connection error?      | 2                     | b                       | 5033756                         | Disconnection error
-2024-10-23T13:53:55.832Z | 173.21.3.15  | 5033754             | Connection error?      | 2                     | b                       | 5033756                         | Disconnection error
-2024-10-23T13:55:01.543Z | 173.21.3.15  | 1756466             | Connected to 10.1.0.1! | 1                     | a                       | 1756468                         | Disconnected from 10.1.0.1
-2024-10-23T13:55:01.543Z | 173.21.3.15  | 1756466             | Connected to 10.1.0.1! | 1                     | a                       | 1756468                         | Disconnected from 10.1.0.1
+@timestamp:datetime      | client_ip:ip | event_duration:unsupported | message:keyword        | language_code:keyword | unmapped.nested:keyword | unmapped_event_duration:keyword | unmapped_message:keyword
+2024-10-23T12:15:03.360Z | 173.21.2.162 | null                    | Connected to 10.1.0.3! | 4                     | g                       | 3450234                         | Disconnected from 10.1.0.3
+2024-10-23T12:15:03.360Z | 173.21.2.162 | null                    | Connected to 10.1.0.3! | 4                     | g                       | 3450234                         | Disconnected from 10.1.0.3
+2024-10-23T12:27:28.948Z | 173.21.2.113 | null                    | Connected to 10.1.0.2! | 3                     | f                       | 2764890                         | Disconnected from 10.1.0.2
+2024-10-23T12:27:28.948Z | 173.21.2.113 | null                    | Connected to 10.1.0.2! | 3                     | f                       | 2764890                         | Disconnected from 10.1.0.2
+2024-10-23T13:33:34.937Z | 173.21.0.5   | null                    | 42                     | 2                     | e                       | 1232383                         | 43
+2024-10-23T13:33:34.937Z | 173.21.0.5   | null                    | 42                     | 2                     | e                       | 1232383                         | 43
+2024-10-23T13:51:54.732Z | 173.21.3.15  | null                    | Connection error?      | 1                     | d                       | 725449                          | Disconnection error
+2024-10-23T13:51:54.732Z | 173.21.3.15  | null                    | Connection error?      | 1                     | d                       | 725449                          | Disconnection error
+2024-10-23T13:52:55.015Z | 173.21.3.15  | null                    | Connection error?      | 3                     | c                       | 8268154                         | Disconnection error
+2024-10-23T13:52:55.015Z | 173.21.3.15  | null                    | Connection error?      | 3                     | c                       | 8268154                         | Disconnection error
+2024-10-23T13:53:55.832Z | 173.21.3.15  | null                    | Connection error?      | 2                     | b                       | 5033756                         | Disconnection error
+2024-10-23T13:53:55.832Z | 173.21.3.15  | null                    | Connection error?      | 2                     | b                       | 5033756                         | Disconnection error
+2024-10-23T13:55:01.543Z | 173.21.3.15  | null                    | Connected to 10.1.0.1! | 1                     | a                       | 1756468                         | Disconnected from 10.1.0.1
+2024-10-23T13:55:01.543Z | 173.21.3.15  | null                    | Connected to 10.1.0.1! | 1                     | a                       | 1756468                         | Disconnected from 10.1.0.1
 ;
 
+// KEEP network.eth0.tx, * names the metric, so that column conflicts. The star still warns for the unmentioned counter.
 loadAllSubqueryKeepStarAmdLoadsOnUnmappedSibling
 required_capability: optional_fields_load_all_subqueries
 required_capability: subquery_in_from_command
@@ -2443,37 +2495,36 @@ FROM (FROM k8s-downsampled), (FROM k8s_nonexistent | KEEP network.eth0.tx, *)
 | KEEP *eth0.tx
 ;
 ignoreOrder:true
-warning:Field [network.eth0.tx] of type [aggregate_metric_double] is unmapped in some indices and has no implicit conversion from KEYWORD, so it will not be loaded from _source; values will be null in those indices
 warning:Field [network.total_bytes_out] of type [counter_long] is unmapped in some indices and has no implicit conversion from KEYWORD, so it will not be loaded from _source; values will be null in those indices
 
-network.eth0.tx:aggregate_metric_double
-{"min":263.0,"max":740.0,"sum":5390.0,"value_count":10}
-{"min":442.0,"max":1011.0,"sum":3850.0,"value_count":7}
-{"min":341.0,"max":592.0,"sum":1956.0,"value_count":5}
-{"min":565.0,"max":829.0,"sum":7290.0,"value_count":10}
-{"min":20.0,"max":190.0,"sum":370.0,"value_count":10}
-{"min":201.0,"max":582.0,"sum":1794.0,"value_count":6}
-{"min":346.0,"max":356.0,"sum":1765.0,"value_count":5}
-{"min":304.0,"max":1148.0,"sum":8590.0,"value_count":10}
-{"min":605.0,"max":605.0,"sum":605.0,"value_count":1}
-{"min":231.0,"max":795.0,"sum":4096.0,"value_count":8}
-{"min":604.0,"max":664.0,"sum":3100.0,"value_count":5}
-{"min":172.0,"max":411.0,"sum":755.0,"value_count":3}
-{"min":94.0,"max":94.0,"sum":94.0,"value_count":1}
-{"min":663.0,"max":1419.0,"sum":11259.0,"value_count":9}
-{"min":113.0,"max":341.0,"sum":1112.0,"value_count":4}
-{"min":176.0,"max":1042.0,"sum":5579.0,"value_count":7}
-{"min":441.0,"max":1248.0,"sum":11960.0,"value_count":10}
-{"min":321.0,"max":685.0,"sum":1932.0,"value_count":3}
-{"min":157.0,"max":193.0,"sum":1232.0,"value_count":7}
-{"min":315.0,"max":815.0,"sum":4320.0,"value_count":8}
-{"min":690.0,"max":824.0,"sum":2936.0,"value_count":4}
-{"min":598.0,"max":1060.0,"sum":6986.0,"value_count":7}
-{"min":377.0,"max":602.0,"sum":2190.0,"value_count":5}
-{"min":162.0,"max":715.0,"sum":1912.0,"value_count":8}
-{"min":468.0,"max":694.0,"sum":3075.0,"value_count":5}
-{"min":75.0,"max":594.0,"sum":5760.0,"value_count":10}
-{"min":243.0,"max":398.0,"sum":2585.0,"value_count":10}
+network.eth0.tx:unsupported
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
+null
 null
 null
 ;
